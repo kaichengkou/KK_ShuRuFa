@@ -1,0 +1,21 @@
+[submodule "app/src/main/jni/librime"]
+	path = app/src/main/jni/librime
+	url = https://github.com/rime/librime.git
+	ignore = dirty
+[submodule "app/src/main/jni/snappy"]
+	path = app/src/main/jni/snappy
+	url = https://github.com/google/snappy.git
+[submodule "app/src/main/jni/librime-lua"]
+	path = app/src/main/jni/librime-lua
+	url = https://github.com/hchunhui/librime-lua
+	ignore = dirty
+[submodule "app/src/main/jni/librime-lua-deps"]
+	path = app/src/main/jni/librime-lua-deps
+	url = https://github.com/hchunhui/librime-lua
+	branch = thirdparty
+[submodule "app/src/main/jni/librime-octagram"]
+	path = app/src/main/jni/librime-octagram
+	url = https://github.com/lotem/librime-octagram.git
+[submodule "rime-data/rime-ice"]
+	path = rime-data/rime-ice
+	url = https://github.com/iDvel/rime-ice.git

@@ -1,0 +1,9 @@
+# 光标面板（工具栏里的光标按钮打开）
+id: cursor
+label: 光标
+engine: direct
+rows:
+  - [{fn: word_left, label: 上一词}, {fn: up, label: "↑"}, {fn: word_right, label: 下一词}, {fn: copy, label: 复制}]
+  - [{fn: left, label: "←"}, {fn: select, label: 选择}, {fn: right, label: "→"}, {fn: cut, label: 剪切}]
+  - [{fn: home, label: 行首}, {fn: down, label: "↓"}, {fn: end, label: 行尾}, {fn: paste, label: 粘贴}]
+  - [{fn: abc, label: 返回}, {fn: select_all, label: 全选}, {fn: backspace}, {fn: enter}]

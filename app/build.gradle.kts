@@ -1,0 +1,102 @@
+plugins {
+    id("com.android.application")
+    id("org.jetbrains.kotlin.android")
+    id("org.jetbrains.kotlin.plugin.compose")
+}
+
+// ABIs to build native code for. Default: the phone (arm64) only; pass -PbuildAbi=all for every ABI.
+val abis = (findProperty("buildAbi") as String?)?.let {
+    if (it == "all") listOf("arm64-v8a", "armeabi-v7a", "x86_64") else it.split(",")
+} ?: listOf("arm64-v8a")
+
+android {
+    namespace = "com.kk.shurufa"
+    compileSdk = 35
+    ndkVersion = "27.2.12479018"
+
+    defaultConfig {
+        applicationId = "com.kk.shurufa"
+        minSdk = 26
+        targetSdk = 35
+        versionCode = 1
+        versionName = "0.1.0"
+        ndk { abiFilters += abis }
+        externalNativeBuild {
+            cmake { arguments += listOf("-DANDROID_STL=c++_static", "-DCMAKE_BUILD_TYPE=Release") }
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/jni/CMakeLists.txt")
+            version = "3.22.1"
+        }
+    }
+
+    signingConfigs {
+        // A fixed debug key checked into the repo keeps CI builds installable over each other.
+        getByName("debug") {
+            storeFile = rootProject.file("keys/debug.p12")
+            storePassword = "kkshurufa"
+            keyAlias = "kk"
+            keyPassword = "kkshurufa"
+        }
+    }
+
+    buildTypes {
+        debug {
+            isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("debug")
+        }
+        release {
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            signingConfig = signingConfigs.getByName("debug")
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+    buildFeatures { compose = true; buildConfig = true }
+    sourceSets["main"].assets.srcDir(layout.buildDirectory.dir("generated/rimeAssets"))
+    packaging { jniLibs { useLegacyPackaging = false } }
+    testOptions { unitTests.isIncludeAndroidResources = true }
+    androidResources { noCompress += listOf("yaml", "txt", "json", "gram", "lua") }
+}
+
+// Copy the Rime schema and dictionaries (rime-ice) into the APK assets.
+val prepareRimeData by tasks.registering(Sync::class) {
+    from(rootProject.file("rime-data/rime-ice")) {
+        include("*.yaml", "cn_dicts/**", "en_dicts/**", "opencc/**", "lua/**", "rime.lua")
+        exclude("*.custom.yaml", "squirrel.yaml", "weasel.yaml")
+        into("rime")
+    }
+    from(rootProject.file("rime-data/overlay")) { into("rime") }
+    from(file("src/main/jni/librime/deps/opencc/data/dictionary")) {
+        include("STCharacters.txt", "STPhrases.txt", "TSCharacters.txt", "TSPhrases.txt")
+        into("rime/opencc")
+    }
+    into(layout.buildDirectory.dir("generated/rimeAssets"))
+}
+tasks.named("preBuild") { dependsOn(prepareRimeData) }
+
+dependencies {
+    implementation("androidx.core:core-ktx:1.15.0")
+    implementation("org.snakeyaml:snakeyaml-engine:2.9")
+    implementation(platform("androidx.compose:compose-bom:2025.06.00"))
+    implementation("androidx.activity:activity-compose:1.10.1")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
+    implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.material:material-icons-extended")
+    implementation("androidx.compose.ui:ui")
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.robolectric:robolectric:4.16")
+    testImplementation("androidx.test:core:1.6.1")
+}
+
+kotlin {
+    compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) }
+}

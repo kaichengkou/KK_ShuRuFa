@@ -1,0 +1,5 @@
+# KK输入法: only the full-pinyin scheme from rime-ice is deployed.
+patch:
+  schema_list:
+    - schema: rime_ice
+  menu/page_size: 10

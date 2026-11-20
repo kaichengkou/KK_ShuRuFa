@@ -1,0 +1,94 @@
+package com.kk.shurufa.keyboard
+
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.Path
+import android.graphics.RectF
+
+/** Line icons drawn on a 24×24 grid, scaled to the key. */
+object Icons {
+    private fun p(block: Path.() -> Unit) = Path().apply(block)
+
+    private val backspace = p {
+        moveTo(9f, 5f); lineTo(19f, 5f); quadTo(21f, 5f, 21f, 7f); lineTo(21f, 17f); quadTo(21f, 19f, 19f, 19f)
+        lineTo(9f, 19f); lineTo(3f, 12f); close()
+        moveTo(12f, 9.5f); lineTo(17f, 14.5f); moveTo(17f, 9.5f); lineTo(12f, 14.5f)
+    }
+    private val enter = p { moveTo(19f, 6f); lineTo(19f, 10f); quadTo(19f, 14f, 15f, 14f); lineTo(5f, 14f); moveTo(9f, 10f); lineTo(5f, 14f); lineTo(9f, 18f) }
+    private val shift = p { moveTo(12f, 4f); lineTo(19.5f, 11.5f); lineTo(15f, 11.5f); lineTo(15f, 19f); lineTo(9f, 19f); lineTo(9f, 11.5f); lineTo(4.5f, 11.5f); close() }
+    private val globe = p {
+        addCircle(12f, 12f, 8.5f, Path.Direction.CW)
+        moveTo(3.5f, 12f); lineTo(20.5f, 12f)
+        addOval(RectF(8.6f, 3.5f, 15.4f, 20.5f), Path.Direction.CW)
+    }
+    private val left = p { moveTo(14.5f, 6f); lineTo(8.5f, 12f); lineTo(14.5f, 18f) }
+    private val right = p { moveTo(9.5f, 6f); lineTo(15.5f, 12f); lineTo(9.5f, 18f) }
+    private val next = p { moveTo(4f, 12f); lineTo(16f, 12f); moveTo(12f, 8f); lineTo(16f, 12f); lineTo(12f, 16f); moveTo(20f, 6f); lineTo(20f, 18f) }
+    private val mic = p {
+        addRoundRect(RectF(9f, 3f, 15f, 14f), 3f, 3f, Path.Direction.CW)
+        moveTo(5.5f, 11f); quadTo(5.5f, 17.5f, 12f, 17.5f); quadTo(18.5f, 17.5f, 18.5f, 11f)
+        moveTo(12f, 17.5f); lineTo(12f, 21f); moveTo(9f, 21f); lineTo(15f, 21f)
+    }
+    private val spark = p {
+        moveTo(10f, 3f); lineTo(11.8f, 8.2f); lineTo(17f, 10f); lineTo(11.8f, 11.8f); lineTo(10f, 17f)
+        lineTo(8.2f, 11.8f); lineTo(3f, 10f); lineTo(8.2f, 8.2f); close()
+        moveTo(18f, 13.5f); lineTo(18.9f, 15.6f); lineTo(21f, 16.5f); lineTo(18.9f, 17.4f); lineTo(18f, 19.5f)
+        lineTo(17.1f, 17.4f); lineTo(15f, 16.5f); lineTo(17.1f, 15.6f); close()
+    }
+    private val smile = p {
+        addCircle(12f, 12f, 8.5f, Path.Direction.CW)
+        moveTo(8.5f, 14f); quadTo(12f, 17.5f, 15.5f, 14f)
+        addCircle(9f, 9.6f, 0.4f, Path.Direction.CW); addCircle(15f, 9.6f, 0.4f, Path.Direction.CW)
+    }
+    private val translate = p {
+        addRoundRect(RectF(3f, 8f, 14f, 20f), 2f, 2f, Path.Direction.CW)
+        moveTo(10f, 4f); lineTo(19f, 4f); quadTo(21f, 4f, 21f, 6f); lineTo(21f, 15f)
+        moveTo(5.8f, 17.5f); lineTo(8.5f, 11f); lineTo(11.2f, 17.5f); moveTo(6.8f, 15.3f); lineTo(10.2f, 15.3f)
+    }
+    private val cursor = p {
+        moveTo(12f, 5f); lineTo(12f, 19f); moveTo(9.5f, 5f); lineTo(14.5f, 5f); moveTo(9.5f, 19f); lineTo(14.5f, 19f)
+        moveTo(6f, 9f); lineTo(3f, 12f); lineTo(6f, 15f); moveTo(18f, 9f); lineTo(21f, 12f); lineTo(18f, 15f)
+    }
+    private val clip = p { addRoundRect(RectF(5f, 4.5f, 19f, 20.5f), 2.5f, 2.5f, Path.Direction.CW); addRect(RectF(9f, 3f, 15f, 6.5f), Path.Direction.CW) }
+    private val gear = p {
+        addCircle(12f, 12f, 3f, Path.Direction.CW)
+        for (k in 0 until 8) {
+            val a = Math.toRadians(k * 45.0)
+            moveTo(12f + 6f * Math.cos(a).toFloat(), 12f + 6f * Math.sin(a).toFloat())
+            lineTo(12f + 8.5f * Math.cos(a).toFloat(), 12f + 8.5f * Math.sin(a).toFloat())
+        }
+        addCircle(12f, 12f, 6f, Path.Direction.CW)
+    }
+    private val chevDown = p { moveTo(6f, 9f); lineTo(12f, 15f); lineTo(18f, 9f) }
+    private val chevUp = p { moveTo(6f, 15f); lineTo(12f, 9f); lineTo(18f, 15f) }
+    private val lock = p { addRoundRect(RectF(5f, 11f, 19f, 20f), 2f, 2f, Path.Direction.CW); moveTo(8f, 11f); lineTo(8f, 8f); quadTo(8f, 4f, 12f, 4f); quadTo(16f, 4f, 16f, 8f); lineTo(16f, 11f) }
+    private val unlock = p { addRoundRect(RectF(5f, 11f, 19f, 20f), 2f, 2f, Path.Direction.CW); moveTo(8f, 11f); lineTo(8f, 8f); quadTo(8f, 4f, 12f, 4f); quadTo(15f, 4f, 15.8f, 6.5f) }
+
+    val all = mapOf(
+        "backspace" to backspace, "enter" to enter, "shift" to shift, "language" to globe,
+        "left" to left, "right" to right, "next_slot" to next, "mic" to mic, "ai" to spark,
+        "emoji" to smile, "translate" to translate, "cursor" to cursor, "clipboard" to clip,
+        "settings" to gear, "collapse" to chevDown, "expand" to chevUp, "lock" to lock, "unlock" to unlock,
+    )
+
+    private val m = android.graphics.Matrix()
+    private val tmp = Path()
+
+    /** Draws icon [name] centered at (cx, cy) with the given size in pixels. */
+    fun draw(c: Canvas, name: String, cx: Float, cy: Float, size: Float, paint: Paint, filled: Boolean = false): Boolean {
+        val src = all[name] ?: return false
+        val s = size / 24f
+        m.reset(); m.setScale(s, s); m.postTranslate(cx - size / 2, cy - size / 2)
+        tmp.reset(); src.transform(m, tmp)
+        val oldStyle = paint.style
+        val oldWidth = paint.strokeWidth
+        paint.style = if (filled) Paint.Style.FILL_AND_STROKE else Paint.Style.STROKE
+        paint.strokeWidth = 1.7f * s
+        paint.strokeCap = Paint.Cap.ROUND
+        paint.strokeJoin = Paint.Join.ROUND
+        c.drawPath(tmp, paint)
+        paint.style = oldStyle
+        paint.strokeWidth = oldWidth
+        return true
+    }
+}

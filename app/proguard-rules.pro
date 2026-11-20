@@ -1,0 +1,2 @@
+-keep class com.kk.shurufa.rime.RimeBridge { *; }
+-dontwarn org.snakeyaml.**
