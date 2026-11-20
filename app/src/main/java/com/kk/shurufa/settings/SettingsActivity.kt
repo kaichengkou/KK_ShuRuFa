@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -222,24 +223,74 @@ private fun Toggle(prefs: Prefs, key: String, title: String, sub: String?, def: 
     }
 }
 
+/** Tidy steps for a range: whole numbers people would pick (5, 10, 50, 100 ms …). */
+private fun intStep(span: Int) = when {
+    span <= 30 -> 1; span <= 100 -> 5; span <= 300 -> 10; span <= 1500 -> 50; span <= 5000 -> 100; else -> 500
+}
+private fun floatStep(span: Float) = when { span <= 2f -> 0.05f; span <= 10f -> 0.1f; else -> 1f }
+private fun fmt(v: Float) = "%.2f".format(java.util.Locale.ROOT, v).trimEnd('0').trimEnd('.')
+
+/** The value at the right of a slider: tap it to type an exact number. */
+@Composable
+private fun ValueLabel(text: String, title: String, unit: String, onEnter: (String) -> Boolean) {
+    var editing by remember { mutableStateOf(false) }
+    Text(text, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Medium,
+        modifier = Modifier.clickable { editing = true }.padding(start = 8.dp))
+    if (editing) {
+        var input by remember { mutableStateOf(text.removeSuffix(unit)) }
+        var bad by remember { mutableStateOf(false) }
+        AlertDialog(
+            onDismissRequest = { editing = false },
+            title = { Text(title) },
+            text = {
+                OutlinedTextField(input, { input = it; bad = false }, singleLine = true, isError = bad,
+                    suffix = { Text(unit) }, supportingText = { if (bad) Text("请输入范围内的数字") },
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Decimal))
+            },
+            confirmButton = { TextButton(onClick = { if (onEnter(input.trim())) editing = false else bad = true }) { Text("确定") } },
+            dismissButton = { TextButton(onClick = { editing = false }) { Text("取消") } },
+        )
+    }
+}
+
 @Composable
 private fun IntSlider(prefs: Prefs, key: String, title: String, def: Int, range: IntRange, unit: String, sub: String? = null, onDone: (() -> Unit)? = null) {
     var v by remember { mutableIntStateOf(prefs.sp.getInt(key, def)) }
+    val step = intStep(range.last - range.first)
     Column(Modifier.padding(vertical = 4.dp)) {
-        Row { Text(title, Modifier.weight(1f)); Text("$v$unit", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Medium) }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(title, Modifier.weight(1f))
+            ValueLabel("$v$unit", title, unit) { t ->
+                val n = t.toIntOrNull() ?: return@ValueLabel false
+                if (n !in range) return@ValueLabel false
+                v = n; prefs.put(key, n); onDone?.invoke(); true
+            }
+        }
         if (sub != null) Text(sub, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Slider(value = v.toFloat(), onValueChange = { v = it.roundToInt() }, onValueChangeFinished = { prefs.put(key, v); onDone?.invoke() },
-            valueRange = range.first.toFloat()..range.last.toFloat())
+        Slider(value = v.toFloat(), onValueChange = { v = (range.first + ((it - range.first) / step).roundToInt() * step).coerceIn(range) },
+            onValueChangeFinished = { prefs.put(key, v); onDone?.invoke() },
+            valueRange = range.first.toFloat()..range.last.toFloat(),
+            steps = ((range.last - range.first) / step - 1).coerceIn(0, 200))
     }
 }
 
 @Composable
 private fun FloatSlider(prefs: Prefs, key: String, title: String, def: Float, range: ClosedFloatingPointRange<Float>, unit: String, sub: String? = null) {
     var v by remember { mutableStateOf(prefs.sp.getFloat(key, def)) }
+    val step = floatStep(range.endInclusive - range.start)
     Column(Modifier.padding(vertical = 4.dp)) {
-        Row { Text(title, Modifier.weight(1f)); Text("${"%.2f".format(java.util.Locale.ROOT, v).trimEnd('0').trimEnd('.')}$unit", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Medium) }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(title, Modifier.weight(1f))
+            ValueLabel("${fmt(v)}$unit", title, unit) { t ->
+                val n = t.toFloatOrNull() ?: return@ValueLabel false
+                if (n < range.start || n > range.endInclusive) return@ValueLabel false
+                v = n; prefs.put(key, n); true
+            }
+        }
         if (sub != null) Text(sub, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Slider(value = v, onValueChange = { v = it }, onValueChangeFinished = { prefs.put(key, v) }, valueRange = range)
+        Slider(value = v, onValueChange = { v = (range.start + ((it - range.start) / step).roundToInt() * step).coerceIn(range.start, range.endInclusive) },
+            onValueChangeFinished = { prefs.put(key, v) }, valueRange = range,
+            steps = (((range.endInclusive - range.start) / step).roundToInt() - 1).coerceIn(0, 200))
     }
 }
 
@@ -893,6 +944,38 @@ private fun ProviderCard(prefs: Prefs, p: com.kk.shurufa.online.Llm.Provider) {
             trailingIcon = { TextButton(onClick = { shown = !shown }) { Text(if (shown) "隐藏" else "显示") } })
         OutlinedTextField(model, { model = it.trim(); prefs.put("llm_${p.id}_model", model) }, Modifier.fillMaxWidth().padding(vertical = 4.dp),
             label = { Text("模型") }, singleLine = true, placeholder = { Text(p.defaultModel.ifEmpty { "模型名称" }) })
+        // 获取可用模型: the service's own list, to pick from
+        var models by remember { mutableStateOf<List<String>?>(null) }
+        var fetching by remember { mutableStateOf("") }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            TextButton(enabled = key.isNotBlank() && fetching != "…", onClick = {
+                fetching = "…"
+                Thread {
+                    val r = runCatching { com.kk.shurufa.online.Llm.listModels(prefs, p.id) }
+                    main.post { r.onSuccess { models = it; fetching = if (it.isEmpty()) "没有可用模型" else "" }.onFailure { fetching = it.message ?: "获取失败" } }
+                }.start()
+            }) { Text(if (fetching == "…") "正在获取…" else "获取可用模型") }
+            if (fetching.isNotEmpty() && fetching != "…") Text(fetching, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+        }
+        models?.let { list ->
+            AlertDialog(
+                onDismissRequest = { models = null },
+                title = { Text("${p.title} 可用模型") },
+                text = {
+                    androidx.compose.foundation.lazy.LazyColumn(Modifier.heightIn(max = 420.dp)) {
+                        items(list.size) { i ->
+                            val m = list[i]
+                            Row(Modifier.fillMaxWidth().clickable { model = m; prefs.put("llm_${p.id}_model", m); models = null }.padding(vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically) {
+                                RadioButton(selected = m == model, onClick = { model = m; prefs.put("llm_${p.id}_model", m); models = null })
+                                Text(m, Modifier.padding(start = 4.dp))
+                            }
+                        }
+                    }
+                },
+                confirmButton = { TextButton(onClick = { models = null }) { Text("关闭") } },
+            )
+        }
         val suggestions = com.kk.shurufa.online.Llm.MODEL_SUGGESTIONS[p.id].orEmpty()
         if (suggestions.isNotEmpty()) Row(Modifier.padding(vertical = 2.dp)) {
             for (m in suggestions) {

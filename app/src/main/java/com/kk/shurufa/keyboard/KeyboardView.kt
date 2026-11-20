@@ -69,6 +69,9 @@ class KeyboardView(context: Context, private val prefs: Prefs) : View(context) {
     var iconLabels = "text"
 
     private var rows: List<List<Key>> = emptyList()
+    /** Where the spacer keys are (space left for another view, like the number pad's operator strip). */
+    val spacerRects = mutableListOf<RectF>()
+    var onLaidOut: (() -> Unit)? = null
     private val rects = mutableListOf<Pair<Key, RectF>>()
     private val pressAnim = HashMap<Key, Tween>()
 
@@ -113,6 +116,7 @@ class KeyboardView(context: Context, private val prefs: Prefs) : View(context) {
 
     override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
         rects.clear()
+        spacerRects.clear()
         val side = dp(4f)
         val avail = width - 2 * side
         val n = rows.size
@@ -126,11 +130,12 @@ class KeyboardView(context: Context, private val prefs: Prefs) : View(context) {
             var x = side
             for (k in row) {
                 val w = unit * k.width
-                if (!k.spacer) rects += k to RectF(x, y, x + w, y + kh)
+                if (!k.spacer) rects += k to RectF(x, y, x + w, y + kh) else spacerRects += RectF(x, y, x + w, y + kh)
                 x += w + gap
             }
             y += kh + gap
         }
+        onLaidOut?.invoke()
     }
 
     // ---- drawing ------------------------------------------------------------------------
@@ -346,6 +351,11 @@ class KeyboardView(context: Context, private val prefs: Prefs) : View(context) {
 
     private var downTime = 0L
 
+    private companion object {
+        /** A drag that takes longer than this to go far is a change of mind, not a flick. */
+        const val SLOW_DRAG_MS = 450L
+    }
+
     private var mode = Mode.NONE
     private var active: Key? = null
     private var activeRect: RectF? = null
@@ -481,9 +491,12 @@ class KeyboardView(context: Context, private val prefs: Prefs) : View(context) {
             }
             Mode.BS_REPEAT, Mode.CANCELLED -> {}
             Mode.PRESS -> {
-                // 误触: dragged far beyond any flick means "never mind"
+                // 误触: a flick is quick, however long it is. Only a slow drag far away (the finger
+                // wandering off to say "never mind") cancels the key.
                 val w = activeRect?.width() ?: threshold
-                if (prefs.dragCancel && k.fn != "space" && k.fn != "backspace" && hypot(dx, dy) > max(threshold * 3.2f, w * 1.6f)) {
+                val held = android.os.SystemClock.uptimeMillis() - downTime
+                if (prefs.dragCancel && k.fn != "space" && k.fn != "backspace" && held > SLOW_DRAG_MS &&
+                    hypot(dx, dy) > max(threshold * 4f, w * 2.2f)) {
                     mode = Mode.CANCELLED
                     flick = null
                     overlay?.hidePreview()

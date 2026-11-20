@@ -77,6 +77,52 @@ object Llm {
         }.trim()
     }
 
+    /**
+     * The models this key can use, from the service's own model list. Blocking. Chat models
+     * only where the service says so (Gemini); others are listed as given.
+     */
+    fun listModels(prefs: Prefs, id: String): List<String> {
+        val key = key(prefs, id)
+        if (key.isEmpty()) error("先填 API Key")
+        return when (protocol(prefs, id)) {
+            "claude" -> {
+                val client = AnthropicOkHttpClient.builder().apiKey(key).apply { if (id != "claude") baseUrl(base(prefs, id)) }.build()
+                try {
+                    val out = ArrayList<String>()
+                    client.models().list().autoPager().forEach { out += it.id() }
+                    out
+                } catch (e: UnauthorizedException) { error("API Key 无效")
+                } catch (e: AnthropicServiceException) { error("获取失败（${e.statusCode()}）")
+                } catch (e: AnthropicIoException) { error("连不上服务器，检查一下网络或地址")
+                } finally { client.close() }
+            }
+            "gemini" -> {
+                val root = JSONObject(get("${base(prefs, id)}/models?pageSize=1000", mapOf("x-goog-api-key" to key)))
+                val arr = root.optJSONArray("models") ?: JSONArray()
+                (0 until arr.length()).map { arr.getJSONObject(it) }
+                    .filter { m -> m.optJSONArray("supportedGenerationMethods")?.let { a -> (0 until a.length()).any { a.getString(it) == "generateContent" } } ?: true }
+                    .map { it.getString("name").removePrefix("models/") }
+            }
+            else -> {
+                val root = JSONObject(get("${base(prefs, id)}/models", mapOf("Authorization" to "Bearer $key")))
+                val arr = root.optJSONArray("data") ?: JSONArray()
+                (0 until arr.length()).map { arr.getJSONObject(it).getString("id") }.sorted()
+            }
+        }
+    }
+
+    private fun get(url: String, headers: Map<String, String>): String {
+        val c = URL(url).openConnection() as HttpURLConnection
+        c.connectTimeout = 15000; c.readTimeout = 30000
+        headers.forEach { (k, v) -> c.setRequestProperty(k, v) }
+        try {
+            val code = c.responseCode
+            if (code !in 200..299) error(when (code) { 401, 403 -> "API Key 无效或没有权限"; 404 -> "这个地址不提供模型列表"; else -> "获取失败（$code）" })
+            return c.inputStream.bufferedReader().readText()
+        } catch (e: java.io.IOException) { error("连不上服务器，检查一下网络或地址")
+        } finally { c.disconnect() }
+    }
+
     // ---- Claude (official SDK) ----
 
     private fun claude(key: String, model: String, system: String, user: String, onText: (String) -> Unit, cancelled: () -> Boolean, baseUrl: String? = null): String {

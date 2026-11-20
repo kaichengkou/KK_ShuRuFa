@@ -45,7 +45,8 @@ class ClipStrip(context: Context, private val prefs: Prefs) : View(context) {
 
     private var cards: List<Card> = emptyList()
     private val layouts = HashMap<Int, StaticLayout>()
-    private val scroller = OverScroller(context)
+    // decelerating only: the strip leaves the finger at its speed and slows down evenly
+    private val scroller = OverScroller(context, android.view.animation.DecelerateInterpolator())
     private var scrollPos = 0f
     private val appear = Tween(1f)
 
@@ -284,7 +285,9 @@ class ClipStrip(context: Context, private val prefs: Prefs) : View(context) {
                         vt?.computeCurrentVelocity(1000)
                         val target = snapTarget(vt?.xVelocity ?: 0f)
                         val dist = abs(target - scrollPos)
-                        val ms = (180 + dist / step * 55).coerceAtMost(520f) * (if (prefs.animations) prefs.animSpeed else 0f)
+                        // with a decelerating curve the starting speed is 2·distance/time: match the finger
+                        val v = abs(vt?.xVelocity ?: 0f)
+                        val ms = (if (v > 50f) 2000f * dist / v else 220f).coerceIn(160f, 650f) * (if (prefs.animations) prefs.animSpeed else 0f)
                         scroller.startScroll(scrollPos.toInt(), 0, (target - scrollPos).toInt(), 0, ms.toInt())
                         postInvalidateOnAnimation()
                     }

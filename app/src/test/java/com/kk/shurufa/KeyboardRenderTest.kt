@@ -225,8 +225,11 @@ class KeyboardRenderTest {
     @Test fun renderPanels() {
         val repo = LayoutRepo(ctx)
         val fam = 220
-        // 数字·标准
-        val num = KeyboardView(ctx, prefs).apply { listener = this@KeyboardRenderTest.listener; setRows(repo.keyboard("num").rows) }
+        // 数字·标准: keys with the operator column over their spacers
+        val opStrip = com.kk.shurufa.keyboard.GridPanel(ctx, prefs).apply {
+            cellStyle = com.kk.shurufa.keyboard.GridPanel.CellStyle.SOFT; columns = 1; textSp = 20f; cellPadDp = 0f; cellGapDp = prefs.keyGapDp; scrollHint = true }
+        val num = com.kk.shurufa.keyboard.NumPadView(ctx, KeyboardView(ctx, prefs).apply { listener = this@KeyboardRenderTest.listener; setRows(repo.keyboard("num").rows) }, opStrip)
+        num.setItems(listOf("+", "−", "×", "÷", "=", "%", "(", ")", "/", ",", "±"))
         panelShot("num", num, fam) { it.showMath(emptyList(), "", "uni", simple = true) }
         // 数字·学术
         val m = repo.math()
@@ -258,22 +261,18 @@ class KeyboardRenderTest {
         // quick panel
         val q = com.kk.shurufa.keyboard.QuickPanel(ctx, prefs)
         q.tiles = listOf(
-            com.kk.shurufa.keyboard.QuickPanel.Tile("trad", "繁体", "简繁切换", false),
-            com.kk.shurufa.keyboard.QuickPanel.Tile("emoji", "Emoji", "候选里带表情", true),
-            com.kk.shurufa.keyboard.QuickPanel.Tile("predict", "联想", "上屏后推荐下文", true),
-            com.kk.shurufa.keyboard.QuickPanel.Tile("correct", "纠错", "拼音按键纠错", true),
-            com.kk.shurufa.keyboard.QuickPanel.Tile("pinyin", "拼音模式", "上屏带声调拼音", false),
-            com.kk.shurufa.keyboard.QuickPanel.Tile("stress", "重音模式", "俄语元音上滑出重音", false),
-            com.kk.shurufa.keyboard.QuickPanel.Tile("latex", "LaTeX", "数学键盘输出", false),
-            com.kk.shurufa.keyboard.QuickPanel.Tile("theme", "主题", "跟随系统"),
-            com.kk.shurufa.keyboard.QuickPanel.Tile("vibrate", "振动", "", true),
-            com.kk.shurufa.keyboard.QuickPanel.Tile("sound", "按键音", "", false),
-            com.kk.shurufa.keyboard.QuickPanel.Tile("math", "数学键盘"),
-            com.kk.shurufa.keyboard.QuickPanel.Tile("symbols", "全部符号"),
-            com.kk.shurufa.keyboard.QuickPanel.Tile("cursor", "文字编辑"),
-            com.kk.shurufa.keyboard.QuickPanel.Tile("clipboard", "剪贴板"),
+            com.kk.shurufa.keyboard.QuickPanel.Tile("predict", "联想", on = true),
+            com.kk.shurufa.keyboard.QuickPanel.Tile("correct", "纠错", on = true),
+            com.kk.shurufa.keyboard.QuickPanel.Tile("trad", "繁体", on = false),
+            com.kk.shurufa.keyboard.QuickPanel.Tile("emoji", "候选表情", on = true),
+            com.kk.shurufa.keyboard.QuickPanel.Tile("pinyin", "拼音模式", on = false),
+            com.kk.shurufa.keyboard.QuickPanel.Tile("stress", "俄语重音", on = false),
+            com.kk.shurufa.keyboard.QuickPanel.Tile("vibrate", "振动", on = true),
+            com.kk.shurufa.keyboard.QuickPanel.Tile("sound", "按键音", on = false),
+            com.kk.shurufa.keyboard.QuickPanel.Tile("theme", "主题", "自动"),
+            com.kk.shurufa.keyboard.QuickPanel.Tile("toolbar", "工具栏"),
             com.kk.shurufa.keyboard.QuickPanel.Tile("picker", "切换输入法"),
-            com.kk.shurufa.keyboard.QuickPanel.Tile("settings", "完整设置"),
+            com.kk.shurufa.keyboard.QuickPanel.Tile("settings", "设置"),
         )
         panelShot("quick", q)
         // expanded candidates: 8 units, single characters take one, notes above

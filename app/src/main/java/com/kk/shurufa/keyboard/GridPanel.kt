@@ -59,6 +59,11 @@ class GridPanel(context: Context, private val prefs: Prefs) : View(context) {
      * e.g. to resize the clipboard (phase 0 start, 1 move, 2 end).
      */
     var onGapDrag: ((phase: Int, rawY: Float, velocityY: Float) -> Unit)? = null
+    /** Margins around and between key-like cells (default 6 dp). */
+    var cellPadDp: Float? = null
+    var cellGapDp: Float? = null
+    /** Fade the bottom edge while more items are below (a hint to scroll). */
+    var scrollHint = false
     /** Fling friction multiplier (higher stops sooner). */
     var friction = 1f
         set(v) { field = v; scroller.setFriction(android.view.ViewConfiguration.getScrollFriction() * v) }
@@ -99,8 +104,8 @@ class GridPanel(context: Context, private val prefs: Prefs) : View(context) {
         cells.clear()
         if (width == 0) return
         val flat = cellStyle == CellStyle.FLAT
-        val pad = if (flat) 0f else dp(6f)
-        val g = if (flat) 0f else dp(6f)
+        val pad = if (flat) 0f else dp(cellPadDp ?: 6f)
+        val g = if (flat) 0f else dp(cellGapDp ?: 6f)
         val rh = dp(rowHeightDp)
         tp.textSize = sp(textSp)
         val cw = (width - 2 * pad - g * (columns - 1)) / columns
@@ -182,6 +187,12 @@ class GridPanel(context: Context, private val prefs: Prefs) : View(context) {
             }
         }
         c.restore()
+        if (scrollHint && scrollPos < maxScroll - 1f) {
+            val h = dp(18f)
+            bg.shader = android.graphics.LinearGradient(0f, height - h, 0f, height.toFloat(), theme.background and 0x00FFFFFF, theme.background, android.graphics.Shader.TileMode.CLAMP)
+            c.drawRect(0f, height - h, width.toFloat(), height.toFloat(), bg)
+            bg.shader = null
+        }
         if (header.isNotEmpty()) {
             bg.color = theme.background
             c.drawRect(0f, 0f, width.toFloat(), headerH(), bg)

@@ -88,6 +88,9 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
     enum class Panel { LETTERS, NUM, SYMBOLS, MATH, PHONE, CURSOR, CLIPBOARD, CANDIDATES, QUICK, EMOJI, VOICE, AI }
 
     private lateinit var aiPanel: com.kk.shurufa.keyboard.AiPanel
+    private lateinit var numPad: com.kk.shurufa.keyboard.NumPadView
+    /** 运算符列 of the standard number pad: five on screen, the rest by scrolling. */
+    private val numOps = listOf("+", "−", "×", "÷", "=", "%", "(", ")", "/", ",", "±")
     private lateinit var translateStrip: com.kk.shurufa.keyboard.TranslateStrip
     private var aiResult = ""
     private var aiFromSelection = false
@@ -295,6 +298,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
         buildSymbolPanel()
         buildEditPanel()
         buildMathPanel()
+        buildNumPad()
         buildVoicePanel()
         buildAiPanel()
         buildTranslateStrip()
@@ -531,7 +535,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
                 refreshMath(slide = 0)
                 content.addView(mathPanel, fixed)
             }
-            Panel.NUM -> { keyboard.setRows(layout("num").rows); content.addView(keyboard, fixed) }
+            Panel.NUM -> { numPad.keys.setRows(layout("num").rows); numPad.setItems(numOps); content.addView(numPad, fixed) }
             Panel.CURSOR -> { syncEditPanel(); content.addView(editPanel, fixed); if (from != p) animateIn(editPanel) }
             Panel.SYMBOLS -> { refreshSymbols(); content.addView(symbolPanel, fixed); if (from != p) animateIn(symbolPanel) }
             Panel.CLIPBOARD -> { refreshClips(); content.addView(clipPanel, fixed); if (from != p) animateIn(clipPanel) }
@@ -840,26 +844,30 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
         clipFavs.setItems(clipFavItems.map { clipShort(it.text) }, resetScroll = !keep)
     }
 
+    /**
+     * 快捷面板, in order: typing switches, look and feedback, the tools not already on the toolbar,
+     * then the keyboard itself. Panels reachable from !#1 (数学、符号) are not repeated here.
+     */
     private fun refreshQuick() {
-        val themeName = when (prefs.theme) { "light" -> "浅色"; "dark" -> "深色"; else -> "系统" }
+        val themeName = when (prefs.theme) { "light" -> "浅色"; "dark" -> "深色"; else -> "自动" }
+        val onBar = prefs.toolbar.toSet()
+        val tools = listOf("ai" to "AI 改写", "mic" to "语音", "translate" to "翻译", "cursor" to "文字编辑", "clipboard" to "剪贴板", "emoji" to "表情")
+            .filter { it.first !in onBar }
+            .map { (id, name) -> QuickPanel.Tile("tool:$id", name) }
         quickPanel.tiles = listOf(
-            QuickPanel.Tile("trad", "繁体", "简繁切换", prefs.zhTraditional),
-            QuickPanel.Tile("emoji", "Emoji", "候选里带表情", prefs.zhEmoji),
-            QuickPanel.Tile("predict", "联想", "推荐下一个词", prefs.zhPredict),
-            QuickPanel.Tile("correct", "纠错", "拼音按键纠错", prefs.zhCorrection),
-            QuickPanel.Tile("pinyin", "拼音模式", "上屏带调拼音", prefs.pinyinMode),
-            QuickPanel.Tile("stress", "重音模式", "俄语重音字母", prefs.stressMode),
-            QuickPanel.Tile("latex", "LaTeX", "数学键盘输出", prefs.mathFormat == "tex"),
+            QuickPanel.Tile("predict", "联想", on = prefs.zhPredict),
+            QuickPanel.Tile("correct", "纠错", on = prefs.zhCorrection),
+            QuickPanel.Tile("trad", "繁体", on = prefs.zhTraditional),
+            QuickPanel.Tile("emoji", "候选表情", on = prefs.zhEmoji),
+            QuickPanel.Tile("pinyin", "拼音模式", on = prefs.pinyinMode),
+            QuickPanel.Tile("stress", "俄语重音", on = prefs.stressMode),
+            QuickPanel.Tile("vibrate", "振动", on = prefs.vibrate),
+            QuickPanel.Tile("sound", "按键音", on = prefs.sound),
             QuickPanel.Tile("theme", "主题", themeName),
-            QuickPanel.Tile("vibrate", "振动", "", prefs.vibrate),
-            QuickPanel.Tile("sound", "按键音", "", prefs.sound),
-            QuickPanel.Tile("math", "数学键盘"),
-            QuickPanel.Tile("symbols", "全部符号"),
-            QuickPanel.Tile("cursor", "文字编辑"),
-            QuickPanel.Tile("clipboard", "剪贴板"),
-            QuickPanel.Tile("picker", "切换输入法"),
+        ) + tools + listOf(
             QuickPanel.Tile("toolbar", "工具栏"),
-            QuickPanel.Tile("settings", "完整设置"),
+            QuickPanel.Tile("picker", "切换输入法"),
+            QuickPanel.Tile("settings", "设置"),
         )
     }
 
@@ -882,6 +890,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
             "picker" -> (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager).showInputMethodPicker()
             "settings" -> openSettings()
             "toolbar" -> openSettings("toolbar")
+            else -> if (id.startsWith("tool:")) { onTool(id.removePrefix("tool:")); return }
         }
         if (panel == Panel.QUICK) refreshQuick()
     }
@@ -2187,6 +2196,23 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
         val to = m.tabs.indexOfFirst { it.id == id }
         mathTab = id
         refreshMath(slide = (to - from).coerceIn(-1, 1))
+    }
+
+    private fun buildNumPad() {
+        val strip = GridPanel(this, prefs).apply {
+            theme = this@KkImeService.theme; cellStyle = GridPanel.CellStyle.SOFT; columns = 1; textSp = 20f
+            cellPadDp = 0f; cellGapDp = prefs.keyGapDp; scrollHint = true
+            onItem = { i -> numOps.getOrNull(i)?.let { onNumOp(it) } }
+            onFeedback = { haptics.play(HapticEvent.LETTER) }
+        }
+        numPad = com.kk.shurufa.keyboard.NumPadView(this, newKeyboard(), strip)
+    }
+
+    private fun onNumOp(op: String) {
+        commitComposingFirst()
+        commit(op, pairable = op == "(")
+        history.push(EditHistory.Op.Insert(op))
+        if (op == "=") showCalcResult() else bar.showResult(null)
     }
 
     private fun buildMathPanel() {

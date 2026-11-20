@@ -1,11 +1,10 @@
-# 数字键盘 · 标准模式。四行，数字键更高；不常用的运算放在上滑（键的右上角有提示）：
-#   + 上滑 =（出结果）   − 上滑 %   × 上滑 ÷   . 上滑 ,   : 上滑 /
-# 左下角 ABC 回到字母（和 !#1 同一个位置），旁边“符号”切到符号面板。
+# 数字键盘 · 标准模式。左列上方是一条可以上下滑动的运算符（+ − × ÷ = 一屏，往下还有
+# % ( ) / , ±），由程序放在留空（spacer）的位置；左下角 ABC 回到字母（和 !#1 同一个位置）。
 id: num
 label: 数字
 engine: direct
 rows:
-  - [{key: "+", style: soft, w: 1.1, up: "="}, {key: "1", w: 1.3}, {key: "2", w: 1.3}, {key: "3", w: 1.3}, {fn: backspace, w: 1.2}]
-  - [{key: "−", style: soft, w: 1.1, up: "%"}, {key: "4", w: 1.3}, {key: "5", w: 1.3}, {key: "6", w: 1.3}, {fn: space, label: "空格", w: 1.2}]
-  - [{key: "×", style: soft, w: 1.1, up: "÷"}, {key: "7", w: 1.3}, {key: "8", w: 1.3}, {key: "9", w: 1.3}, {fn: enter, w: 1.2}]
-  - [{fn: abc, label: "ABC", w: 1.1}, {fn: more_symbols, label: "符号", style: tint, w: 1.3}, {key: "0", w: 1.3}, {key: ".", style: soft, w: 1.3, up: ",", long: [",", "-", "/"]}, {key: ":", style: soft, w: 1.2, up: "/", long: ["/", "-", "(", ")"]}]
+  - [{spacer: 1.1}, {key: "1", w: 1.3}, {key: "2", w: 1.3}, {key: "3", w: 1.3}, {fn: backspace, w: 1.2}]
+  - [{spacer: 1.1}, {key: "4", w: 1.3}, {key: "5", w: 1.3}, {key: "6", w: 1.3}, {fn: space, label: "空格", w: 1.2}]
+  - [{spacer: 1.1}, {key: "7", w: 1.3}, {key: "8", w: 1.3}, {key: "9", w: 1.3}, {fn: enter, w: 1.2}]
+  - [{fn: abc, label: "ABC", w: 1.1}, {fn: more_symbols, label: "符号", style: tint, w: 1.3}, {key: "0", w: 1.3}, {key: ".", style: soft, w: 1.3, up: ",", long: [",", "-", "/"]}, {key: ":", style: soft, w: 1.2, up: "/", long: ["/", "-"]}]
