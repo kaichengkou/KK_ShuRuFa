@@ -88,6 +88,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
     enum class Panel { LETTERS, NUM, SYMBOLS, MATH, PHONE, CURSOR, CLIPBOARD, CANDIDATES, QUICK, EMOJI, VOICE, AI }
 
     private lateinit var aiPanel: com.kk.shurufa.keyboard.AiPanel
+    private lateinit var translateStrip: com.kk.shurufa.keyboard.TranslateStrip
     private var aiResult = ""
     private var aiFromSelection = false
     // 翻译: like 表情查找, the keyboard types into [searchQuery]; the bar shows the translation
@@ -95,8 +96,6 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
     private var translateTo = "en"
     private var translateResult = ""
     private var translatedFor = ""
-    private var translateItems: List<String> = emptyList()
-    private val translator by lazy { com.kk.shurufa.online.Translator() }
     private val translateRun = Runnable { runTranslate() }
     private val sinkOn get() = emojiSearch || translateMode
 
@@ -294,9 +293,11 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
         buildMathPanel()
         buildVoicePanel()
         buildAiPanel()
+        buildTranslateStrip()
         buildClipPanel()
         buildEmojiPanel()
         quickPanel = QuickPanel(this, prefs).also { it.theme = theme; it.onTile = { id -> onQuickTile(id) }; it.onPress = { haptics.play(HapticEvent.LETTER) } }
+        column.addView(translateStrip, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         column.addView(bar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         column.addView(content, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         root.addView(column, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM))
@@ -402,6 +403,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
     override fun onFinishInputView(finishingInput: Boolean) {
         super.onFinishInputView(finishingInput)
         emojiSearch = false; translateMode = false; searchQuery.setLength(0)
+        if (::translateStrip.isInitialized) translateStrip.visibility = View.GONE
         voice?.cancel()
         if (RimeEngine.ready) RimeBridge.clearComposition()
         resetSyllables()
@@ -484,7 +486,10 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
     private fun inFamily(p: Panel) = p == Panel.NUM || p == Panel.MATH || p == Panel.SYMBOLS
 
     private fun showPanel(p: Panel) {
-        if (p != Panel.LETTERS && sinkOn) { emojiSearch = false; translateMode = false; searchQuery.setLength(0) }
+        if (p != Panel.LETTERS && sinkOn) {
+            emojiSearch = false; translateMode = false; searchQuery.setLength(0)
+            if (::translateStrip.isInitialized) translateStrip.visibility = View.GONE
+        }
         if (p != Panel.VOICE && panel == Panel.VOICE) voice?.cancel()
         val from = panel
         panel = p
@@ -580,7 +585,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
             isZh && RimeEngine.state == RimeEngine.State.DEPLOYING && panel == Panel.LETTERS -> bar.showMessage("正在部署雾凇拼音词库，首次约需一分钟…")
             isZh && RimeEngine.state == RimeEngine.State.PREPARING && panel == Panel.LETTERS -> bar.showMessage("正在准备中文词库…")
             isZh && RimeEngine.state == RimeEngine.State.FAILED -> bar.showMessage("中文引擎启动失败：${RimeEngine.error ?: "未知错误"}")
-            translateMode && !composing && panel == Panel.LETTERS -> showTranslateBar()
+            translateMode && !composing && panel == Panel.LETTERS -> { bar.showToolbar(); syncTranslate() }
             emojiSearch && !composing && panel == Panel.LETTERS -> {
                 val q = searchQuery.toString().trim()
                 val drawable = emojiGroups.flatMapTo(HashSet()) { it.second }
@@ -1462,13 +1467,6 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
     }
 
     override fun onCandidate(index: Int) {
-        if (index < 0 && translateMode && !composing) {
-            val item = translateItems.getOrNull(-1 - index) ?: return
-            val lang = com.kk.shurufa.online.Translator.LANGS.firstOrNull { item == "→ " + it.second }
-            if (lang != null) { translateTo = lang.first; prefs.put(Prefs.TRANSLATE_TARGET, lang.first); translatedFor = ""; syncBar() }
-            else commitTranslation()
-            return
-        }
         if (index < 0 && emojiSearch && !composing) {
             searchResults.getOrNull(-1 - index)?.let { onEmoji(it) }
             return
@@ -1706,64 +1704,105 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
 
     // ---- 翻译 ----------------------------------------------------------------------------
 
-    /** Starts from the selection when there is one (the translation then replaces it). */
+    private val handler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val translateSvc by lazy { com.kk.shurufa.online.TranslateService(prefs) }
+    private var translateFrom = "auto"
+    private var translateFromSelection = false
+
+    private fun buildTranslateStrip() {
+        translateStrip = com.kk.shurufa.keyboard.TranslateStrip(this, prefs).apply {
+            theme = this@KkImeService.theme
+            visibility = View.GONE
+            languages = com.kk.shurufa.online.TranslateService.LANGS
+            onFeedback = { haptics.play(HapticEvent.FUNCTION) }
+            onClose = { stopTranslate() }
+            onCommit = { commitTranslation() }
+            onSwap = {
+                val src = if (translateFrom == "auto") com.kk.shurufa.online.TranslateService.guess(searchQuery.toString()) else translateFrom
+                translateFrom = translateTo; translateTo = src
+                // the previous result becomes the text to translate back
+                if (translateResult.isNotEmpty() && !translateFromSelection) { searchQuery.setLength(0); searchQuery.append(translateResult) }
+                translatedFor = ""; syncTranslate()
+            }
+            onPick = { which, lang ->
+                if (which == "from") translateFrom = lang else { translateTo = lang; prefs.put(Prefs.TRANSLATE_TARGET, lang) }
+                translatedFor = ""; syncTranslate()
+            }
+            onEngine = {
+                val engines = listOf("mlkit") + com.kk.shurufa.online.Llm.configuredIds(prefs)
+                val next = engines[(engines.indexOf(translateSvc.engine) + 1) % engines.size]
+                prefs.put(Prefs.TRANSLATE_ENGINE, next)
+                if (engines.size == 1) Toast.makeText(this@KkImeService, "在 设置 → 联网功能 里添加 AI 服务后，可以用它来翻译", Toast.LENGTH_SHORT).show()
+                translatedFor = ""; syncTranslate()
+            }
+        }
+    }
+
+    /** Opens the strip above the toolbar; the selection, if any, is translated right away. */
     private fun startTranslate() {
         commitComposingFirst()
         emojiSearch = false
         translateMode = true
         translateTo = prefs.translateTarget
+        translateFrom = "auto"
         searchQuery.setLength(0)
-        currentInputConnection?.getSelectedText(0)?.toString()?.takeIf { it.isNotBlank() }?.let { searchQuery.append(it) }
+        val sel = currentInputConnection?.getSelectedText(0)?.toString()?.takeIf { it.isNotBlank() }
+        translateFromSelection = sel != null
+        sel?.let { searchQuery.append(it) }
         translateResult = ""; translatedFor = ""
         haptics.play(HapticEvent.FUNCTION)
         showPanel(Panel.LETTERS)
+        translateStrip.visibility = View.VISIBLE
+        if (prefs.animations) {
+            translateStrip.alpha = 0f; translateStrip.translationY = dp(24f)
+            translateStrip.animate().alpha(1f).translationY(0f).setDuration((200 * prefs.animSpeed).toLong())
+                .setInterpolator(android.view.animation.PathInterpolator(0.2f, 0f, 0f, 1f)).withLayer().start()
+        }
+        syncTranslate()
     }
 
     private fun stopTranslate() {
         if (!translateMode) return
         translateMode = false
+        translateSvc.cancel()
         if (composing) RimeBridge.clearComposition()
         searchQuery.setLength(0)
         handler.removeCallbacks(translateRun)
+        translateStrip.visibility = View.GONE
         showPanel(Panel.LETTERS)
     }
 
-    private fun langName(id: String) = com.kk.shurufa.online.Translator.LANGS.firstOrNull { it.first == id }?.second ?: id
-
-    /** The source language by its letters; the target is the chosen one unless that is the same. */
-    private fun translatePair(q: String): Pair<String, String> {
-        val from = com.kk.shurufa.online.Translator.guess(q)
-        val to = if (from == translateTo) (if (from == "zh") "en" else "zh") else translateTo
-        return from to to
-    }
-
-    private fun showTranslateBar() {
+    /** Updates the strip; a changed text is translated after a short pause in typing. */
+    private fun syncTranslate() {
+        if (!translateMode) return
         val q = searchQuery.toString()
-        val (from, to) = translatePair(q)
-        val fresh = translatedFor == q && q.isNotBlank()
-        if (!fresh && q.isNotBlank()) { handler.removeCallbacks(translateRun); handler.postDelayed(translateRun, 350) }
-        val items = mutableListOf<String>()
-        if (fresh && translateResult.isNotEmpty()) items += translateResult
-        items += com.kk.shurufa.online.Translator.LANGS.filter { it.first != to }.map { "→ " + it.second }
-        translateItems = items
-        bar.showPredictions(items, when {
-            q.isBlank() -> "翻译成${langName(to)}：输入要翻译的文字"
-            !fresh -> "翻译中… ${q.takeLast(16)}"
-            else -> "${langName(from)} → ${langName(to)} · 点译文上屏"
-        })
+        val st = translateStrip
+        val src = if (translateFrom == "auto") com.kk.shurufa.online.TranslateService.guess(q) else translateFrom
+        if (src == translateTo) translateTo = if (src == "zh") "en" else "zh"
+        st.from = translateFrom; st.to = translateTo
+        st.fromName = if (translateFrom == "auto") (if (q.isBlank()) "自动" else "自动·" + com.kk.shurufa.online.TranslateService.name(src)) else com.kk.shurufa.online.TranslateService.name(translateFrom)
+        st.toName = com.kk.shurufa.online.TranslateService.name(translateTo)
+        st.engineName = translateSvc.engineName()
+        st.source = q; st.sourceIsSelection = translateFromSelection
+        val fresh = translatedFor == q
+        if (!fresh) { st.result = ""; st.busy = q.isNotBlank() }
+        if (q.isBlank()) st.status = ""
+        if (!fresh && q.isNotBlank()) { handler.removeCallbacks(translateRun); handler.postDelayed(translateRun, if (translateFromSelection) 0 else 400) }
+        st.refresh()
     }
-
-    private val handler = android.os.Handler(android.os.Looper.getMainLooper())
 
     private fun runTranslate() {
         val q = searchQuery.toString()
         if (!translateMode || q.isBlank()) return
-        val (from, to) = translatePair(q)
-        translator.translate(q, from, to, prefs.translateWifiOnly) { r ->
+        translateSvc.translate(q, translateFrom, translateTo, onPartial = { t ->
+            if (searchQuery.toString() == q) { translateStrip.result = t; translateStrip.refresh() }
+        }) { r ->
             if (!translateMode || searchQuery.toString() != q) return@translate
-            r.onSuccess { translateResult = it; translatedFor = q }
-             .onFailure { translateResult = ""; translatedFor = q; Toast.makeText(this, it.message ?: "翻译失败", Toast.LENGTH_SHORT).show() }
-            syncBar()
+            translatedFor = q
+            r.onSuccess { translateResult = it; translateStrip.result = it; translateStrip.status = "" }
+             .onFailure { translateResult = ""; translateStrip.result = ""; translateStrip.status = it.message ?: "翻译失败" }
+            translateStrip.busy = false
+            translateStrip.refresh()
         }
     }
 
@@ -1777,15 +1816,45 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
 
     // ---- AI 改写 --------------------------------------------------------------------------
 
+    private var aiAction: com.kk.shurufa.online.AiWriter.Action? = null
+    @Volatile private var aiRun = 0
+
     private fun buildAiPanel() {
         aiPanel = com.kk.shurufa.keyboard.AiPanel(this, prefs).apply {
             theme = this@KkImeService.theme
-            actions = com.kk.shurufa.online.AiWriter.ACTIONS.map { it.id to it.title }
+            actions = com.kk.shurufa.online.AiWriter.ACTIONS.map { com.kk.shurufa.keyboard.AiPanel.Act(it.id, it.title, it.group) }
             onFeedback = { haptics.play(HapticEvent.FUNCTION) }
-            onSetup = { openSettings("online") }
             onAction = { id -> runAi(id) }
-            onApply = { replace -> applyAi(replace) }
+            onButton = { b ->
+                when (b) {
+                    "setup" -> openSettings("online")
+                    "replace" -> applyAi(true)
+                    "insert" -> applyAi(false)
+                    "retry" -> aiAction?.let { runAi(it.id) }
+                    "copy" -> {
+                        (getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(android.content.ClipData.newPlainText("AI", aiResult))
+                        Toast.makeText(this@KkImeService, "已复制", Toast.LENGTH_SHORT).show()
+                    }
+                    "provider" -> {
+                        val ids = com.kk.shurufa.online.Llm.configuredIds(prefs)
+                        if (ids.size > 1) { prefs.put(Prefs.AI_PROVIDER, ids[(ids.indexOf(aiProvider()) + 1) % ids.size]); syncAiHeader() }
+                        else openSettings("online")
+                    }
+                }
+            }
         }
+    }
+
+    private fun aiProvider(): String {
+        val ids = com.kk.shurufa.online.Llm.configuredIds(prefs)
+        return prefs.aiProvider.takeIf { it in ids } ?: ids.firstOrNull() ?: prefs.aiProvider
+    }
+
+    private fun syncAiHeader() {
+        val id = aiProvider()
+        aiPanel.needsSetup = com.kk.shurufa.online.Llm.configuredIds(prefs).isEmpty()
+        aiPanel.provider = com.kk.shurufa.online.Llm.provider(id).title + " · " + com.kk.shurufa.online.Llm.model(prefs, id).removePrefix("claude-")
+        aiPanel.invalidate()
     }
 
     /** The text the AI works on: the selection, or else everything in the field. */
@@ -1800,25 +1869,33 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
     private fun onAiOpened() {
         commitComposingFirst()
         val src = aiSource()
-        aiPanel.needsSetup = prefs.aiKey.isBlank()
         aiPanel.source = src.ifBlank { "（输入框是空的）" }
-        aiPanel.sourceLabel = if (aiFromSelection) "选中文字" else "整段文字"
-        aiPanel.result = ""; aiPanel.status = ""; aiPanel.busy = null
-        aiResult = ""
+        aiPanel.sourceLabel = if (aiFromSelection) "选中" else "全文"
+        aiPanel.running = null; aiPanel.status = ""
+        aiPanel.setResult("", null)
+        aiResult = ""; aiAction = null
+        syncAiHeader()
     }
 
     private fun runAi(id: String) {
         val action = com.kk.shurufa.online.AiWriter.ACTIONS.firstOrNull { it.id == id } ?: return
         val src = aiSource()
-        if (src.isBlank()) { aiPanel.status = "输入框里还没有文字"; aiPanel.result = ""; return }
-        aiPanel.busy = id; aiPanel.result = ""; aiPanel.status = "正在${action.title}…"
-        val key = prefs.aiKey; val model = prefs.aiModel
+        if (src.isBlank()) { aiPanel.status = "输入框里还没有文字"; aiPanel.setResult("", null); return }
+        val run = ++aiRun
+        aiAction = action
+        aiPanel.running = id; aiPanel.doneTitle = action.title; aiPanel.status = ""
+        aiPanel.setResult("", null)
+        val provider = aiProvider()
         Thread {
-            val r = runCatching { com.kk.shurufa.online.AiWriter(key, model).run(action, src) }
+            val r = runCatching {
+                com.kk.shurufa.online.Llm.complete(prefs, provider, com.kk.shurufa.online.AiWriter.SYSTEM, com.kk.shurufa.online.AiWriter.prompt(action, src),
+                    onText = { t -> handler.post { if (run == aiRun) aiPanel.setResult(t, null) } }, cancelled = { run != aiRun })
+            }
             handler.post {
-                aiPanel.busy = null
-                r.onSuccess { aiResult = it; aiPanel.result = it }
-                 .onFailure { aiResult = ""; aiPanel.result = ""; aiPanel.status = it.message ?: "出错了" }
+                if (run != aiRun) return@post
+                aiPanel.running = null
+                r.onSuccess { aiResult = it; aiPanel.setResult(it, if (action.diff) src else null) }
+                 .onFailure { aiResult = ""; aiPanel.setResult("", null); aiPanel.status = it.message ?: "出错了" }
                 haptics.play(HapticEvent.GESTURE)
             }
         }.apply { isDaemon = true }.start()
@@ -1828,6 +1905,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
         val t = aiResult
         val ic = currentInputConnection ?: return
         if (t.isEmpty()) return
+        aiRun++
         ic.beginBatchEdit()
         if (replace && !aiFromSelection) {
             // the whole field is replaced (undoable with 下滑撤销 on backspace)
@@ -1845,91 +1923,149 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
 
     // ---- 语音输入 ------------------------------------------------------------------------
 
+    /** 转文字 or 翻译 (each sentence translated before it goes in). */
+    private var voiceTranslate = false
+    private var voiceSessionText = false
+    private var lastVoiceInsert = ""
+
     private fun buildVoicePanel() {
-        voicePanel = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         voiceView = com.kk.shurufa.keyboard.VoicePanel(this, prefs).apply {
             theme = this@KkImeService.theme
             onFeedback = { haptics.play(HapticEvent.FUNCTION) }
             onMic = { onMicButton() }
-            onCancel = { voice?.cancel() }
+            onCancel = { voice?.cancel(); currentInputConnection?.finishComposingText() }
             onLanguage = {
-                val order = listOf("auto", "zh", "en", "ru")
+                val order = listOf("zh", "en", "ru", "auto")
                 voiceLangPick = order[(order.indexOf(voiceLang()) + 1) % order.size]
-                voiceView.language = voiceLangName(voiceLang())
+                syncVoiceChips()
+                // switching between the Chinese and the foreign model needs a restart
+                if (voice?.state == com.kk.shurufa.voice.VoiceEngine.State.LISTENING) { voice?.cancel(); onMicButton() }
             }
+            onMode = { voiceTranslate = !voiceTranslate; syncVoiceChips() }
+            onUndo = { undoVoice() }
         }
-        val bottom = newKeyboard()
-        bottom.setRows(listOf(listOf(
-            Key(fn = "abc", label = "ABC", width = 1.5f), Key(fn = "space", width = 4f),
-            Key(fn = "backspace", width = 1.5f), Key(fn = "enter", width = 1.5f),
-        )))
+        voicePanel = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         voicePanel.addView(voiceView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
-        voicePanel.addView(bottom, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
     }
 
-    private fun voiceLang(): String = voiceLangPick ?: prefs.voiceLang.let { if (it == "follow") (if (isZh) "zh" else curLang.takeIf { l -> l == "ru" || l == "en" } ?: "auto") else it }
+    private fun voiceLang(): String = voiceLangPick ?: prefs.voiceLang.let { if (it == "follow") (if (isZh) "zh" else curLang.takeIf { l -> l == "ru" || l == "en" } ?: "zh") else it }
     private fun voiceLangName(l: String) = when (l) { "zh" -> "中文"; "en" -> "English"; "ru" -> "Русский"; else -> "自动" }
+
+    private fun syncVoiceChips() {
+        voiceView.language = voiceLangName(voiceLang())
+        voiceView.translating = voiceTranslate
+        voiceView.mode = if (voiceTranslate) "译成" + com.kk.shurufa.online.TranslateService.name(prefs.translateTarget) else "转文字"
+    }
 
     private fun voiceEngine(): com.kk.shurufa.voice.VoiceEngine = voice ?: com.kk.shurufa.voice.VoiceEngine(this, prefs).also { e ->
         voice = e
         e.listener = object : com.kk.shurufa.voice.VoiceEngine.Listener {
             override fun onLevel(level: Float) = voiceView.setLevel(level)
-            override fun onPartial(text: String) { voiceView.partial = text }
+            override fun onPartial(text: String) {
+                voiceView.partial = text
+                // 流式: the sentence grows in the field as it is spoken
+                if (!voiceTranslate) currentInputConnection?.setComposingText(previewVoice(text), 1)
+            }
+            override fun onSegment(text: String, pauseMs: Long) = commitVoice(text, pauseMs)
             override fun onState(state: com.kk.shurufa.voice.VoiceEngine.State, detail: String) {
                 voiceView.look = when (state) {
                     com.kk.shurufa.voice.VoiceEngine.State.LISTENING -> com.kk.shurufa.keyboard.VoicePanel.Look.LISTENING
+                    com.kk.shurufa.voice.VoiceEngine.State.LOADING -> com.kk.shurufa.keyboard.VoicePanel.Look.LOADING
                     com.kk.shurufa.voice.VoiceEngine.State.RECOGNIZING -> com.kk.shurufa.keyboard.VoicePanel.Look.WORKING
                     else -> com.kk.shurufa.keyboard.VoicePanel.Look.READY
                 }
                 voiceView.status = when (state) {
-                    com.kk.shurufa.voice.VoiceEngine.State.LISTENING -> "正在听…说完点一下"
+                    com.kk.shurufa.voice.VoiceEngine.State.LISTENING -> "正在听…停顿 ${prefs.voiceAutoStopSec} 秒自动结束"
+                    com.kk.shurufa.voice.VoiceEngine.State.LOADING -> "正在加载模型…"
                     com.kk.shurufa.voice.VoiceEngine.State.RECOGNIZING -> "识别中…"
-                    else -> detail.ifEmpty { "点按开始说话" }
+                    else -> detail.ifEmpty { if (voiceSessionText) "点按继续说" else "点按开始说话" }
                 }
-                if (state != com.kk.shurufa.voice.VoiceEngine.State.LISTENING) voiceView.partial = ""
+                if (state == com.kk.shurufa.voice.VoiceEngine.State.IDLE || state == com.kk.shurufa.voice.VoiceEngine.State.ERROR) {
+                    voiceView.partial = ""
+                    currentInputConnection?.finishComposingText()
+                }
                 if (state == com.kk.shurufa.voice.VoiceEngine.State.LISTENING) haptics.play(HapticEvent.GESTURE)
             }
-            override fun onResult(text: String) = commitVoice(text)
         }
     }
 
     /** Opening the panel starts listening right away, when it can. */
     private fun onVoiceOpened() {
-        voiceView.language = voiceLangName(voiceLang())
+        syncVoiceChips()
         voiceView.partial = ""
+        voiceView.canUndo = false
+        voiceSessionText = false
+        val lang = voiceLang()
         when {
             !com.kk.shurufa.voice.PermissionActivity.granted(this) -> {
                 voiceView.look = com.kk.shurufa.keyboard.VoicePanel.Look.READY
                 voiceView.status = "需要麦克风权限，点麦克风去允许"
             }
-            prefs.voiceEngine == "whisper" && !voiceEngine().modelReady() -> {
+            !voiceEngine().modelReady(lang) -> {
                 voiceView.look = com.kk.shurufa.keyboard.VoicePanel.Look.NEED_MODEL
-                voiceView.status = "先下载语音模型，点麦克风去设置"
+                voiceView.status = if (voiceEngine().usesWhisper(lang)) "先下载外文模型，点麦克风去设置" else "先下载中文模型，点麦克风去设置"
             }
-            else -> { commitComposingFirst(); voiceEngine().start(voiceLang()) }
+            else -> { commitComposingFirst(); voiceEngine().start(lang) }
         }
     }
 
     private fun onMicButton() {
         val e = voiceEngine()
+        val lang = voiceLang()
         when {
             !com.kk.shurufa.voice.PermissionActivity.granted(this) -> com.kk.shurufa.voice.PermissionActivity.request(this)
-            prefs.voiceEngine == "whisper" && !e.modelReady() -> openSettings("voice")
+            !e.modelReady(lang) -> openSettings("voice")
             e.state == com.kk.shurufa.voice.VoiceEngine.State.LISTENING -> e.stop()
-            e.state == com.kk.shurufa.voice.VoiceEngine.State.RECOGNIZING -> {}
-            else -> { commitComposingFirst(); e.start(voiceLang()) }
+            e.state == com.kk.shurufa.voice.VoiceEngine.State.LOADING || e.state == com.kk.shurufa.voice.VoiceEngine.State.RECOGNIZING -> {}
+            else -> { commitComposingFirst(); e.start(lang) }
         }
     }
 
-    /** Puts recognized text in the field; Latin text gets a space from the word before it. */
-    private fun commitVoice(text: String) {
-        var t = text.trim()
+    private fun textBefore(n: Int) = currentInputConnection?.getTextBeforeCursor(n, 0)?.toString().orEmpty()
+
+    /** What a growing sentence would look like once committed (shown as composing text). */
+    private fun previewVoice(text: String): String = com.kk.shurufa.voice.VoiceText.format(
+        text, textBefore(4), 0, voiceSessionText, prefs.voicePunct, false, prefs.voicePangu).insert
+
+    private fun commitVoice(text: String, pauseMs: Long) {
+        val ic = currentInputConnection ?: return
+        if (text.isBlank()) { ic.finishComposingText(); return }
+        if (voiceTranslate) {
+            voiceView.partial = text
+            translateSvc.translate(text, voiceLang().let { if (it == "auto") "auto" else it }, prefs.translateTarget) { r ->
+                r.onSuccess { insertVoice(it, pauseMs) }.onFailure { voiceView.status = it.message ?: "翻译失败" }
+            }
+            return
+        }
+        insertVoice(text, pauseMs)
+    }
+
+    private fun insertVoice(text: String, pauseMs: Long) {
+        val ic = currentInputConnection ?: return
+        // the composing preview is replaced by the final text
+        ic.setComposingText("", 1)
+        val edit = com.kk.shurufa.voice.VoiceText.format(text, textBefore(4), pauseMs, voiceSessionText,
+            prefs.voicePunct, prefs.voiceJoinComma, prefs.voicePangu)
+        ic.beginBatchEdit()
+        if (edit.deleteBefore > 0) ic.deleteSurroundingText(edit.deleteBefore, 0)
+        ic.commitText(edit.insert, 1)
+        ic.endBatchEdit()
+        history.push(EditHistory.Op.Insert(edit.insert))
+        lastVoiceInsert = edit.insert
+        voiceSessionText = true
+        voiceView.canUndo = true
+        voiceView.partial = ""
+    }
+
+    /** 撤回上一句: takes the last sentence back out of the field. */
+    private fun undoVoice() {
+        val ic = currentInputConnection ?: return
+        val t = lastVoiceInsert
         if (t.isEmpty()) return
-        val before = currentInputConnection?.getTextBeforeCursor(1, 0)?.toString().orEmpty()
-        if (before.isNotEmpty() && !before[0].isWhitespace() && t[0].isLetterOrDigit() && !isCjk(t[0]) && !isCjk(before[0])) t = " $t"
-        commit(t, pairable = false)
-        history.push(EditHistory.Op.Insert(t))
-        voiceView.status = "点按继续说"
+        if (textBefore(t.length) == t) ic.deleteSurroundingText(t.length, 0)
+        lastVoiceInsert = ""
+        voiceView.canUndo = false
+        haptics.play(HapticEvent.GESTURE)
     }
 
     // ---- 表情查找 ------------------------------------------------------------------------

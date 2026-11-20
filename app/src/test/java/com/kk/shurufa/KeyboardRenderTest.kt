@@ -215,11 +215,11 @@ class KeyboardRenderTest {
     }
 
     /** Like panelShot, at the view's own height. */
-    private fun panelShotWrap(name: String, v: View, setup: ((CandidateBar) -> Unit)? = null) {
+    private fun panelShotWrap(name: String, v: View, noBar: Boolean = false, setup: ((CandidateBar) -> Unit)? = null) {
         val w = ctx.resources.displayMetrics.widthPixels
         (v.parent as? android.view.ViewGroup)?.removeView(v)
         v.measure(View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
-        panelShot(name, v, (v.measuredHeight / ctx.resources.displayMetrics.density).toInt(), setup = setup)
+        panelShot(name, v, (v.measuredHeight / ctx.resources.displayMetrics.density).toInt() + 1, noBar = noBar, setup = setup)
     }
 
     @Test fun renderPanels() {
@@ -320,18 +320,31 @@ class KeyboardRenderTest {
         ecells.columns = 3; ecells.textSp = 14f; ecells.rowHeightDp = 44f
         ecells.setItems(ctx.assets.open("data/kaomoji.txt").bufferedReader().readLines().filter { it.isNotBlank() })
         panelShot("emoji_kaomoji", emo)
-        // 语音输入 and AI 改写
-        val vp = com.kk.shurufa.keyboard.VoicePanel(ctx, prefs).apply { look = com.kk.shurufa.keyboard.VoicePanel.Look.LISTENING; status = "正在听…说完点一下"; language = "中文"; partial = "明天下午三点" }
+        // 语音输入 (no bottom row), AI 改写, 翻译栏
+        val vp = com.kk.shurufa.keyboard.VoicePanel(ctx, prefs).apply {
+            look = com.kk.shurufa.keyboard.VoicePanel.Look.LISTENING; status = "正在听…停顿 3 秒自动结束"; language = "中文"
+            partial = "明天下午三点在学校门口"; mode = "转文字"; canUndo = true
+        }
         vp.setLevel(0.6f); idle(200)
         panelShot("voice", vp) { it.activeTool = "mic" }
+        vp.translating = true; vp.mode = "译成English"; vp.partial = "明天下午三点在学校门口"
+        panelShot("voice_translate", vp) { it.activeTool = "mic" }
         val ap = com.kk.shurufa.keyboard.AiPanel(ctx, prefs).apply {
-            actions = com.kk.shurufa.online.AiWriter.ACTIONS.map { it.id to it.title }
-            sourceLabel = "整段文字"; source = "今天天气真好我门去公园吧，顺便买点水果"
-            result = "今天天气真好，我们去公园吧，顺便买点水果。"
+            actions = com.kk.shurufa.online.AiWriter.ACTIONS.map { com.kk.shurufa.keyboard.AiPanel.Act(it.id, it.title, it.group) }
+            sourceLabel = "全文"; source = "今天天气真好我门去公园吧，顺便买点水果"; provider = "Claude · opus-5-5"; doneTitle = "纠错"
+            setResult("今天天气真好，我们去公园吧，顺便买点水果。", "今天天气真好我门去公园吧，顺便买点水果")
         }
         panelShot("ai", ap) { it.activeTool = "ai" }
-        panelShot("translate_bar", KeyboardView(ctx, prefs).apply { listener = this@KeyboardRenderTest.listener; setRows(LayoutRepo(ctx).keyboard("zh").rows) }, 200) {
-            it.showPredictions(listOf("See you at the school gate at three tomorrow afternoon.", "→ 中文", "→ Русский"), "中文 → English · 点译文上屏"); it.activeTool = "translate" }
+        val tstrip = com.kk.shurufa.keyboard.TranslateStrip(ctx, prefs).apply {
+            languages = com.kk.shurufa.online.TranslateService.LANGS
+            fromName = "自动·中文"; toName = "English"; engineName = "DeepSeek"
+            source = "明天下午三点在学校门口见"; result = "See you at the school gate at three tomorrow afternoon."
+        }
+        val tcol = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
+        tcol.addView(tstrip, LinearLayout.LayoutParams(-1, -2))
+        tcol.addView(CandidateBar(ctx, prefs).apply { activeTool = "translate" }, LinearLayout.LayoutParams(-1, -2))
+        tcol.addView(KeyboardView(ctx, prefs).apply { listener = this@KeyboardRenderTest.listener; setRows(LayoutRepo(ctx).keyboard("zh").rows) }, LinearLayout.LayoutParams(-1, -2))
+        panelShotWrap("translate", tcol, noBar = true)
         // 长按选肤色: rows of the emoji's forms
         val d = com.kk.shurufa.ime.EmojiData(ctx).apply { load() }
         val opts = (listOf("👮") + d.variants["👮"]!!).chunked(6).map { r -> r.map { Output.of(it) } }

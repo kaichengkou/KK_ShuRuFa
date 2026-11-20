@@ -10,6 +10,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.Looper
+import android.os.SystemClock
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
@@ -20,140 +21,195 @@ import java.io.File
 import kotlin.math.sqrt
 
 /**
- * 语音输入. Two engines:
- *  - "whisper": records 16 kHz audio while the button is on, then transcribes it on the phone
- *    with whisper.cpp (offline, accurate, punctuated);
- *  - "system": Android's own recognizer, which streams partial results.
- * Callbacks arrive on the main thread.
+ * 语音输入, streaming. The microphone runs continuously; Silero VAD finds where each sentence
+ * starts and ends. While a sentence is being spoken it is recognized again every half second
+ * ([Listener.onPartial], shown in the field as it grows); when the speaker pauses it is
+ * recognized once more and committed ([Listener.onSegment]). After a few seconds without
+ * speech the engine stops by itself.
+ *
+ * Chinese (and mixed Chinese-English) goes to SenseVoice; English and Russian to Whisper,
+ * which is slower, so it only shows the final text of each sentence. The "system" engine uses
+ * Android's recognizer instead. Callbacks arrive on the main thread.
  */
 class VoiceEngine(private val context: Context, private val prefs: Prefs) {
     interface Listener {
         fun onLevel(level: Float) {}
         fun onState(state: State, detail: String = "") {}
         fun onPartial(text: String) {}
-        fun onResult(text: String) {}
+        /** A finished sentence; [pauseMs] is the silence before it (0 for the first). */
+        fun onSegment(text: String, pauseMs: Long) {}
     }
 
-    enum class State { IDLE, LISTENING, RECOGNIZING, ERROR }
+    enum class State { IDLE, LOADING, LISTENING, RECOGNIZING, ERROR }
 
     var listener: Listener? = null
     var state = State.IDLE
         private set
 
     private val main = Handler(Looper.getMainLooper())
-    private val worker = HandlerThread("kk-voice").apply { start() }
-    private val work = Handler(worker.looper)
-    @Volatile private var recording = false
-    private var record: AudioRecord? = null
-    private val samples = FloatArrayBuilder()
-    private var ctx = 0L
-    private var ctxModel = ""
+    private val decodeThread = HandlerThread("kk-voice").apply { start() }
+    private val decode = Handler(decodeThread.looper)
+    @Volatile private var running = false
+    @Volatile private var session = 0
+    private var sense: SenseVoice? = null
+    private var vad: SileroVad? = null
+    private var whisper = 0L
+    private var whisperModel = ""
     private var system: SpeechRecognizer? = null
+    @Volatile private var partialBusy = false
 
-    private fun post(s: State, detail: String = "") { main.post { state = s; listener?.onState(s, detail) } }
+    /** State changes from an older session (after a cancel or restart) are dropped. */
+    private fun post(s: State, detail: String = "", id: Int = session) { main.post { if (id == session) { state = s; listener?.onState(s, detail) } } }
 
-    fun modelReady(): Boolean = VoiceModels.installed(context, VoiceModels.byId(prefs.voiceModel))
+    /** Which recognizer [lang] uses with the local engine. */
+    fun usesWhisper(lang: String) = lang == "en" || lang == "ru"
 
-    /** [lang] "zh" "en" "ru" or "auto". */
+    fun modelReady(lang: String): Boolean = when {
+        prefs.voiceEngine == "system" -> true
+        usesWhisper(lang) -> VoiceModels.installed(context, VoiceModels.byId(prefs.voiceModel))
+        else -> VoiceModels.SenseVoiceModel.installed(context)
+    }
+
     fun start(lang: String) {
-        if (state == State.LISTENING || state == State.RECOGNIZING) return
-        if (prefs.voiceEngine == "system") startSystem(lang) else startWhisper(lang)
+        if (state == State.LISTENING || state == State.LOADING) return
+        session++
+        if (prefs.voiceEngine == "system") startSystem(lang) else startLocal(lang)
     }
 
-    /** Stops listening and recognizes what was said. */
+    /** Stops listening; what was said so far is still recognized and delivered. */
     fun stop() {
-        if (prefs.voiceEngine == "system") system?.stopListening() else recording = false
+        if (prefs.voiceEngine == "system") system?.stopListening() else running = false
     }
 
-    /** Stops without a result. */
+    /** Stops without delivering anything more. */
     fun cancel() {
-        recording = false
-        samples.clear()
+        session++
+        running = false
         system?.cancel()
         runCatching { WhisperBridge.cancel() }
-        post(State.IDLE)
+        main.post { state = State.IDLE; listener?.onState(State.IDLE) }
     }
 
     fun release() {
         cancel()
-        work.post { if (ctx != 0L) { WhisperBridge.free(ctx); ctx = 0L } }
-        worker.quitSafely()
+        decode.post {
+            sense?.close(); sense = null
+            vad?.close(); vad = null
+            if (whisper != 0L) { WhisperBridge.free(whisper); whisper = 0L }
+        }
+        decodeThread.quitSafely()
         system?.destroy(); system = null
     }
 
-    // ---- whisper ----
+    // ---- local: VAD + SenseVoice / Whisper ----
+
+    private fun loadModels(lang: String) {
+        if (vad == null) vad = SileroVad(context.assets.open("data/silero_vad_v5.onnx").use { it.readBytes() })
+        val threads = Runtime.getRuntime().availableProcessors().coerceIn(2, 4)
+        if (usesWhisper(lang)) {
+            val m = VoiceModels.byId(prefs.voiceModel)
+            if (whisper == 0L || whisperModel != m.id) {
+                WhisperBridge.ensureLoaded()
+                if (whisper != 0L) WhisperBridge.free(whisper)
+                whisper = WhisperBridge.init(VoiceModels.file(context, m).absolutePath)
+                whisperModel = m.id
+                if (whisper == 0L) error("外文模型加载失败，请在设置里重新下载")
+            }
+        } else if (sense == null) {
+            val d = VoiceModels.SenseVoiceModel.dir(context)
+            sense = SenseVoice(File(d, "model.int8.onnx"), File(d, "tokens.txt"), threads)
+        }
+    }
 
     @SuppressLint("MissingPermission")
-    private fun startWhisper(lang: String) {
-        val model = VoiceModels.byId(prefs.voiceModel)
-        if (!VoiceModels.installed(context, model)) { post(State.ERROR, "还没有下载语音模型"); return }
+    private fun startLocal(lang: String) {
+        if (!modelReady(lang)) { post(State.ERROR, if (usesWhisper(lang)) "还没有下载外文模型" else "还没有下载中文模型"); return }
+        val id = session
+        running = true
+        post(State.LOADING)
+        Thread {
+            // models load first (about a second the first time); the microphone opens after
+            val loaded = CountDown()
+            decode.post { try { loadModels(lang); loaded.ok() } catch (e: Throwable) { loaded.fail(e.message ?: "模型加载失败") } }
+            loaded.await()?.let { post(State.ERROR, it, id); running = false; return@Thread }
+            if (id != session || !running) return@Thread
+            listen(id, lang)
+        }.apply { name = "kk-mic" }.start()
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun listen(id: Int, lang: String) {
         val rate = 16000
         val min = AudioRecord.getMinBufferSize(rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_FLOAT)
         val rec = try {
             AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_FLOAT, maxOf(min, rate))
-        } catch (e: Exception) { post(State.ERROR, "无法打开麦克风"); return }
-        if (rec.state != AudioRecord.STATE_INITIALIZED) { rec.release(); post(State.ERROR, "无法打开麦克风"); return }
-        record = rec
-        samples.clear()
-        recording = true
-        post(State.LISTENING)
-        // load the model while the user speaks
-        work.post { loadModel(model) }
-        Thread {
-            val buf = FloatArray(1600)
-            rec.startRecording()
-            val maxSamples = rate * prefs.voiceMaxSec
-            while (recording && samples.size < maxSamples) {
-                val n = rec.read(buf, 0, buf.size, AudioRecord.READ_BLOCKING)
-                if (n <= 0) continue
-                samples.add(buf, n)
-                var sum = 0f
-                for (i in 0 until n) sum += buf[i] * buf[i]
-                val rms = sqrt(sum / n)
-                main.post { listener?.onLevel((rms * 12f).coerceIn(0f, 1f)) }
-            }
-            rec.stop(); rec.release(); record = null
-            val pcm = samples.toArray()
-            samples.clear()
-            if (state != State.LISTENING) return@Thread
-            if (pcm.size < rate / 3) { post(State.IDLE); return@Thread }
-            post(State.RECOGNIZING)
-            work.post { recognize(model, pcm, lang) }
-        }.apply { name = "kk-mic" }.start()
-    }
-
-    private fun loadModel(m: VoiceModels.Model) {
-        if (ctx != 0L && ctxModel == m.id) return
-        WhisperBridge.ensureLoaded()
-        if (ctx != 0L) { WhisperBridge.free(ctx); ctx = 0L }
-        ctx = WhisperBridge.init(VoiceModels.file(context, m).absolutePath)
-        ctxModel = m.id
-    }
-
-    private fun recognize(m: VoiceModels.Model, pcm: FloatArray, lang: String) {
+        } catch (e: Exception) { post(State.ERROR, "无法打开麦克风", id); running = false; return }
+        if (rec.state != AudioRecord.STATE_INITIALIZED) { rec.release(); post(State.ERROR, "无法打开麦克风", id); running = false; return }
+        val v = vad!!
+        v.reset()
+        post(State.LISTENING, id = id)
+        val chunk = FloatArray(SileroVad.CHUNK)
+        val whisperMode = usesWhisper(lang)
+        // Whisper is too slow to re-run every half second: it shows each sentence when done
+        val seg = Segmenter({ v.probability(it) }, prefs.voicePauseMs, prefs.voiceAutoStopSec * 1000L,
+            partialEveryChunks = if (whisperMode) Int.MAX_VALUE else 16)
+        rec.startRecording()
         try {
-            loadModel(m)
-            if (ctx == 0L) { post(State.ERROR, "模型加载失败，请在设置里重新下载"); return }
-            val threads = Runtime.getRuntime().availableProcessors().coerceIn(2, 6)
-            // a prompt in the expected style keeps Chinese simplified and punctuated
-            val prompt = when (lang) {
-                "zh" -> "以下是普通话的句子，使用简体中文和标点符号。"
-                "ru" -> "Это предложение на русском языке."
-                "en" -> "This is a sentence in English."
-                else -> ""
+            loop@ while (running && id == session) {
+                var got = 0
+                while (got < chunk.size) { val n = rec.read(chunk, got, chunk.size - got, AudioRecord.READ_BLOCKING); if (n <= 0) break; got += n }
+                if (got < chunk.size) continue
+                var sum = 0f
+                for (x in chunk) sum += x * x
+                val rms = sqrt(sum / chunk.size)
+                main.post { listener?.onLevel((rms * 12f).coerceIn(0f, 1f)) }
+                for (e in seg.feed(chunk)) when (e) {
+                    is Segmenter.Event.Partial -> if (!partialBusy) partialSegment(id, lang, e.pcm)
+                    is Segmenter.Event.Final -> finalSegment(id, lang, e.pcm, e.pauseMs)
+                    Segmenter.Event.Stop -> break@loop
+                }
             }
-            var text = WhisperBridge.transcribe(ctx, pcm, lang, threads, prompt).trim()
-            val detected = if (lang == "auto") WhisperBridge.lastLanguage(ctx) else lang
-            if (detected == "zh") text = simplified(text)
-            if (text.isEmpty()) { post(State.IDLE, "没有听清"); return }
-            main.post { state = State.IDLE; listener?.onResult(text); listener?.onState(State.IDLE) }
-        } catch (e: Throwable) {
-            post(State.ERROR, "识别失败：${e.message ?: e.javaClass.simpleName}")
+            // whatever is still being said when stopped
+            if (id == session) seg.flush()?.let { finalSegment(id, lang, it.pcm, it.pauseMs) }
+        } finally {
+            runCatching { rec.stop() }; rec.release()
+            running = false
+            decode.post { post(State.IDLE, id = id) }
+        }
+    }
+
+    private fun recognize(lang: String, pcm: FloatArray): String {
+        if (usesWhisper(lang)) {
+            val prompt = if (lang == "ru") "Это предложение на русском языке." else "This is a sentence in English."
+            val threads = Runtime.getRuntime().availableProcessors().coerceIn(2, 6)
+            return WhisperBridge.transcribe(whisper, pcm, lang, threads, prompt).trim()
+        }
+        val t = sense?.recognize(pcm, lang = if (lang == "zh") "zh" else "auto").orEmpty()
+        return simplified(t)
+    }
+
+    private fun partialSegment(id: Int, lang: String, pcm: FloatArray) {
+        partialBusy = true
+        decode.post {
+            try {
+                if (id != session) return@post
+                val t = recognize(lang, pcm)
+                if (t.isNotEmpty() && id == session) main.post { if (id == session) listener?.onPartial(t) }
+            } catch (_: Throwable) {} finally { partialBusy = false }
+        }
+    }
+
+    private fun finalSegment(id: Int, lang: String, pcm: FloatArray, pauseMs: Long) {
+        if (pcm.size < 16000 / 4) return
+        decode.post {
+            if (id != session) return@post
+            val t = try { recognize(lang, pcm) } catch (e: Throwable) { post(State.ERROR, "识别失败：${e.message}"); return@post }
+            main.post { if (id == session) listener?.onSegment(t, pauseMs) }
         }
     }
 
     private fun simplified(t: String): String {
-        if (!RimeEngine.ready) return t
+        if (!RimeEngine.ready || t.isEmpty()) return t
         val cfg = File(RimeEngine.sharedDir(context), "opencc/t2s.json")
         return if (cfg.isFile) runCatching { RimeBridge.t2s(t, cfg.absolutePath) }.getOrDefault(t) else t
     }
@@ -181,7 +237,7 @@ class VoiceEngine(private val context: Context, private val prefs: Prefs) {
             override fun onResults(results: Bundle?) {
                 val t = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty()
                 state = State.IDLE
-                if (t.isNotEmpty()) listener?.onResult(t)
+                if (t.isNotEmpty()) listener?.onSegment(t, 0)
                 listener?.onState(State.IDLE)
             }
             override fun onPartialResults(partial: Bundle?) {
@@ -193,10 +249,20 @@ class VoiceEngine(private val context: Context, private val prefs: Prefs) {
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, prefs.voiceAutoStopSec * 1000L)
             if (tag != null) putExtra(RecognizerIntent.EXTRA_LANGUAGE, tag)
         }
         post(State.LISTENING)
         r.startListening(intent)
+    }
+
+    /** A one-shot result handed between threads. */
+    private class CountDown {
+        private val latch = java.util.concurrent.CountDownLatch(1)
+        @Volatile private var err: String? = null
+        fun ok() = latch.countDown()
+        fun fail(m: String) { err = m; latch.countDown() }
+        fun await(): String? { latch.await(); return err }
     }
 }
 
@@ -209,6 +275,11 @@ class FloatArrayBuilder {
         if (size + n > data.size) data = data.copyOf(maxOf(data.size * 2, size + n))
         System.arraycopy(src, 0, data, size, n); size += n
     }
-    @Synchronized fun toArray(): FloatArray = data.copyOf(size)
+    @Synchronized fun toArray(from: Int = 0, to: Int = size): FloatArray = data.copyOfRange(from.coerceIn(0, size), to.coerceIn(0, size))
+    /** Forgets the first [n] samples. */
+    @Synchronized fun dropFront(n: Int) {
+        val k = n.coerceIn(0, size)
+        System.arraycopy(data, k, data, 0, size - k); size -= k
+    }
     @Synchronized fun clear() { size = 0 }
 }

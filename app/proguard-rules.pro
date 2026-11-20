@@ -15,3 +15,5 @@
 -dontwarn java.lang.reflect.AnnotatedParameterizedType
 -dontwarn java.lang.reflect.AnnotatedType
 -dontwarn com.github.victools.**
+# ONNX Runtime: native code looks its Java classes up by name
+-keep class ai.onnxruntime.** { *; }

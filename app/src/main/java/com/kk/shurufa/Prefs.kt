@@ -95,6 +95,15 @@ class Prefs(context: Context) {
     val aiModel get() = s(AI_MODEL, "claude-opus-5-5")
     val translateTarget get() = s(TRANSLATE_TARGET, "en")
     val translateWifiOnly get() = b(TRANSLATE_WIFI, false)
+    /** "mlkit" or a provider id (see online.Llm). */
+    val translateEngine get() = s(TRANSLATE_ENGINE, "mlkit")
+    val aiProvider get() = s(AI_PROVIDER, "claude")
+    val voiceZhModel get() = s(VOICE_ZH_MODEL, "sensevoice")
+    val voicePunct get() = s(VOICE_PUNCT, "full")
+    val voiceJoinComma get() = b(VOICE_JOIN_COMMA, true)
+    val voicePangu get() = b(VOICE_PANGU, false)
+    val voicePauseMs get() = i(VOICE_PAUSE_MS, 700)
+    val voiceAutoStopSec get() = i(VOICE_AUTO_STOP, 3)
 
     // Symbols
     val autoPair get() = b(AUTO_PAIR, true)
@@ -192,6 +201,14 @@ class Prefs(context: Context) {
         const val AI_MODEL = "ai_model"
         const val TRANSLATE_TARGET = "translate_target"
         const val TRANSLATE_WIFI = "translate_wifi"
+        const val TRANSLATE_ENGINE = "translate_engine"
+        const val AI_PROVIDER = "ai_provider"
+        const val VOICE_ZH_MODEL = "voice_zh_model"
+        const val VOICE_PUNCT = "voice_punct"
+        const val VOICE_JOIN_COMMA = "voice_join_comma"
+        const val VOICE_PANGU = "voice_pangu"
+        const val VOICE_PAUSE_MS = "voice_pause_ms"
+        const val VOICE_AUTO_STOP = "voice_auto_stop"
         /** Last emoji update check (ms); a state, not a setting. */
         const val EMOJI_CHECKED = "seen_emoji_checked"
         const val ACCENT = "accent"

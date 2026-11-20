@@ -773,6 +773,45 @@ private fun DictPage() {
 
 // ---- voice ---------------------------------------------------------------------------------
 
+/** A downloadable model row: title, size, state, and 下载 / 停止 / 删除. */
+@Composable
+private fun ModelRow(title: String, note: String, installed: Boolean, selected: Boolean?, onSelect: (() -> Unit)?,
+                     download: ((progress: (Float) -> Unit, cancelled: () -> Boolean) -> Unit), delete: () -> Unit) {
+    var progress by remember { mutableStateOf(-1f) }
+    var have by remember { mutableStateOf(installed) }
+    var cancel by remember { mutableStateOf(false) }
+    var msg by remember { mutableStateOf("") }
+    val main = remember { android.os.Handler(android.os.Looper.getMainLooper()) }
+    Row(Modifier.fillMaxWidth().let { if (onSelect != null) it.clickable { onSelect() } else it }.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        if (selected != null) RadioButton(selected = selected, onClick = { onSelect?.invoke() })
+        Column(Modifier.weight(1f)) {
+            Text(title, fontWeight = FontWeight.Medium)
+            Text(when {
+                progress >= 0f -> "正在下载 ${(progress * 100).toInt()}%"
+                msg.isNotEmpty() -> msg
+                have -> "已下载 · $note"
+                else -> note
+            }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        when {
+            progress >= 0f -> TextButton(onClick = { cancel = true }) { Text("停止") }
+            have -> TextButton(onClick = { delete(); have = false; msg = "已删除" }) { Text("删除") }
+            else -> TextButton(onClick = {
+                progress = 0f; cancel = false; msg = ""
+                Thread {
+                    val r = runCatching { download({ p -> main.post { progress = p } }, { cancel }) }
+                    main.post {
+                        progress = -1f
+                        r.onSuccess { if (!cancel) { have = true; msg = "" } else msg = "已停止，下次会接着下载" }
+                         .onFailure { msg = "下载失败：${it.message ?: "网络错误"}，可以换个下载来源再试" }
+                    }
+                }.start()
+            }) { Text("下载") }
+        }
+    }
+    if (progress >= 0f) LinearProgressIndicator(progress = { progress.coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
+}
+
 @Composable
 private fun VoicePage(prefs: Prefs) {
     val ctx = LocalContext.current
@@ -785,52 +824,38 @@ private fun VoicePage(prefs: Prefs) {
     }
     val granted = remember(tick) { com.kk.shurufa.voice.PermissionActivity.granted(ctx) }
     Group("识别方式") {
-        Choice(prefs, Prefs.VOICE_ENGINE, "引擎", listOf("whisper" to "本地 Whisper", "system" to "系统语音识别"))
-        Note("本地 Whisper 在手机上离线识别，带标点，中文、英文、俄语都准，说完后要等一两秒；系统识别用手机自带的服务，边说边出字，准确度取决于手机。")
-        Choice(prefs, Prefs.VOICE_LANG, "识别语言", listOf("follow" to "跟随键盘", "auto" to "自动", "zh" to "中文", "en" to "英文", "ru" to "俄语"))
-        IntSlider(prefs, Prefs.VOICE_MAX_SEC, "一次最长", 60, 15..180, "秒", "到时间自动结束并识别")
+        Choice(prefs, Prefs.VOICE_ENGINE, "引擎", listOf("whisper" to "本地模型", "system" to "系统语音识别"))
+        Note("本地模型在手机上离线识别，边说边出字：中文用 SenseVoice（专为中文训练，带标点，也认得夹杂的英文），英文和俄语用 Whisper。系统识别用手机自带的服务，准确度取决于手机。")
+        Choice(prefs, Prefs.VOICE_LANG, "识别语言", listOf("follow" to "跟随键盘", "zh" to "中文", "en" to "英文", "ru" to "俄语"))
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 4.dp)) {
             Text(if (granted) "已允许使用麦克风" else "还没有麦克风权限", Modifier.weight(1f))
             if (!granted) Button(onClick = { com.kk.shurufa.voice.PermissionActivity.request(ctx) }) { Text("允许") }
         }
     }
-    Group("本地模型") {
+    Group("断句和标点") {
+        Choice(prefs, Prefs.VOICE_PUNCT, "标点", listOf("full" to "完整标点", "chat" to "聊天风格", "none" to "不加标点"))
+        Note("完整标点：模型给的逗号句号问号都保留。聊天风格：每句末尾不加句号，短停顿用逗号接上，长停顿空一格——像平时发消息。不加标点：只用空格分开。")
+        Toggle(prefs, Prefs.VOICE_JOIN_COMMA, "短停顿接成一句", "停顿不到一秒时把上一句的句号改成逗号", true)
+        Toggle(prefs, Prefs.VOICE_PANGU, "中英文之间加空格", "“我用 iPhone 拍了 3 张”", false)
+        IntSlider(prefs, Prefs.VOICE_PAUSE_MS, "断句停顿", 700, 400..1500, "ms", "停顿超过这么久算一句话说完，马上上屏")
+        IntSlider(prefs, Prefs.VOICE_AUTO_STOP, "自动结束", 3, 0..10, "秒", "这么久没有说话就停止收音；0 为不自动结束")
+    }
+    Group("模型") {
         Choice(prefs, Prefs.VOICE_SOURCE, "下载来源", listOf("hf" to "Hugging Face", "mirror" to "国内镜像"))
+        Text("中文", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 8.dp))
+        ModelRow("${com.kk.shurufa.voice.VoiceModels.SenseVoiceModel.TITLE} · ${com.kk.shurufa.voice.VoiceModels.SenseVoiceModel.SIZE_MB} MB",
+            "阿里通义 SenseVoice-Small，中文准确率高，识别很快，自带标点和数字格式",
+            remember(tick) { com.kk.shurufa.voice.VoiceModels.SenseVoiceModel.installed(ctx) }, null, null,
+            { p, c -> com.kk.shurufa.voice.VoiceModels.downloadSenseVoice(ctx, prefs.voiceSource, p, c) },
+            { com.kk.shurufa.voice.VoiceModels.SenseVoiceModel.delete(ctx) })
+        Text("英文、俄语（Whisper，选一个）", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 8.dp))
         var selected by remember { mutableStateOf(prefs.voiceModel) }
-        var progress by remember { mutableStateOf(-1f) }
-        var downloading by remember { mutableStateOf<String?>(null) }
-        var message by remember { mutableStateOf("") }
-        var cancel by remember { mutableStateOf(false) }
         for (m in com.kk.shurufa.voice.VoiceModels.all) {
-            val have = remember(tick, downloading, message) { com.kk.shurufa.voice.VoiceModels.installed(ctx, m) }
-            Row(Modifier.fillMaxWidth().clickable { selected = m.id; prefs.put(Prefs.VOICE_MODEL, m.id) }.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                RadioButton(selected = selected == m.id, onClick = { selected = m.id; prefs.put(Prefs.VOICE_MODEL, m.id) })
-                Column(Modifier.weight(1f)) {
-                    Text("${m.title} · ${m.sizeMb} MB", fontWeight = FontWeight.Medium)
-                    Text(if (downloading == m.id) "正在下载 ${(progress * 100).toInt().coerceAtLeast(0)}%" else if (have) "已下载 · ${m.note}" else m.note,
-                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                when {
-                    downloading == m.id -> TextButton(onClick = { cancel = true }) { Text("停止") }
-                    have -> TextButton(onClick = { com.kk.shurufa.voice.VoiceModels.file(ctx, m).delete(); message = "已删除 ${m.title}" }) { Text("删除") }
-                    else -> TextButton(enabled = downloading == null, onClick = {
-                        downloading = m.id; progress = 0f; cancel = false; message = ""
-                        val main = android.os.Handler(android.os.Looper.getMainLooper())
-                        Thread {
-                            val r = runCatching {
-                                com.kk.shurufa.voice.VoiceModels.download(ctx, m, prefs.voiceSource, { p -> main.post { progress = p } }, { cancel })
-                            }
-                            main.post {
-                                downloading = null
-                                message = r.fold({ if (cancel) "已停止，下次会接着下载" else "${m.title} 下载完成" }, { "下载失败：${it.message ?: "网络错误"}，可以换个下载来源再试" })
-                            }
-                        }.start()
-                    }) { Text("下载") }
-                }
-            }
+            ModelRow("${m.title} · ${m.sizeMb} MB", m.note, remember(tick) { com.kk.shurufa.voice.VoiceModels.installed(ctx, m) },
+                selected == m.id, { selected = m.id; prefs.put(Prefs.VOICE_MODEL, m.id) },
+                { p, c -> com.kk.shurufa.voice.VoiceModels.download(ctx, m, prefs.voiceSource, p, c) },
+                { com.kk.shurufa.voice.VoiceModels.file(ctx, m).delete() })
         }
-        if (downloading != null) LinearProgressIndicator(progress = { progress.coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp))
-        if (message.isNotEmpty()) Note(message)
         Note("模型只存在手机里，录音不会上传。下载建议连 Wi-Fi。")
     }
 }
@@ -838,13 +863,75 @@ private fun VoicePage(prefs: Prefs) {
 // ---- online --------------------------------------------------------------------------------
 
 @Composable
+private fun ProviderCard(prefs: Prefs, p: com.kk.shurufa.online.Llm.Provider) {
+    val main = remember { android.os.Handler(android.os.Looper.getMainLooper()) }
+    var open by remember { mutableStateOf(com.kk.shurufa.online.Llm.configured(prefs, p.id)) }
+    var key by remember { mutableStateOf(com.kk.shurufa.online.Llm.key(prefs, p.id)) }
+    var model by remember { mutableStateOf(prefs.sp.getString("llm_${p.id}_model", "")!!) }
+    var base by remember { mutableStateOf(prefs.sp.getString("llm_${p.id}_base", "")!!) }
+    var shown by remember { mutableStateOf(false) }
+    var test by remember { mutableStateOf("") }
+    Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+        Row(Modifier.fillMaxWidth().clickable { open = !open }.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(p.title, fontWeight = FontWeight.Medium)
+                Text(if (com.kk.shurufa.online.Llm.configured(prefs, p.id)) "已设置 · " + com.kk.shurufa.online.Llm.model(prefs, p.id) else p.site,
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Text(if (open) "收起" else "设置", color = MaterialTheme.colorScheme.primary)
+        }
+        if (!open) return@Column
+        OutlinedTextField(key, { key = it.trim(); prefs.put("llm_${p.id}_key", key) }, Modifier.fillMaxWidth().padding(vertical = 4.dp),
+            label = { Text("API Key") }, singleLine = true, placeholder = { Text(p.keyHint) },
+            visualTransformation = if (shown) androidx.compose.ui.text.input.VisualTransformation.None else androidx.compose.ui.text.input.PasswordVisualTransformation(),
+            trailingIcon = { TextButton(onClick = { shown = !shown }) { Text(if (shown) "隐藏" else "显示") } })
+        OutlinedTextField(model, { model = it.trim(); prefs.put("llm_${p.id}_model", model) }, Modifier.fillMaxWidth().padding(vertical = 4.dp),
+            label = { Text("模型") }, singleLine = true, placeholder = { Text(p.defaultModel.ifEmpty { "模型名称" }) })
+        val suggestions = com.kk.shurufa.online.Llm.MODEL_SUGGESTIONS[p.id].orEmpty()
+        if (suggestions.isNotEmpty()) Row(Modifier.padding(vertical = 2.dp)) {
+            for (m in suggestions) {
+                TextButton(onClick = { model = m; prefs.put("llm_${p.id}_model", m) }) { Text(m.removePrefix("claude-"), style = MaterialTheme.typography.bodySmall) }
+            }
+        }
+        if (p.id != "claude") OutlinedTextField(base, { base = it.trim(); prefs.put("llm_${p.id}_base", base) }, Modifier.fillMaxWidth().padding(vertical = 4.dp),
+            label = { Text("接口地址") }, singleLine = true, placeholder = { Text(p.defaultBase.ifEmpty { "https://…/v1" }) })
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 4.dp)) {
+            Text(test, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Button(enabled = key.isNotBlank(), onClick = {
+                test = "正在测试…"
+                Thread {
+                    val r = runCatching {
+                        val a = com.kk.shurufa.online.AiWriter.ACTIONS.first { it.id == "fix" }
+                        com.kk.shurufa.online.Llm.complete(prefs, p.id, com.kk.shurufa.online.AiWriter.SYSTEM, com.kk.shurufa.online.AiWriter.prompt(a, "今天天气真好，我门去公园吧"))
+                    }
+                    main.post { test = r.fold({ "可以用：$it" }, { it.message ?: "失败" }) }
+                }.start()
+            }) { Text("测试") }
+        }
+    }
+}
+
+@Composable
 private fun OnlinePage(prefs: Prefs) {
     val ctx = LocalContext.current
     val main = remember { android.os.Handler(android.os.Looper.getMainLooper()) }
+    var tick by remember { mutableIntStateOf(0) }
+    Group("AI 服务") {
+        Note("填哪家的 Key 就能用哪家，可以都填；AI 改写和翻译各自选用一个。Key 只保存在这台手机上，只有你点了操作，文字才会发出去。")
+        for (p in com.kk.shurufa.online.Llm.PROVIDERS) ProviderCard(prefs, p)
+        TextButton(onClick = { tick++ }) { Text("刷新可选服务") }
+    }
+    val configured = remember(tick) { com.kk.shurufa.online.Llm.configuredIds(prefs) }
+    Group("AI 改写") {
+        if (configured.isEmpty()) Note("先在上面设置至少一个 AI 服务。")
+        else Choice(prefs, Prefs.AI_PROVIDER, "使用", configured.map { it to com.kk.shurufa.online.Llm.provider(it).title }, configured.first())
+        Note("工具栏的 ✦：润色、纠错、正式、口语、精简、扩写，翻译成英文 / 俄语 / 中文，帮我回复、婉拒。面板右上角可以临时切换服务。")
+    }
     Group("翻译") {
-        Choice(prefs, Prefs.TRANSLATE_TARGET, "默认翻译成", com.kk.shurufa.online.Translator.LANGS)
-        Toggle(prefs, Prefs.TRANSLATE_WIFI, "翻译模型只在 Wi-Fi 下载", "每种语言约 30 MB，下载一次后离线翻译", false)
-        Note("点工具栏的翻译按钮：选中文字时直接翻译选中的部分；没选时输入要翻译的话（拼音照常）。中文会翻成默认语言，其他语言翻成中文。候选栏里可以临时换目标语言。")
+        Choice(prefs, Prefs.TRANSLATE_ENGINE, "翻译引擎", listOf("mlkit" to "离线（ML Kit）") + configured.map { it to com.kk.shurufa.online.Llm.provider(it).title })
+        Choice(prefs, Prefs.TRANSLATE_TARGET, "默认翻译成", com.kk.shurufa.online.TranslateService.LANGS.take(3))
+        Toggle(prefs, Prefs.TRANSLATE_WIFI, "离线模型只在 Wi-Fi 下载", "每种语言约 30 MB，下载一次后离线翻译", false)
+        Note("点工具栏的翻译按钮，键盘上方会展开翻译栏：可以选语言、⇄ 对调、切换引擎；选中文字时直接翻译并可替换。AI 翻译更地道，离线翻译不联网也能用。")
     }
     Group("词库更新") {
         var status by remember { mutableStateOf("词库来自雾凇拼音（rime-ice），可以随时更新到最新版") }
@@ -879,27 +966,5 @@ private fun OnlinePage(prefs: Prefs) {
             }) { Text("下载并部署") }
         }
         Note("更新后的词库放在应用自己的文件夹里，优先于安装包自带的版本；你自己造的词和学习记录不受影响。")
-    }
-    Group("AI 改写") {
-        var key by remember { mutableStateOf(prefs.aiKey) }
-        var shown by remember { mutableStateOf(false) }
-        OutlinedTextField(key, { key = it.trim(); prefs.put(Prefs.AI_KEY, key) }, Modifier.fillMaxWidth().padding(vertical = 6.dp),
-            label = { Text("Claude API Key") }, singleLine = true, placeholder = { Text("sk-ant-…") },
-            visualTransformation = if (shown) androidx.compose.ui.text.input.VisualTransformation.None else androidx.compose.ui.text.input.PasswordVisualTransformation(),
-            trailingIcon = { TextButton(onClick = { shown = !shown }) { Text(if (shown) "隐藏" else "显示") } })
-        Choice(prefs, Prefs.AI_MODEL, "模型", com.kk.shurufa.online.AiWriter.MODELS, com.kk.shurufa.online.AiWriter.DEFAULT_MODEL)
-        var test by remember { mutableStateOf("") }
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 4.dp)) {
-            Text(test, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Button(enabled = key.isNotBlank(), onClick = {
-                test = "正在测试…"
-                val model = prefs.aiModel
-                Thread {
-                    val r = runCatching { com.kk.shurufa.online.AiWriter(key, model).run(com.kk.shurufa.online.AiWriter.ACTIONS.first { it.id == "fix" }, "今天天气真好，我门去公园吧") }
-                    main.post { test = r.fold({ "可以用：$it" }, { it.message ?: "失败" }) }
-                }.start()
-            }) { Text("测试") }
-        }
-        Note("在 console.anthropic.com 创建 API Key，按用量付费。点工具栏的 ✦ 打开：选中文字时只处理选中的部分，否则处理整个输入框；只有你点了操作，文字才会发给 Claude。Key 只保存在这台手机上。")
     }
 }

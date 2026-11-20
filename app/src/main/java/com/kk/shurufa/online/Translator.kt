@@ -14,7 +14,11 @@ class Translator {
 
     companion object {
         val LANGS = listOf("zh" to "中文", "en" to "English", "ru" to "Русский")
-        fun mlkit(id: String) = when (id) { "zh" -> TranslateLanguage.CHINESE; "ru" -> TranslateLanguage.RUSSIAN; else -> TranslateLanguage.ENGLISH }
+        fun mlkit(id: String) = when (id) {
+            "zh" -> TranslateLanguage.CHINESE; "ru" -> TranslateLanguage.RUSSIAN; "ja" -> TranslateLanguage.JAPANESE
+            "ko" -> TranslateLanguage.KOREAN; "fr" -> TranslateLanguage.FRENCH; "de" -> TranslateLanguage.GERMAN
+            "es" -> TranslateLanguage.SPANISH; else -> TranslateLanguage.ENGLISH
+        }
 
         /** The language a piece of text is written in, by its letters. */
         fun guess(text: String): String = when {

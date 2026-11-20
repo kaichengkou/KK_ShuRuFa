@@ -18,8 +18,8 @@ android {
         applicationId = "com.kk.shurufa"
         minSdk = 26
         targetSdk = 35
-        versionCode = 11
-        versionName = "0.7.0"
+        versionCode = 12
+        versionName = "0.8.0"
         ndk { abiFilters += abis }
         externalNativeBuild {
             cmake { arguments += listOf("-DANDROID_STL=c++_static", "-DCMAKE_BUILD_TYPE=Release") }
@@ -115,11 +115,15 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     // 翻译: on-device ML Kit models (downloaded once per language)
     implementation("com.google.mlkit:translate:17.0.3")
+    // 语音: SenseVoice and Silero VAD run on ONNX Runtime
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.22.0")
     // AI 改写: the official Claude SDK, with the user's own API key
     implementation("com.anthropic:anthropic-java:3.3.0")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.robolectric:robolectric:4.16")
     testImplementation("androidx.test:core:1.6.1")
+    // desktop ONNX Runtime, so the speech pipeline can be checked end to end on the build machine
+    testImplementation("com.microsoft.onnxruntime:onnxruntime:1.22.0")
 }
 
 kotlin {

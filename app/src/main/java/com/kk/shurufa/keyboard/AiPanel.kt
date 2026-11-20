@@ -6,48 +6,56 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.RectF
 import android.text.Layout
+import android.text.SpannableString
+import android.text.Spanned
 import android.text.StaticLayout
 import android.text.TextPaint
 import android.text.TextUtils
+import android.text.style.BackgroundColorSpan
+import android.text.style.ForegroundColorSpan
 import android.util.TypedValue
 import android.view.MotionEvent
 import android.view.View
 import com.kk.shurufa.Prefs
 
 /**
- * AI 改写: what will be sent (the selection or the whole field) on top, the actions as soft
- * chips, and the result in a card with 替换 / 插入. While a request runs the chosen chip pulses.
+ * AI 改写. What will be sent and the service it goes to on top; the actions in groups
+ * (改写 · 翻译 · 回复); and a result card that fills in while the answer streams, with the
+ * changed characters marked for 润色 and 纠错, and 重试 · 复制 · 插入 · 替换.
  */
 @SuppressLint("ViewConstructor")
 class AiPanel(context: Context, private val prefs: Prefs) : View(context) {
+    class Act(val id: String, val title: String, val group: String)
+
     var theme: KbTheme = KbTheme.resolve(context, prefs)
-    var actions: List<Pair<String, String>> = emptyList()
+    var actions: List<Act> = emptyList()
         set(v) { field = v; invalidate() }
     var onAction: ((String) -> Unit)? = null
-    var onApply: ((replace: Boolean) -> Unit)? = null
-    var onSetup: (() -> Unit)? = null
+    var onButton: ((String) -> Unit)? = null     // "replace" "insert" "copy" "retry" "provider" "setup"
     var onFeedback: (() -> Unit)? = null
 
     var source = ""
-        set(v) { field = v; invalidate() }
     var sourceLabel = ""
-        set(v) { field = v; invalidate() }
-    var result = ""
-        set(v) { field = v; resultLayout = null; invalidate() }
-    var status = ""
-        set(v) { field = v; invalidate() }
-    var busy: String? = null
-        set(v) { field = v; invalidate() }
+    var provider = ""
     var needsSetup = false
-        set(v) { field = v; invalidate() }
+    var running: String? = null
+    var doneTitle = ""
+    var status = ""
+    private var result = ""
+    private var diffBase: String? = null
+
+    /** The answer so far; [base] marks what changed against the original (润色/纠错). */
+    fun setResult(text: String, base: String?) { result = text; diffBase = base; resLayout = null; invalidate() }
+    fun refresh() { resLayout = null; invalidate() }
 
     private fun dp(v: Float) = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, resources.displayMetrics)
     private fun sp(v: Float) = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, v, resources.displayMetrics)
 
     private val bg = Paint(Paint.ANTI_ALIAS_FLAG)
     private val tp = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val ip = Paint(Paint.ANTI_ALIAS_FLAG)
     private val body = TextPaint(Paint.ANTI_ALIAS_FLAG)
-    private var resultLayout: StaticLayout? = null
+    private var resLayout: StaticLayout? = null
     private val hits = mutableListOf<Pair<RectF, String>>()
     private var pressed: String? = null
     private val pulse = Tween(0f)
@@ -57,81 +65,151 @@ class AiPanel(context: Context, private val prefs: Prefs) : View(context) {
         hits.clear()
         val pad = dp(10f)
         val rad = dp(prefs.keyRadiusDp)
-        var y = pad
-        // what goes out
-        tp.textAlign = Paint.Align.LEFT; tp.typeface = Ui.medium; tp.textSize = sp(Ui.SMALL); tp.color = theme.hint
-        c.drawText(sourceLabel, pad + dp(2f), y + tp.textSize, tp)
+        var y = dp(8f)
+        // header: source preview, provider chip
+        tp.textSize = sp(Ui.CAPTION + 0.5f)
+        val pw = tp.measureText(provider) + dp(22f)
+        val pr = RectF(width - pad - pw, y, width - pad, y + dp(24f))
+        if (!needsSetup) {
+            bg.color = if (pressed == "provider") theme.softPressed else theme.soft
+            c.drawRoundRect(pr, pr.height() / 2, pr.height() / 2, bg)
+            tp.textAlign = Paint.Align.CENTER; tp.color = theme.inkSoft
+            text(c, provider, pr.centerX(), pr.centerY())
+            hits += pr to "provider"
+        }
+        tp.textAlign = Paint.Align.LEFT; tp.textSize = sp(Ui.SMALL); tp.typeface = Ui.medium; tp.color = theme.hint
+        c.drawText(sourceLabel, pad + dp(2f), pr.centerY() + tp.textSize * 0.36f, tp)
+        val lx = pad + dp(2f) + tp.measureText(sourceLabel) + dp(8f)
         tp.typeface = Ui.regular; tp.color = theme.inkSoft
-        val src = source.replace('\n', ' ')
-        val avail = width - 2 * pad - tp.measureText(sourceLabel) - dp(10f)
-        c.drawText(TextUtils.ellipsize(src, TextPaint(tp), avail, TextUtils.TruncateAt.END).toString(), pad + tp.measureText(sourceLabel) + dp(10f), y + tp.textSize, tp)
-        y += dp(24f)
+        val avail = pr.left - dp(8f) - lx
+        c.drawText(TextUtils.ellipsize(source.replace('\n', ' '), TextPaint(tp), avail.coerceAtLeast(0f), TextUtils.TruncateAt.END).toString(), lx, pr.centerY() + tp.textSize * 0.36f, tp)
+        y = pr.bottom + dp(8f)
         if (needsSetup) {
             val r = RectF(pad, y, width - pad, y + dp(48f))
             bg.color = if (pressed == "setup") theme.accentPressed else theme.accent
             c.drawRoundRect(r, rad, rad, bg)
-            tp.color = theme.onAccent; tp.textAlign = Paint.Align.CENTER; tp.textSize = sp(Ui.BODY); tp.typeface = Ui.medium
-            text(c, "填写 Claude API Key 后即可使用", r.centerX(), r.centerY())
+            tp.textAlign = Paint.Align.CENTER; tp.textSize = sp(Ui.BODY); tp.typeface = Ui.medium; tp.color = theme.onAccent
+            text(c, "设置一个 AI 服务（Claude、OpenAI、DeepSeek、Gemini…）", r.centerX(), r.centerY())
             tp.typeface = Ui.regular
             hits += r to "setup"
             return
         }
-        // action chips, wrapping
-        tp.textSize = sp(Ui.BODY); tp.textAlign = Paint.Align.CENTER
-        val ch = dp(36f); val gap = dp(6f)
+        // groups of chips, flowing
+        val ch = dp(34f); val gap = dp(6f)
         var x = pad
-        if (pulse.running || busy != null) postInvalidateOnAnimation()
-        if (busy != null && !pulse.running) { pulse.set(0f); pulse.animateTo(1f, 900) }
-        for ((id, name) in actions) {
-            val w = tp.measureText(name) + dp(24f)
-            if (x + w > width - pad) { x = pad; y += ch + gap }
+        if (running != null) { if (!pulse.running) { pulse.set(0f); pulse.animateTo(1f, 1000) }; postInvalidateOnAnimation() }
+        var lastGroup = ""
+        for (a in actions) {
+            tp.textSize = sp(Ui.BODY)
+            val w = tp.measureText(a.title) + dp(24f)
+            var labelW = 0f
+            if (a.group != lastGroup) {
+                tp.textSize = sp(Ui.CAPTION)
+                labelW = tp.measureText(a.group) + dp(8f)
+                if (x > pad) x += dp(6f)
+            }
+            if (x + labelW + w > width - pad) { x = pad; y += ch + gap }
+            if (a.group != lastGroup) {
+                tp.textAlign = Paint.Align.LEFT; tp.textSize = sp(Ui.CAPTION); tp.color = theme.hint
+                c.drawText(a.group, x, y + ch / 2 + tp.textSize * 0.36f, tp)
+                x += labelW; lastGroup = a.group
+            }
             val r = RectF(x, y, x + w, y + ch)
-            val on = busy == id
+            val on = running == a.id
             bg.color = when {
-                on -> blend(theme.accentSoft, theme.accent, 0.25f + 0.25f * kotlin.math.sin(pulse.value * Math.PI).toFloat())
-                pressed == id -> theme.softPressed
+                on -> blend(theme.accentSoft, theme.accent, 0.15f + 0.2f * kotlin.math.sin(pulse.value * Math.PI).toFloat())
+                pressed == a.id -> theme.softPressed
                 else -> theme.soft
             }
             c.drawRoundRect(r, ch / 2, ch / 2, bg)
+            tp.textAlign = Paint.Align.CENTER; tp.textSize = sp(Ui.BODY)
             tp.color = if (on) theme.accent else theme.ink
-            text(c, name, r.centerX(), r.centerY())
-            hits += r to id
+            text(c, a.title, r.centerX(), r.centerY())
+            hits += r to "act:${a.id}"
             x += w + gap
         }
         y += ch + dp(10f)
-        // result card
-        val card = RectF(pad, y, width - pad, height - pad)
-        if (card.height() < dp(40f)) return
+        // the result card
+        val card = RectF(pad, y, width - pad, height - dp(8f))
+        if (card.height() < dp(48f)) return
         bg.color = theme.surface
         c.drawRoundRect(card, Ui.radiusLarge(rad, dp(1f)), Ui.radiusLarge(rad, dp(1f)), bg)
+        val inner = dp(12f)
         if (result.isEmpty()) {
-            tp.color = theme.hint; tp.textSize = sp(Ui.SMALL)
-            text(c, status.ifEmpty { "选一个操作，结果会显示在这里" }, card.centerX(), card.centerY())
+            tp.textAlign = Paint.Align.CENTER; tp.color = theme.hint; tp.textSize = sp(Ui.SMALL)
+            text(c, status.ifEmpty { if (running != null) "正在思考…" else "选一个操作；选中文字时只处理选中的部分" }, card.centerX(), card.centerY())
             return
         }
-        val btnW = dp(64f); val btnH = dp(34f)
-        val inner = dp(12f)
-        val lay = resultLayout ?: run {
+        tp.textAlign = Paint.Align.LEFT; tp.textSize = sp(Ui.CAPTION); tp.color = theme.hint; tp.typeface = Ui.medium
+        c.drawText(if (running != null) "$doneTitle · 生成中…" else doneTitle, card.left + inner, card.top + inner + tp.textSize * 0.8f, tp)
+        tp.typeface = Ui.regular
+        val btnH = dp(30f)
+        val top = card.top + inner + dp(16f)
+        val lay = resLayout ?: run {
             body.textSize = sp(Ui.BODY + 1f); body.color = theme.ink
             val w = (card.width() - 2 * inner).toInt().coerceAtLeast(1)
-            val lines = ((card.height() - 2 * inner - btnH - dp(6f)) / (body.fontSpacing * 1.1f)).toInt().coerceAtLeast(1)
-            StaticLayout.Builder.obtain(result, 0, result.length, body, w).setMaxLines(lines)
+            val lines = ((card.bottom - inner - btnH - dp(6f) - top) / (body.fontSpacing * 1.1f)).toInt().coerceAtLeast(1)
+            val text = marked(result, diffBase)
+            StaticLayout.Builder.obtain(text, 0, text.length, body, w).setMaxLines(lines)
                 .setEllipsize(TextUtils.TruncateAt.END).setAlignment(Layout.Alignment.ALIGN_NORMAL).setLineSpacing(0f, 1.1f).build()
-                .also { resultLayout = it }
+                .also { resLayout = it }
         }
-        c.save(); c.translate(card.left + inner, card.top + inner); lay.draw(c); c.restore()
+        c.save(); c.translate(card.left + inner, top); lay.draw(c); c.restore()
+        if (running != null) return
+        // buttons, right to left
+        var bx = card.right - inner
         val by = card.bottom - inner - btnH
-        val rep = RectF(card.right - inner - btnW, by, card.right - inner, by + btnH)
-        val ins = RectF(rep.left - dp(8f) - btnW, by, rep.left - dp(8f), by + btnH)
-        bg.color = if (pressed == "replace") theme.accentPressed else theme.accent
-        c.drawRoundRect(rep, btnH / 2, btnH / 2, bg)
-        bg.color = if (pressed == "insert") theme.softPressed else theme.soft
-        c.drawRoundRect(ins, btnH / 2, btnH / 2, bg)
-        tp.textSize = sp(Ui.SMALL); tp.typeface = Ui.medium
-        tp.color = theme.onAccent; text(c, "替换", rep.centerX(), rep.centerY())
-        tp.color = theme.ink; text(c, "插入", ins.centerX(), ins.centerY())
-        tp.typeface = Ui.regular
-        hits += rep to "replace"; hits += ins to "insert"
+        for ((id, label, primary) in listOf(Triple("replace", "替换", true), Triple("insert", "插入", false), Triple("copy", "复制", false), Triple("retry", "重试", false))) {
+            tp.textSize = sp(Ui.SMALL)
+            val w = tp.measureText(label) + dp(26f)
+            val r = RectF(bx - w, by, bx, by + btnH)
+            bg.color = when {
+                primary -> if (pressed == id) theme.accentPressed else theme.accent
+                else -> if (pressed == id) theme.softPressed else theme.soft
+            }
+            c.drawRoundRect(r, btnH / 2, btnH / 2, bg)
+            tp.textAlign = Paint.Align.CENTER; tp.typeface = if (primary) Ui.medium else Ui.regular
+            tp.color = if (primary) theme.onAccent else theme.ink
+            text(c, label, r.centerX(), r.centerY())
+            tp.typeface = Ui.regular
+            hits += r to id
+            bx = r.left - dp(6f)
+        }
+    }
+
+    /** The result with the characters that are new against [base] tinted. */
+    private fun marked(s: String, base: String?): CharSequence {
+        if (base == null || base.length > 800 || s.length > 800) return s
+        val sp = SpannableString(s)
+        val keep = lcsMask(base, s)
+        var i = 0
+        while (i < s.length) {
+            if (keep[i]) { i++; continue }
+            var j = i
+            while (j < s.length && !keep[j]) j++
+            sp.setSpan(BackgroundColorSpan(theme.accentSoft), i, j, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            sp.setSpan(ForegroundColorSpan(theme.accent), i, j, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            i = j
+        }
+        return sp
+    }
+
+    /** For each character of [b]: is it part of the longest common subsequence with [a]? */
+    private fun lcsMask(a: String, b: String): BooleanArray {
+        val n = a.length; val m = b.length
+        val d = Array(n + 1) { IntArray(m + 1) }
+        for (i in n - 1 downTo 0) for (j in m - 1 downTo 0)
+            d[i][j] = if (a[i] == b[j]) d[i + 1][j + 1] + 1 else maxOf(d[i + 1][j], d[i][j + 1])
+        val keep = BooleanArray(m)
+        var i = 0; var j = 0
+        while (i < n && j < m) {
+            when {
+                a[i] == b[j] -> { keep[j] = true; i++; j++ }
+                d[i + 1][j] >= d[i][j + 1] -> i++
+                else -> j++
+            }
+        }
+        return keep
     }
 
     private fun text(c: Canvas, s: String, x: Float, y: Float) {
@@ -148,19 +226,19 @@ class AiPanel(context: Context, private val prefs: Prefs) : View(context) {
     override fun onTouchEvent(e: MotionEvent): Boolean {
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                pressed = hits.firstOrNull { it.first.contains(e.x, e.y) }?.second
+                pressed = hits.lastOrNull { it.first.contains(e.x, e.y) }?.second?.removePrefix("act:")
                 if (pressed != null) onFeedback?.invoke()
                 invalidate()
             }
             MotionEvent.ACTION_UP -> {
-                when (val p = pressed) {
-                    null -> {}
-                    "setup" -> onSetup?.invoke()
-                    "replace" -> onApply?.invoke(true)
-                    "insert" -> onApply?.invoke(false)
-                    else -> if (busy == null) onAction?.invoke(p)
+                val p = pressed
+                pressed = null
+                when {
+                    p == null -> {}
+                    p in setOf("replace", "insert", "copy", "retry", "provider", "setup") -> onButton?.invoke(p)
+                    running == null -> onAction?.invoke(p)
                 }
-                pressed = null; invalidate()
+                invalidate()
             }
             MotionEvent.ACTION_CANCEL -> { pressed = null; invalidate() }
         }
