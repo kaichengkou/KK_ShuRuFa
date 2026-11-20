@@ -509,11 +509,45 @@ private fun SymbolsPage(prefs: Prefs) {
         Toggle(prefs, Prefs.SMART_PUNCT, "数字后的标点保持半角", "3.14 不会变成 3。14", true)
     }
     Group("数学键盘") {
-        Choice(prefs, Prefs.MATH_FORMAT, "默认输出格式", listOf("uni" to "符号", "tex" to "LaTeX"))
+        Choice(prefs, Prefs.MATH_FORMAT, "默认输出格式", listOf("uni" to "文本", "tex" to "LaTeX"))
         Toggle(prefs, Prefs.MATH_CALC, "按 = 后给出计算结果", null, true)
         Toggle(prefs, Prefs.NUMBER_FIELD_MATH, "数字输入框弹出数字键盘", "按上次用的模式（简易或科学）打开", true)
         Choice(prefs, Prefs.NUM_MODE, "数字键盘默认模式", listOf("simple" to "标准", "sci" to "学术"))
         IntSlider(prefs, Prefs.SYMBOL_MEMORY, "记住符号面板的时间", 7, 0..30, "秒", "用过符号面板后这么久之内，再点 !#1 直接回到符号面板；0 为总是先开数字键盘")
+    }
+    EmojiGroup(prefs)
+}
+
+@Composable
+private fun EmojiGroup(prefs: Prefs) {
+    val ctx = LocalContext.current
+    val data = remember { com.kk.shurufa.ime.EmojiData(ctx).also { runCatching { it.load() } } }
+    var version by remember { mutableStateOf(data.version) }
+    var status by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    Group("Emoji") {
+        Text("当前版本：Emoji $version", modifier = Modifier.padding(vertical = 4.dp))
+        Toggle(prefs, Prefs.EMOJI_AUTO_UPDATE, "自动检查更新", "每周最多一次，从 unicode.org 和 CLDR 下载新版表情列表和中英文名称", true)
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 4.dp)) {
+            Text(status, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Button(enabled = !busy, onClick = {
+                busy = true; status = "正在检查…"
+                val main = android.os.Handler(android.os.Looper.getMainLooper())
+                Thread {
+                    val r = runCatching { com.kk.shurufa.ime.EmojiData.update(ctx, version) }
+                    main.post {
+                        busy = false
+                        r.onSuccess { v ->
+                            if (v == null) status = "已是最新"
+                            else { version = v; status = "已更新到 Emoji $v" }
+                            prefs.sp.edit().putLong(Prefs.EMOJI_CHECKED, System.currentTimeMillis())
+                                .putLong("seen_emoji_reload", System.currentTimeMillis()).apply()
+                        }.onFailure { status = "检查失败：${it.message ?: "网络错误"}" }
+                    }
+                }.start()
+            }) { Text("立即检查") }
+        }
+        Note("新表情只有手机字体支持时才会显示；系统画不出来的会自动隐藏，因为发出去对方多半也看不到。")
     }
 }
 

@@ -55,4 +55,19 @@ class DataTest {
         assertEquals("lǜ sè", t.convert("绿色", listOf("lv", "se")))
         assertEquals("nǐ hǎo，shì jiè", t.convert("你好，世界", listOf("ni", "hao", "shi", "jie")))
     }
+
+    @Test fun emojiSearch() {
+        val d = com.kk.shurufa.ime.EmojiData(ctx).apply { load() }
+        assertTrue(d.version, com.kk.shurufa.ime.EmojiData.newer(d.version, "15.1"))
+        assertTrue(d.search("开心").take(10).contains("😄"))
+        assertTrue(d.search("开心").none { it == "🙁" })
+        assertEquals("🐈", d.search("cat").first())
+        assertTrue(d.search("猫").take(12).contains("🐱"))
+        // a phrase finds the words inside it
+        assertTrue(d.search("今天好开心").take(20).contains("😄"))
+        assertEquals("😂", d.search("笑哭").first())
+        assertTrue(d.search("ЖЖЖ").toString(), d.search("ЖЖЖ").isEmpty())
+        assertTrue(com.kk.shurufa.ime.EmojiData.newer("18.0", "16.0"))
+        assertTrue(!com.kk.shurufa.ime.EmojiData.newer("16.0", "16.0"))
+    }
 }

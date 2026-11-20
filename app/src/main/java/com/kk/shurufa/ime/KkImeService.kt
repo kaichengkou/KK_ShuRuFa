@@ -99,8 +99,6 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
     private var math: MathLayout? = null
     private var mathTab = "basic"
     private var symbols: List<SymbolCategory> = emptyList()
-    private var commonZh: List<Output> = emptyList()
-    private var commonLatin: List<Output> = emptyList()
     private var symCat = ""
     private var symLock = false
     private var symItems: List<Output> = emptyList()
@@ -138,10 +136,19 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
     private lateinit var emojiPanel: LinearLayout
     private lateinit var emojiRail: GridPanel
     private lateinit var emojiCells: GridPanel
+    private lateinit var emojiData: EmojiData
+    /** Emoji groups the phone can draw, worked out once per data version. */
     private var emojiGroups: List<Pair<String, List<String>>> = emptyList()
+    private var kaomoji: List<String> = emptyList()
+    /** Tab of the emoji panel: 0 最近, 1..n the groups, n+1 颜文字. */
     private var emojiGroup = 0
     private var emojiShown: List<String> = emptyList()
     private val recentEmoji = mutableListOf<String>()
+    private val recentKao = mutableListOf<String>()
+    // 表情查找: the keyboard types into a query instead of the app, the bar shows matches
+    private var emojiSearch = false
+    private val searchQuery = StringBuilder()
+    private var searchResults: List<String> = emptyList()
     private var commonChars: Set<Char>? = null
     private val history = EditHistory()
 
@@ -166,6 +173,10 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
         if (prefs.zhPredict) predictor.load()
         if (prefs.packPoetry) predictor.loadPoetry()
         recentEmoji += prefs.sp.getString("emoji_recent", "")!!.split(' ').filter { it.isNotEmpty() }
+        recentKao += prefs.sp.getString("kao_recent", "")!!.split('\u0001').filter { it.isNotEmpty() }
+        emojiData = EmojiData(this)
+        loadEmoji()
+        maybeUpdateEmoji()
         prefs.sp.registerOnSharedPreferenceChangeListener(this)
         recentSymbols = prefs.sp.getString("sym_recent", "")!!.split('\u0001').filter { it.isNotEmpty() }.toMutableList()
         clips = ClipHistory(File(filesDir, "clipboard.txt")) { prefs.clipKeep }
@@ -197,7 +208,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
 
     /** Settings that only change behavior; everything else rebuilds the keyboard. */
     private val liveKeys = setOf(
-        "sym_recent", "emoji_recent", Prefs.ZH_TRAD, Prefs.ZH_EMOJI, Prefs.ZH_PREDICT, Prefs.PINYIN_MODE, Prefs.MATH_FORMAT,
+        "sym_recent", "emoji_recent", "kao_recent", Prefs.EMOJI_AUTO_UPDATE, Prefs.ZH_TRAD, Prefs.ZH_EMOJI, Prefs.ZH_PREDICT, Prefs.PINYIN_MODE, Prefs.MATH_FORMAT,
         Prefs.VIBRATE, Prefs.SOUND, Prefs.CLIP_KEEP, Prefs.CLIP_SUGGEST, Prefs.ZH_CORRECTION, Prefs.STRESS_MODE,
         Prefs.BACKSPACE_RESELECT, Prefs.NUM_MODE, Prefs.TYPO_MARK, Prefs.RARE_ANNOTATE, Prefs.PACK_POETRY, Prefs.SYMBOL_MEMORY,
         Prefs.CLIP_MAX_CHARS, Prefs.CLIP_FRICTION, Prefs.CLIP_COLUMNS,
@@ -205,6 +216,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
 
     override fun onSharedPreferenceChanged(sp: SharedPreferences?, key: String?) {
         if (key != null && key.startsWith("hap_")) { haptics.invalidate(); return }
+        if (key == "seen_emoji_reload") { loadEmoji(); return }
         if (key == null || key.startsWith("app_lang_") || key.startsWith("seen_")) return
         when (key) {
             Prefs.ZH_EMOJI, Prefs.ZH_TRAD -> applyRimeOptions()
@@ -319,7 +331,6 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
         try {
             math = repo.math()
             symbols = repo.symbols()
-            repo.symbolCommons().let { commonZh = it.first; commonLatin = it.second }
         } catch (e: Exception) {
             Toast.makeText(this, "布局文件有错误：${e.message}", Toast.LENGTH_LONG).show()
         }
@@ -362,6 +373,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
 
     override fun onFinishInputView(finishingInput: Boolean) {
         super.onFinishInputView(finishingInput)
+        emojiSearch = false; searchQuery.setLength(0)
         if (RimeEngine.ready) RimeBridge.clearComposition()
         resetSyllables()
         predictions = emptyList()
@@ -441,6 +453,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
     private fun inFamily(p: Panel) = p == Panel.NUM || p == Panel.MATH || p == Panel.SYMBOLS
 
     private fun showPanel(p: Panel) {
+        if (p != Panel.LETTERS && emojiSearch) { emojiSearch = false; searchQuery.setLength(0) }
         val from = panel
         panel = p
         if (p != Panel.LETTERS && p != Panel.CANDIDATES) pinyinEdit = false
@@ -489,7 +502,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
             }
         }
         bar.expanded = p == Panel.CANDIDATES
-        bar.activeTool = toolFor(p)
+        bar.activeTool = if (emojiSearch) "emoji" else toolFor(p)
         syncBar()
         animateHeight(oldTotal, if (noBar) 0 else barH)
     }
@@ -533,6 +546,16 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
             isZh && RimeEngine.state == RimeEngine.State.DEPLOYING && panel == Panel.LETTERS -> bar.showMessage("正在部署雾凇拼音词库，首次约需一分钟…")
             isZh && RimeEngine.state == RimeEngine.State.PREPARING && panel == Panel.LETTERS -> bar.showMessage("正在准备中文词库…")
             isZh && RimeEngine.state == RimeEngine.State.FAILED -> bar.showMessage("中文引擎启动失败：${RimeEngine.error ?: "未知错误"}")
+            emojiSearch && !composing && panel == Panel.LETTERS -> {
+                val q = searchQuery.toString().trim()
+                val drawable = emojiGroups.flatMapTo(HashSet()) { it.second }
+                searchResults = emojiData.search(q, 120).filter { it in drawable }
+                bar.showPredictions(searchResults, when {
+                    q.isEmpty() -> "查找表情：输入中文或英文关键词"
+                    searchResults.isEmpty() -> "没有找到和「$q」相关的表情"
+                    else -> "查找「$q」· 点按发送"
+                })
+            }
             composing && pinyinEdit -> bar.showEdit(RimeBridge.input(), RimeBridge.caretPos(), syllableGaps())
             composing -> {
                 trackSyllables()
@@ -592,7 +615,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
         val top = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         symRail = GridPanel(this, prefs).apply {
             theme = this@KkImeService.theme; columns = 1; rowHeightDp = 36f; textSp = 13.5f; cellStyle = GridPanel.CellStyle.RAIL
-            onItem = { i -> symCat = symCatIds().getOrElse(i) { "common" }; refreshSymbols() }
+            onItem = { i -> symCat = symCatIds().getOrElse(i) { "recent" }; refreshSymbols() }
             onFeedback = { haptics.play(HapticEvent.FUNCTION) }
         }
         symCells = GridPanel(this, prefs).apply {
@@ -661,14 +684,14 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
 
     private fun refreshSymbols() {
         if (symbols.isEmpty()) return
-        if (symCat.isEmpty()) symCat = if (recentSymbols.isNotEmpty()) "recent" else "common"
+        // 最近 holds what was typed; with nothing typed yet the panel opens on the first category
+        if (symCat.isEmpty()) symCat = if (recentSymbols.isNotEmpty()) "recent" else symbols.first().id
         val ids = symCatIds()
         val idx = ids.indexOf(symCat).coerceAtLeast(0)
         val cat = symbols.getOrNull(idx - 1)
         // 最近 holds only what was actually typed; 常用 is the fixed default set
         symItems = when {
             idx == 0 -> recentSymbols.map { Output.of(it) }
-            cat?.id == "common" -> if (isZh) commonZh else commonLatin
             else -> cat?.items.orEmpty()
         }
         val wide = cat?.wide == true
@@ -829,7 +852,11 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
 
     private fun flushRime() {
         val commit = RimeBridge.commitText()
-        if (commit.isNotEmpty()) {
+        if (commit.isNotEmpty() && emojiSearch) {
+            // 表情查找: the chosen word goes into the query, not the app
+            resetSyllables(); inputBeforeKey = ""
+            searchQuery.append(commit)
+        } else if (commit.isNotEmpty()) {
             val syl = confirmedSyllables + lastSyllables
             var out = if (prefs.pinyinMode && commit.any { isCjk(it) }) tones.convert(commit, syl) else commit
             if (prefs.pinyinMode && out != commit) {
@@ -1085,6 +1112,13 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
 
     override fun onOutput(key: Key, output: Output) {
         if (panel == Panel.MATH) { mathOut(output); return }
+        if (emojiSearch && panel == Panel.LETTERS) {
+            val tt = output.text
+            if (isZh && output === key.main && tt.length == 1 && tt[0] in 'a'..'z' && rimeKey(tt[0].code)) return
+            commitComposingFirst()
+            searchType(if (output === key.main && key.isLetter && shift > 0) tt.uppercase() else tt)
+            return
+        }
         if (panel == Panel.NUM) {
             commit(output.text, pairable = output.text.length > 1)
             history.push(EditHistory.Op.Insert(output.text))
@@ -1130,6 +1164,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
                 predictions = emptyList()
                 when {
                     composing -> rimeKey(RimeBridge.XK_BackSpace)
+                    emojiSearch -> { if (searchQuery.isNotEmpty()) searchQuery.setLength(searchQuery.offsetByCodePoints(searchQuery.length, -1)); syncBar() }
                     else -> {
                         deleteBackward()
                         updateAutoCap()
@@ -1140,6 +1175,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
             }
             "space" -> {
                 if (composing) { rimeKey(RimeBridge.XK_space); return }
+                if (emojiSearch) { searchType(" "); return }
                 predictions = emptyList()
                 val now = SystemClock.uptimeMillis()
                 val before = ic?.getTextBeforeCursor(2, 0)?.toString().orEmpty()
@@ -1151,7 +1187,9 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
                 updateAutoCap()
                 syncBar()
             }
-            "enter" -> if (composing) rimeKey(RimeBridge.XK_Return) else { predictions = emptyList(); performEnter(); updateAutoCap(); syncBar() }
+            "enter" -> if (composing) rimeKey(RimeBridge.XK_Return)
+            else if (emojiSearch) { searchResults.firstOrNull()?.let { onEmoji(it) } }
+            else { predictions = emptyList(); performEnter(); updateAutoCap(); syncBar() }
             "shift" -> {
                 val now = SystemClock.uptimeMillis()
                 shift = when {
@@ -1383,6 +1421,10 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
     }
 
     override fun onCandidate(index: Int) {
+        if (index < 0 && emojiSearch && !composing) {
+            searchResults.getOrNull(-1 - index)?.let { onEmoji(it) }
+            return
+        }
         if (index < 0) {
             // an association: commit it and suggest what follows
             val word = predictions.getOrNull(-1 - index) ?: return
@@ -1498,18 +1540,35 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
 
     private val glyphPaint = android.graphics.Paint()
 
-    private fun buildEmojiPanel() {
-        emojiGroups = runCatching {
-            assets.open("data/emoji.txt").bufferedReader().readLines().mapNotNull { l ->
-                // only emoji the system font can draw (newer ones show as boxes on older phones)
-                val t = l.indexOf('\t'); if (t < 0) null else l.substring(0, t) to l.substring(t + 1).split(' ').filter { it.isNotEmpty() && glyphPaint.hasGlyph(it) }
+    private fun loadEmoji() {
+        runCatching { emojiData.load() }
+        // only emoji the system font can draw (newer ones show as boxes on older phones)
+        emojiGroups = emojiData.groups.map { (g, l) -> g to l.filter { glyphPaint.hasGlyph(it) } }.filter { it.second.isNotEmpty() }
+        kaomoji = runCatching { assets.open("data/kaomoji.txt").bufferedReader().readLines().filter { it.isNotBlank() } }.getOrDefault(emptyList())
+    }
+
+    /** 自动更新: at most once a week, in the background, when the keyboard starts. */
+    private fun maybeUpdateEmoji(force: Boolean = false) {
+        val now = System.currentTimeMillis()
+        if (!force && (!prefs.emojiAutoUpdate || now - prefs.sp.getLong(Prefs.EMOJI_CHECKED, 0L) < 7L * 24 * 3600 * 1000)) return
+        prefs.sp.edit().putLong(Prefs.EMOJI_CHECKED, now).apply()
+        val current = emojiData.version
+        Thread {
+            val v = runCatching { EmojiData.update(this, current) }.getOrNull()
+            if (v != null) android.os.Handler(mainLooper).post {
+                loadEmoji()
+                if (::emojiPanel.isInitialized && panel == Panel.EMOJI) refreshEmoji()
             }
-        }.getOrDefault(emptyList())
+        }.apply { isDaemon = true }.start()
+    }
+
+    private fun buildEmojiPanel() {
         emojiPanel = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val top = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         emojiRail = GridPanel(this, prefs).apply {
             theme = this@KkImeService.theme; columns = 1; rowHeightDp = 36f; textSp = 13.5f; cellStyle = GridPanel.CellStyle.RAIL
-            onItem = { i -> emojiGroup = i; refreshEmoji() }
+            // the first item is 查找, the rest are tabs
+            onItem = { i -> if (i == 0) startEmojiSearch() else { emojiGroup = i - 1; refreshEmoji() } }
             onFeedback = { haptics.play(HapticEvent.FUNCTION) }
         }
         emojiCells = GridPanel(this, prefs).apply {
@@ -1522,18 +1581,28 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
         top.addView(emojiCells, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
         val bottom = newKeyboard()
         bottom.setRows(listOf(listOf(
-            Key(fn = "abc", label = "返回", width = 1.4f), Key(fn = "space", width = 3f),
-            Key(fn = "backspace", width = 1.2f), Key(fn = "enter", width = 1.2f),
+            Key(fn = "abc", label = "ABC", width = 1.5f), Key(fn = "space", width = 4f),
+            Key(fn = "backspace", width = 1.5f), Key(fn = "enter", width = 1.5f),
         )))
         emojiPanel.addView(top, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         emojiPanel.addView(bottom, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
     }
 
     private fun refreshEmoji() {
-        val names = listOf("最近") + emojiGroups.map { it.first }
-        emojiRail.selectedIndex = emojiGroup
-        emojiRail.setItems(names, resetScroll = false)
-        emojiShown = if (emojiGroup == 0) recentEmoji.toList() else emojiGroups.getOrNull(emojiGroup - 1)?.second.orEmpty()
+        val kaoTab = emojiGroups.size + 1
+        emojiGroup = emojiGroup.coerceIn(0, kaoTab)
+        emojiRail.selectedIndex = emojiGroup + 1
+        emojiRail.setItems(listOf("⌕ 查找", "最近") + emojiGroups.map { it.first } + "颜文字", resetScroll = false)
+        val kao = emojiGroup == kaoTab
+        emojiShown = when {
+            emojiGroup == 0 -> recentEmoji.toList()
+            kao -> (recentKao + kaomoji).distinct()
+            else -> emojiGroups.getOrNull(emojiGroup - 1)?.second.orEmpty()
+        }
+        // kaomoji are wide: three to a row, in text size
+        emojiCells.columns = if (kao) 3 else 7
+        emojiCells.textSp = if (kao) 14f else 25f
+        emojiCells.rowHeightDp = if (kao) 44f else 46f
         emojiCells.setItems(emojiShown)
     }
 
@@ -1541,9 +1610,52 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
         commitComposingFirst()
         commit(e, pairable = false)
         history.push(EditHistory.Op.Insert(e))
+        if (e in kaomoji || recentKao.contains(e)) {
+            recentKao.remove(e); recentKao.add(0, e)
+            while (recentKao.size > 12) recentKao.removeAt(recentKao.size - 1)
+            prefs.sp.edit().putString("kao_recent", recentKao.joinToString("\u0001")).apply()
+            return
+        }
         recentEmoji.remove(e); recentEmoji.add(0, e)
         while (recentEmoji.size > 32) recentEmoji.removeAt(recentEmoji.size - 1)
         prefs.sp.edit().putString("emoji_recent", recentEmoji.joinToString(" ")).apply()
+    }
+
+    // ---- 表情查找 ------------------------------------------------------------------------
+
+    /**
+     * Opens the letters with the bar showing matching emoji. The query starts from what is
+     * selected, or the last word before the cursor, so one tap already finds related emoji.
+     */
+    private fun startEmojiSearch() {
+        commitComposingFirst()
+        emojiSearch = true
+        searchQuery.setLength(0)
+        searchQuery.append(contextWord())
+        haptics.play(HapticEvent.FUNCTION)
+        showPanel(Panel.LETTERS)
+    }
+
+    private fun stopEmojiSearch(toPanel: Panel? = Panel.EMOJI) {
+        if (!emojiSearch) return
+        emojiSearch = false
+        if (composing) RimeBridge.clearComposition()
+        searchQuery.setLength(0)
+        if (toPanel != null) showPanel(toPanel)
+    }
+
+    private fun contextWord(): String {
+        val ic = currentInputConnection ?: return ""
+        ic.getSelectedText(0)?.toString()?.trim()?.takeIf { it.isNotEmpty() }?.let { return it.take(12) }
+        val before = ic.getTextBeforeCursor(24, 0)?.toString().orEmpty().trimEnd()
+        if (before.isEmpty()) return ""
+        return if (isCjk(before.last())) before.takeLastWhile { isCjk(it) }.takeLast(6)
+        else before.takeLastWhile { it.isLetter() }.takeLast(20)
+    }
+
+    private fun searchType(text: String) {
+        searchQuery.append(text)
+        syncBar()
     }
 
     override fun onExpand() {
@@ -1558,6 +1670,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
     }
 
     override fun onDismissSuggestions() {
+        if (emojiSearch) { stopEmojiSearch(); return }
         predictions = emptyList()
         pendingClip = null
         syncBar()

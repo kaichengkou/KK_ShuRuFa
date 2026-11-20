@@ -140,13 +140,6 @@ class LayoutRepo(
         }
     }
 
-    /** The default "常用" symbols for Chinese and for Latin/Cyrillic layouts. */
-    fun symbolCommons(): Pair<List<Output>, List<Output>> {
-        val m = read("symbols.yaml") as Map<*, *>
-        fun list(k: String) = (m[k] as? String)?.trim()?.split(Regex("\\s+"))?.map { Output.of(it) } ?: emptyList()
-        return list("common_zh") to list("common_latin")
-    }
-
     private fun unescape(s: String) = s.replace("\\u00A0", " ")
 
     private fun outputs(v: Any?): List<Output> = when (v) {

@@ -312,8 +312,17 @@ class KeyboardRenderTest {
         emo.addView(erail, LinearLayout.LayoutParams((ctx.resources.displayMetrics.density * 64).toInt(), -1))
         emo.addView(ecells, LinearLayout.LayoutParams(0, -1, 1f))
         val groups = ctx.assets.open("data/emoji.txt").bufferedReader().readLines().map { it.substringBefore('\t') to it.substringAfter('\t').split(' ') }
-        erail.setItems(listOf("最近") + groups.map { it.first })
+        erail.setItems(listOf("⌕ 查找", "最近") + groups.map { it.first } + "颜文字")
+        erail.selectedIndex = 2
         ecells.setItems(groups[0].second)
         panelShot("emoji", emo)
+        erail.selectedIndex = groups.size + 2
+        ecells.columns = 3; ecells.textSp = 14f; ecells.rowHeightDp = 44f
+        ecells.setItems(ctx.assets.open("data/kaomoji.txt").bufferedReader().readLines().filter { it.isNotBlank() })
+        panelShot("emoji_kaomoji", emo)
+        // 查找: the bar lists matches for the word before the cursor
+        val found = com.kk.shurufa.ime.EmojiData(ctx).apply { load() }.search("开心").take(20)
+        val kb2 = KeyboardView(ctx, prefs).apply { listener = this@KeyboardRenderTest.listener; setRows(LayoutRepo(ctx).keyboard("zh").rows) }
+        panelShot("emoji_search", kb2, 200) { it.showPredictions(found, "查找「开心」· 点按发送"); it.activeTool = "emoji" }
     }
 }

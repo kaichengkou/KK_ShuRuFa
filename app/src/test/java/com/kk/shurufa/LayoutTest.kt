@@ -65,13 +65,10 @@ class LayoutTest {
 
     @Test fun symbols() {
         val cats = repo.symbols()
-        assertEquals("common", cats[0].id)
-        assertTrue(cats.first { it.id == "ru" }.items.any { it.text == " " })
-        assertTrue(cats.first { it.id == "kao" }.wide)
+        assertEquals("zh", cats[0].id)
+        assertTrue(cats.none { it.id == "common" || it.id == "kao" })
+        assertTrue(cats.first { it.id == "ru" }.items.any { it.text == "\u00A0" })
         assertTrue(cats.first { it.id == "en" }.items.any { it.text == "\\" })
-        val (zh, lat) = repo.symbolCommons()
-        assertEquals("，", zh[0].text)
-        assertEquals(",", lat[0].text)
     }
 
     @Test fun calculator() {
