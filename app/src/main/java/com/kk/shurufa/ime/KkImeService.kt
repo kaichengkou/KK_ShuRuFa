@@ -197,7 +197,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
 
     /** Settings that only change behavior; everything else rebuilds the keyboard. */
     private val liveKeys = setOf(
-        "sym_recent", Prefs.ZH_TRAD, Prefs.ZH_EMOJI, Prefs.ZH_PREDICT, Prefs.PINYIN_MODE, Prefs.MATH_FORMAT,
+        "sym_recent", "emoji_recent", Prefs.ZH_TRAD, Prefs.ZH_EMOJI, Prefs.ZH_PREDICT, Prefs.PINYIN_MODE, Prefs.MATH_FORMAT,
         Prefs.VIBRATE, Prefs.SOUND, Prefs.CLIP_KEEP, Prefs.CLIP_SUGGEST, Prefs.ZH_CORRECTION, Prefs.STRESS_MODE,
         Prefs.BACKSPACE_RESELECT, Prefs.NUM_MODE, Prefs.TYPO_MARK, Prefs.RARE_ANNOTATE, Prefs.PACK_POETRY, Prefs.SYMBOL_MEMORY,
         Prefs.CLIP_MAX_CHARS, Prefs.CLIP_FRICTION, Prefs.CLIP_COLUMNS,
@@ -205,7 +205,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
 
     override fun onSharedPreferenceChanged(sp: SharedPreferences?, key: String?) {
         if (key != null && key.startsWith("hap_")) { haptics.invalidate(); return }
-        if (key == null || key.startsWith("app_lang_")) return
+        if (key == null || key.startsWith("app_lang_") || key.startsWith("seen_")) return
         when (key) {
             Prefs.ZH_EMOJI, Prefs.ZH_TRAD -> applyRimeOptions()
             Prefs.ZH_PREDICT -> if (prefs.zhPredict) predictor.load() else { predictions = emptyList(); syncBar() }
@@ -454,7 +454,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
         if (from == Panel.SYMBOLS && p != Panel.SYMBOLS) lastSymbolsAt = SystemClock.uptimeMillis()
         listOf(clipHandle, candHandle).forEach { it.low = base; it.high = tallH; it.current = if (tall) tallH else base }
         // the symbol and edit panels hide the toolbar and use its height themselves
-        val noBar = p == Panel.SYMBOLS || p == Panel.CURSOR
+        val noBar = p == Panel.SYMBOLS
         bar.visibility = if (noBar) View.GONE else View.VISIBLE
         val h = when {
             p == Panel.MATH -> -1
@@ -636,7 +636,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
     private fun onEditAction(id: String) {
         val ic = currentInputConnection
         when (id) {
-            "back" -> { selectMode = false; showPanel(Panel.LETTERS); return }
+            "undo" -> undo()
             "select" -> {
                 selectMode = !selectMode
                 // leaving selection mode drops the selection back to a caret at its end

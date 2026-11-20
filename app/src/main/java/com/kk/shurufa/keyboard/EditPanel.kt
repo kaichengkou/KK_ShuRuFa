@@ -13,8 +13,14 @@ import android.view.View
 import com.kk.shurufa.Prefs
 
 /**
- * 文字编辑. A header with a way back; a card holding the four arrows around the 开始选择 toggle,
- * with 行首 · 全选 · 行尾 along its bottom; and a column of 删除 / 复制 / 剪切 / 粘贴 on the right.
+ * 文字编辑, built from the same keys as the keyboard (same gaps, radius, solid and soft styles):
+ *
+ *   行首  ↑   行尾 │ 删除
+ *    ←  选择   →  │ 复制
+ *   全选  ↓   撤销 │ 剪切
+ *                 │ 粘贴
+ *
+ * Arrows are solid like letter keys, everything else is soft; 选择 turns accent while selecting.
  * Arrows and 删除 repeat while held. 复制 and 剪切 are dimmed while nothing is selected.
  */
 @SuppressLint("ViewConstructor")
@@ -39,49 +45,42 @@ class EditPanel(context: Context, private val prefs: Prefs) : View(context) {
     private val selAnim = Tween(0f)
     private val handler = Handler(Looper.getMainLooper())
 
-    private class Btn(val id: String, val icon: String?, val text: String, val r: RectF, val repeat: Boolean)
-    private val buttons = mutableListOf<Btn>()
-    private var card = RectF()
-    private var pressed: Btn? = null
+    private enum class Kind { ARROW, SELECT, SOFT }
+    private class Btn(val id: String, val icon: String, val text: String, val kind: Kind, val repeat: Boolean) {
+        val r = RectF()
+        val press = Tween(0f)
+    }
 
-    private val headerH get() = dp(40f)
+    private val buttons = listOf(
+        Btn("home", "home", "行首", Kind.SOFT, false), Btn("up", "up", "", Kind.ARROW, true), Btn("end", "end", "行尾", Kind.SOFT, false),
+        Btn("left", "left", "", Kind.ARROW, true), Btn("select", "cursor", "开始选择", Kind.SELECT, false), Btn("right", "right", "", Kind.ARROW, true),
+        Btn("select_all", "select_all", "全选", Kind.SOFT, false), Btn("down", "down", "", Kind.ARROW, true), Btn("undo", "undo", "撤销", Kind.SOFT, false),
+        Btn("backspace", "backspace", "删除", Kind.SOFT, true), Btn("copy", "copy", "复制", Kind.SOFT, false),
+        Btn("cut", "cut", "剪切", Kind.SOFT, false), Btn("paste", "paste", "粘贴", Kind.SOFT, false),
+    )
+    private var pressed: Btn? = null
+    private val tmp = RectF()
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) = layoutButtons()
 
     private fun layoutButtons() {
-        buttons.clear()
-        val pad = dp(8f)
-        val gap = dp(prefs.keyGapDp)
-        val top = headerH
-        val bottom = height - pad
-        buttons += Btn("back", "left", "返回", RectF(width - dp(52f), dp(4f), width - dp(8f), headerH - dp(4f)), false)
-        val colW = (width - 2 * pad) * 0.27f
-        card = RectF(pad, top, width - pad - colW - gap, bottom)
-        // right column
-        val rx = card.right + gap
-        val ids = listOf(Triple("backspace", "backspace", "删除"), Triple("copy", "copy", "复制"), Triple("cut", "cut", "剪切"), Triple("paste", "paste", "粘贴"))
-        val rh = (bottom - top - gap * (ids.size - 1)) / ids.size
-        ids.forEachIndexed { i, (id, icon, text) ->
-            val y = top + i * (rh + gap)
-            buttons += Btn(id, icon, text, RectF(rx, y, rx + colW, y + rh), id == "backspace")
+        // the keyboard's own margins, so the edges line up with the letters
+        val side = dp(4f); val top = dp(6f); val bottom = height - dp(prefs.bottomPaddingDp + 2f)
+        val g = dp(prefs.keyGapDp)
+        val unit = (width - 2 * side - 3 * g) / 4.4f
+        val colW = floatArrayOf(unit, unit * 1.4f, unit, unit)
+        val x = FloatArray(4); var cx = side
+        for (i in 0 until 4) { x[i] = cx; cx += colW[i] + g }
+        val lh = (bottom - top - 2 * g) / 3
+        for (i in 0 until 9) {
+            val c = i % 3; val r = i / 3
+            val y = top + r * (lh + g)
+            buttons[i].r.set(x[c], y, x[c] + colW[c], y + lh)
         }
-        // the card: arrows around the toggle, a strip of three along the bottom
-        val stripH = (card.height() * 0.24f).coerceIn(dp(40f), dp(56f))
-        val area = RectF(card.left, card.top, card.right, card.bottom - stripH)
-        val cx = area.centerX(); val cy = area.centerY()
-        val cw = (area.width() * 0.36f).coerceAtMost(dp(150f))
-        val ch = (area.height() * 0.36f).coerceIn(dp(40f), dp(60f))
-        val center = RectF(cx - cw / 2, cy - ch / 2, cx + cw / 2, cy + ch / 2)
-        buttons += Btn("select", null, "开始选择", center, false)
-        val aw = (area.width() - cw) / 2
-        val ah = (area.height() - ch) / 2
-        buttons += Btn("up", "up", "", RectF(center.left, area.top, center.right, center.top), true)
-        buttons += Btn("down", "down", "", RectF(center.left, center.bottom, center.right, area.bottom), true)
-        buttons += Btn("left", "left", "", RectF(area.left, area.top + ah * 0.4f, area.left + aw, area.bottom - ah * 0.4f), true)
-        buttons += Btn("right", "right", "", RectF(area.right - aw, area.top + ah * 0.4f, area.right, area.bottom - ah * 0.4f), true)
-        val sw = card.width() / 3
-        listOf(Triple("home", "home", "行首"), Triple("select_all", "select_all", "全选"), Triple("end", "end", "行尾")).forEachIndexed { i, (id, icon, text) ->
-            buttons += Btn(id, icon, text, RectF(card.left + i * sw, card.bottom - stripH, card.left + (i + 1) * sw, card.bottom), false)
+        val rh = (bottom - top - 3 * g) / 4
+        for (i in 0 until 4) {
+            val y = top + i * (rh + g)
+            buttons[9 + i].r.set(x[3], y, x[3] + colW[3], y + rh)
         }
     }
 
@@ -89,81 +88,61 @@ class EditPanel(context: Context, private val prefs: Prefs) : View(context) {
 
     override fun onDraw(c: Canvas) {
         c.drawColor(theme.background)
-        if (selAnim.running) postInvalidateOnAnimation()
-        // header
-        tp.textAlign = Paint.Align.LEFT; tp.textSize = sp(Ui.TITLE); tp.color = theme.ink; tp.typeface = Ui.medium
-        val fm0 = tp.fontMetrics
-        c.drawText("文字编辑", dp(16f), headerH / 2 - (fm0.ascent + fm0.descent) / 2, tp)
-        tp.typeface = Ui.regular; tp.textAlign = Paint.Align.CENTER
+        var again = selAnim.running
         val rad = dp(prefs.keyRadiusDp)
-        // card
-        bg.color = theme.surface
-        c.drawRoundRect(card, Ui.radiusLarge(rad, dp(1f)), Ui.radiusLarge(rad, dp(1f)), bg)
-        val strip = buttons.first { it.id == "home" }.r
-        bg.color = theme.divider
-        c.drawRect(card.left + dp(12f), strip.top, card.right - dp(12f), strip.top + dp(0.8f), bg)
-        for (id in listOf("home", "select_all")) {
-            val r = buttons.first { it.id == id }.r
-            c.drawRect(r.right - dp(0.4f), r.top + dp(12f), r.right + dp(0.4f), r.bottom - dp(12f), bg)
+        val s = selAnim.value
+        for (b in buttons) {
+            val pv = b.press.value
+            if (b.press.running) again = true
+            val inset = dp(1.6f) * pv
+            val r = tmp.apply { set(b.r.left + inset, b.r.top + inset, b.r.right - inset, b.r.bottom - inset) }
+            when (b.kind) {
+                Kind.ARROW -> {
+                    if (prefs.keyBorders) { bg.color = theme.shadow; c.drawRoundRect(r.left, r.top + dp(1.2f), r.right, r.bottom + dp(1.2f), rad, rad, bg) }
+                    bg.color = blend(theme.surface, theme.surfacePressed, pv)
+                }
+                Kind.SELECT -> bg.color = blend(blend(theme.soft, theme.accent, s), if (s > 0.5f) theme.accentPressed else theme.softPressed, pv)
+                Kind.SOFT -> bg.color = blend(theme.soft, theme.softPressed, pv)
+            }
+            c.drawRoundRect(r, rad, rad, bg)
+            drawLabel(c, b, r, s)
         }
-        for (b in buttons) drawButton(c, b, rad)
+        if (again) postInvalidateOnAnimation()
     }
 
-    private fun drawButton(c: Canvas, b: Btn, rad: Float) {
-        val on = pressed == b
-        val en = enabled(b)
-        val r = b.r
-        when (b.id) {
-            "back" -> {
-                if (on) { bg.color = theme.soft; c.drawRoundRect(r, r.height() / 2, r.height() / 2, bg) }
-                ip.color = theme.inkSoft
-                Icons.draw(c, "left", r.centerX(), r.centerY(), dp(22f), ip)
-                return
+    private fun drawLabel(c: Canvas, b: Btn, r: RectF, s: Float) {
+        val alpha = if (enabled(b)) 255 else 90
+        when (b.kind) {
+            Kind.ARROW -> {
+                ip.color = blend(theme.ink, theme.accent, s); ip.alpha = alpha
+                Icons.draw(c, b.icon, r.centerX(), r.centerY(), dp(24f), ip)
             }
-            "select" -> {
-                val s = selAnim.value
-                bg.color = blend(theme.soft, theme.accent, s)
-                if (on) bg.color = if (selecting) theme.accentPressed else theme.softPressed
-                c.drawRoundRect(r, rad + dp(4f), rad + dp(4f), bg)
-                tp.textSize = sp(Ui.BODY)
+            Kind.SELECT -> {
                 tp.color = blend(theme.ink, theme.onAccent, s)
+                tp.textSize = sp(Ui.BODY); tp.typeface = Ui.medium
                 text(c, if (selecting) "结束选择" else "开始选择", r.centerX(), r.centerY())
-                return
+                tp.typeface = Ui.regular
             }
-            "up", "down", "left", "right" -> {
-                if (on) { bg.color = theme.soft; c.drawRoundRect(r, rad, rad, bg) }
-                ip.color = if (on) theme.accent else if (selecting) theme.accent else theme.inkSoft
-                Icons.draw(c, b.icon!!, r.centerX(), r.centerY(), dp(26f), ip)
-                return
-            }
-            "home", "select_all", "end" -> {
-                if (on) { bg.color = theme.soft; c.drawRect(r, bg) }
-            }
-            else -> {
-                bg.color = if (on) theme.softPressed else theme.soft
-                c.drawRoundRect(r, rad, rad, bg)
-            }
-        }
-        val alpha = if (en) 255 else 90
-        ip.color = theme.inkSoft; ip.alpha = alpha
-        tp.color = theme.ink; tp.alpha = alpha
-        when (labels) {
-            "icon" -> Icons.draw(c, b.icon!!, r.centerX(), r.centerY(), dp(22f), ip)
-            "text" -> { tp.textSize = sp(Ui.BODY); text(c, b.text, r.centerX(), r.centerY()) }
-            else -> {
-                if (r.height() > dp(48f)) {
-                    Icons.draw(c, b.icon!!, r.centerX(), r.centerY() - dp(9f), dp(20f), ip)
-                    tp.textSize = sp(Ui.SMALL); tp.color = theme.inkSoft; tp.alpha = alpha
-                    text(c, b.text, r.centerX(), r.centerY() + dp(13f))
-                } else {
-                    tp.textSize = sp(Ui.BODY)
-                    val tw = tp.measureText(b.text)
-                    Icons.draw(c, b.icon!!, r.centerX() - tw / 2 - dp(6f), r.centerY(), dp(18f), ip)
-                    text(c, b.text, r.centerX() + dp(8f), r.centerY())
+            Kind.SOFT -> {
+                ip.color = theme.inkSoft; ip.alpha = alpha
+                tp.color = theme.inkSoft; tp.alpha = alpha
+                when (labels) {
+                    "icon" -> Icons.draw(c, b.icon, r.centerX(), r.centerY(), dp(22f), ip)
+                    "text" -> { tp.textSize = sp(Ui.BODY); text(c, b.text, r.centerX(), r.centerY()) }
+                    else -> if (r.height() > dp(50f)) {
+                        Icons.draw(c, b.icon, r.centerX(), r.centerY() - dp(9f), dp(20f), ip)
+                        tp.textSize = sp(Ui.CAPTION + 0.5f)
+                        text(c, b.text, r.centerX(), r.centerY() + dp(12f))
+                    } else {
+                        tp.textSize = sp(Ui.SMALL)
+                        val tw = tp.measureText(b.text)
+                        Icons.draw(c, b.icon, r.centerX() - tw / 2 - dp(5f), r.centerY(), dp(17f), ip)
+                        text(c, b.text, r.centerX() + dp(9f), r.centerY())
+                    }
                 }
+                tp.alpha = 255; ip.alpha = 255
             }
         }
-        tp.alpha = 255; ip.alpha = 255
     }
 
     private fun text(c: Canvas, s: String, x: Float, y: Float) {
@@ -195,12 +174,18 @@ class EditPanel(context: Context, private val prefs: Prefs) : View(context) {
         onAction?.invoke(b.id)
     }
 
+    private fun release(b: Btn?) {
+        b?.press?.animateTo(0f, dur(140)); invalidate()
+    }
+
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(e: MotionEvent): Boolean {
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                val b = buttons.firstOrNull { it.r.contains(e.x, e.y) } ?: return true
+                val half = dp(prefs.keyGapDp) / 2
+                val b = buttons.firstOrNull { RectF(it.r).apply { inset(-half, -half) }.contains(e.x, e.y) } ?: return true
                 pressed = b; repeats = 0
+                b.press.animateTo(1f, dur(70))
                 if (b.repeat) { fire(b); handler.postDelayed(repeatRunnable, 380) }
                 else onFeedback?.invoke("touch")
                 invalidate()
@@ -208,7 +193,7 @@ class EditPanel(context: Context, private val prefs: Prefs) : View(context) {
             MotionEvent.ACTION_MOVE -> {
                 val b = pressed ?: return true
                 if (!RectF(b.r).apply { inset(-dp(16f), -dp(16f)) }.contains(e.x, e.y)) {
-                    handler.removeCallbacks(repeatRunnable); pressed = null; invalidate()
+                    handler.removeCallbacks(repeatRunnable); pressed = null; release(b)
                 }
             }
             MotionEvent.ACTION_UP -> {
@@ -216,9 +201,9 @@ class EditPanel(context: Context, private val prefs: Prefs) : View(context) {
                 val b = pressed
                 pressed = null
                 if (b != null && !b.repeat) fire(b)
-                invalidate()
+                release(b)
             }
-            MotionEvent.ACTION_CANCEL -> { handler.removeCallbacks(repeatRunnable); pressed = null; invalidate() }
+            MotionEvent.ACTION_CANCEL -> { handler.removeCallbacks(repeatRunnable); release(pressed); pressed = null }
         }
         return true
     }

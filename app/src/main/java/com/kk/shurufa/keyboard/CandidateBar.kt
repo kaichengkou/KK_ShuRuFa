@@ -137,6 +137,13 @@ class CandidateBar(context: Context, private val prefs: Prefs) : View(context) {
     /** The number keyboard's bar: the 标准/学术 switch first, then the calculator line or the math tabs. */
     fun showMath(tabs: List<Pair<String, String>>, current: String, format: String, simple: Boolean = false) {
         val keepResult = simple == simpleNum && mode == Mode.MATH
+        // the switches slide when they change while the bar stays on screen, and jump otherwise
+        val seg = if (simple) 0f else 1f
+        val fmt = if (format == "tex") 1f else 0f
+        if (mode == Mode.MATH) {
+            if (seg != segPos.target) segPos.animateTo(seg, dur(220))
+            if (fmt != fmtPos.target) fmtPos.animateTo(fmt, dur(220))
+        } else { segPos.set(seg); fmtPos.set(fmt) }
         mathTabs = tabs; mathTab = current; mathFormat = format; simpleNum = simple
         if (!keepResult) resultChip = null
         switchTo(Mode.MATH)
@@ -300,39 +307,54 @@ class CandidateBar(context: Context, private val prefs: Prefs) : View(context) {
         hits += RectF(width - closeW, 0f, width.toFloat(), height.toFloat()) to { listener?.onDismissSuggestions() }
     }
 
+    private val segPos = Tween(0f)
+    private val fmtPos = Tween(0f)
+
+    /**
+     * A two-way switch whose highlight slides between the options. [strong] fills it with the
+     * accent (the main mode), otherwise a light tint (a secondary setting).
+     */
+    private fun segmented(c: Canvas, box: RectF, names: List<String>, pos: Tween, strong: Boolean, pick: (Int) -> Unit) {
+        pill(c, box, theme.soft)
+        if (pos.running) postInvalidateOnAnimation()
+        val w = box.width() / names.size
+        val p = pos.value
+        val hl = RectF(box.left + p * w + dp(2f), box.top + dp(2f), box.left + (p + 1) * w - dp(2f), box.bottom - dp(2f))
+        pill(c, hl, if (strong) theme.accent else theme.accentSoft)
+        names.forEachIndexed { i, name ->
+            val r = RectF(box.left + i * w, box.top, box.left + (i + 1) * w, box.bottom)
+            val near = (1f - kotlin.math.abs(p - i)).coerceIn(0f, 1f)
+            tp.color = blend(theme.inkSoft, if (strong) theme.onAccent else theme.accent, near)
+            tp.textSize = sp(if (strong) Ui.BODY else Ui.SMALL)
+            tp.typeface = if (near > 0.5f) Ui.medium else Ui.regular
+            text(c, name, r.centerX(), r.centerY())
+            hits += r to { pick(i) }
+        }
+        tp.typeface = Ui.regular
+    }
+
+    private fun blend(x: Int, y: Int, t: Float): Int {
+        fun ch(sh: Int) = (((x shr sh) and 0xFF) * (1 - t) + ((y shr sh) and 0xFF) * t).toInt() shl sh
+        return ch(24) or ch(16) or ch(8) or ch(0)
+    }
+
+    /** Small explanations in the number bar go away for good after one tap. */
+    private fun hintSeen(key: String) = prefs.sp.getBoolean("seen_$key", false)
+
     private fun drawMath(c: Canvas, a: Float) {
         tp.textAlign = Paint.Align.CENTER
         // 标准 / 学术 switch, always in the same place
-        val segW = dp(104f)
-        val sr = RectF(dp(6f), dp(8f), dp(6f) + segW, height - dp(8f))
-        pill(c, sr, theme.soft)
-        listOf("simple" to "标准", "sci" to "学术").forEachIndexed { i, (id, name) ->
-            val r = RectF(sr.left + i * segW / 2 + dp(2f), sr.top + dp(2f), sr.left + (i + 1) * segW / 2 - dp(2f), sr.bottom - dp(2f))
-            val on = (id == "simple") == simpleNum
-            if (on) pill(c, r, theme.accent)
-            tp.color = if (on) theme.onAccent else theme.inkSoft
-            tp.textSize = sp(Ui.BODY); tp.typeface = if (on) Ui.medium else Ui.regular
-            text(c, name, r.centerX(), r.centerY())
-            tp.typeface = Ui.regular
-            hits += r to { listener?.onNumMode(id) }
-        }
+        val sr = RectF(dp(6f), dp(8f), dp(6f) + dp(104f), height - dp(8f))
+        segmented(c, sr, listOf("标准", "学术"), segPos, strong = true) { i -> listener?.onNumMode(if (i == 0) "simple" else "sci") }
         val chip = resultChip
         var right = width - dp(6f)
         if (!simpleNum) {
-            val fmtW = dp(92f)
-            val fr = RectF(right - fmtW, dp(8f), right, height - dp(8f))
-            pill(c, fr, theme.soft)
-            listOf("uni" to "文本", "tex" to "LaTeX").forEachIndexed { i, (id, name) ->
-                val r = RectF(fr.left + i * fmtW / 2 + dp(2f), fr.top + dp(2f), fr.left + (i + 1) * fmtW / 2 - dp(2f), fr.bottom - dp(2f))
-                if (id == mathFormat) pill(c, r, theme.accentSoft)
-                tp.color = if (id == mathFormat) theme.accent else theme.inkSoft
-                tp.textSize = sp(Ui.SMALL)
-                text(c, name, r.centerX(), r.centerY())
-                hits += r to { listener?.onMathFormat(id) }
-            }
+            val fr = RectF(right - dp(96f), dp(8f), right, height - dp(8f))
+            segmented(c, fr, listOf("文本", "LaTeX"), fmtPos, strong = false) { i -> listener?.onMathFormat(if (i == 0) "uni" else "tex") }
             right = fr.left - dp(4f)
         }
         val midL = sr.right + dp(6f)
+        tp.textAlign = Paint.Align.CENTER
         if (chip != null) {
             tp.textSize = sp(Ui.TITLE)
             val label = "= $chip"
@@ -346,11 +368,21 @@ class CandidateBar(context: Context, private val prefs: Prefs) : View(context) {
             hits += r to { listener?.onResultChip(chip) }
             return
         }
-        // the calculator line (标准) or how the academic keys work (学术)
+        // the calculator line (标准) or how the academic keys work (学术), until tapped once
+        val key = if (simpleNum) "hint_num" else "hint_sci"
+        if (hintSeen(key)) return
         tp.textAlign = Paint.Align.LEFT
         tp.color = theme.hint; tp.textSize = sp(Ui.SMALL)
         val hint = if (simpleNum) "输入算式后点 = 出结果" else "长按看全部 · ⇥ 跳到下一个空位"
-        if (tp.measureText(hint) < right - midL - dp(8f)) text(c, hint, midL + dp(4f), height / 2f)
+        val tw = tp.measureText(hint)
+        if (tw < right - midL - dp(8f)) {
+            text(c, hint, midL + dp(4f), height / 2f)
+            hits += RectF(midL, 0f, midL + tw + dp(12f), height.toFloat()) to {
+                prefs.sp.edit().putBoolean("seen_$key", true).apply()
+                fade.set(0.6f); fade.animateTo(1f, dur(150))
+                invalidate()
+            }
+        }
     }
 
     private fun drawEdit(c: Canvas, a: Float) {

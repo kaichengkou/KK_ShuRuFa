@@ -15,7 +15,8 @@ data class Output(val label: String, val text: String, val tex: String = text) {
 }
 
 /** NORMAL: solid (letters, digits). FUNC/SOFT: translucent (functions, symbols). ACTION: accent (enter). */
-enum class KeyStyle { NORMAL, FUNC, SOFT, ACTION }
+/** NORMAL solid, FUNC/SOFT translucent ink, ACTION accent, TINT translucent accent (a way to another panel). */
+enum class KeyStyle { NORMAL, FUNC, SOFT, ACTION, TINT }
 
 private fun defaultStyle(fn: String?) = when (fn) {
     null, "space" -> KeyStyle.NORMAL
@@ -212,6 +213,7 @@ class LayoutRepo(
         "soft" -> KeyStyle.SOFT
         "action" -> KeyStyle.ACTION
         "normal" -> KeyStyle.NORMAL
+        "tint" -> KeyStyle.TINT
         else -> null
     }
 

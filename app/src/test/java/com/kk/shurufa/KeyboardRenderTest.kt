@@ -252,9 +252,9 @@ class KeyboardRenderTest {
         panelShot("symbols", sym, fam + 50, noBar = true)
         // 文字编辑
         val edit = com.kk.shurufa.keyboard.EditPanel(ctx, prefs)
-        panelShot("cursor", edit, 270, noBar = true)
+        panelShot("cursor", edit, 220) { it.activeTool = "cursor" }
         edit.selecting = true; edit.hasSelection = true
-        panelShot("cursor_selecting", edit, 270, noBar = true)
+        panelShot("cursor_selecting", edit, 220) { it.activeTool = "cursor" }
         // quick panel
         val q = com.kk.shurufa.keyboard.QuickPanel(ctx, prefs)
         q.tiles = listOf(

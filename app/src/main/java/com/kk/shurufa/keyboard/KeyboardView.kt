@@ -165,10 +165,12 @@ class KeyboardView(context: Context, private val prefs: Prefs) : View(context) {
                 }
                 KeyStyle.FUNC, KeyStyle.SOFT -> keyPaint.color = blend(theme.soft, theme.softPressed, pv)
                 KeyStyle.ACTION -> keyPaint.color = blend(theme.accent, theme.accentPressed, pv)
+                KeyStyle.TINT -> keyPaint.color = blend(theme.accentSoft, theme.accent, pv * 0.3f)
             }
             c.drawRoundRect(kr, r, r, keyPaint)
             val ink = when (style) {
                 KeyStyle.ACTION -> theme.onAccent
+                KeyStyle.TINT -> theme.accent
                 KeyStyle.FUNC -> theme.inkSoft
                 else -> theme.ink
             }
@@ -225,8 +227,9 @@ class KeyboardView(context: Context, private val prefs: Prefs) : View(context) {
                     } else Icons.draw(c, k.fn, cx, cy, dp(22f), iconPaint)
                 }
                 k.label != null || !Icons.all.containsKey(k.fn) -> {
-                    textPaint.textSize = sp(14.5f * prefs.labelScale)
-                    textPaint.typeface = Ui.regular
+                    val tint = k.style == KeyStyle.TINT
+                    textPaint.textSize = sp((if (tint) 15.5f else 14.5f) * prefs.labelScale)
+                    textPaint.typeface = if (tint) Ui.medium else Ui.regular
                     val label = k.label ?: k.fn
                     val maxW = rect.width() - dp(6f)
                     val tw = textPaint.measureText(label)
