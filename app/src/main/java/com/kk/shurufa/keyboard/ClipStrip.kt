@@ -57,6 +57,7 @@ class ClipStrip(context: Context, private val prefs: Prefs) : View(context) {
     fun setCards(list: List<Card>, keepPosition: Boolean) {
         cards = list
         layouts.clear()
+        measureCards()
         if (!keepPosition) { scrollPos = 0f; scroller.forceFinished(true) }
         scrollPos = scrollPos.coerceIn(0f, maxScroll)
         if (prefs.animations && !keepPosition) { appear.set(0f); appear.animateTo(1f, (200 * prefs.animSpeed).toLong()) }
@@ -67,15 +68,45 @@ class ClipStrip(context: Context, private val prefs: Prefs) : View(context) {
     private val pad get() = dp(10f)
     private val gap get() = dp(8f)
     /** Wide enough for a dozen characters a line; on wide screens two and a half cards show. */
+    /** The widest a card gets: room for a dozen characters a line, two and a half cards on screen. */
     private val cardW get() = min(max(dp(132f), (width - pad) / 2.45f), dp(220f))
+    private val minW get() = dp(68f)
+    /** Left edge and width of each card: short clips get narrow cards, long ones wrap at [cardW]. */
+    private var lefts = FloatArray(0)
+    private var widths = FloatArray(0)
     private val step get() = cardW + gap
-    private val maxScroll get() = max(0f, pad * 2 + cards.size * step - gap - width)
+    private val maxScroll get() = if (cards.isEmpty()) 0f else max(0f, lefts.last() + widths.last() + pad - width)
 
-    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) = layouts.clear()
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) { layouts.clear(); measureCards() }
+
+    private fun shown(t: String) = t.replace(Regex("\\s+"), " ").trim().let { if (it.length > prefs.clipMaxChars) it.take(prefs.clipMaxChars) + "…" else it }
+
+    private fun measureCards() {
+        lefts = FloatArray(cards.size); widths = FloatArray(cards.size)
+        if (width == 0) return
+        body.textSize = sp(Ui.BODY + 0.5f)
+        tp.textSize = sp(Ui.CAPTION)
+        val inner = dp(10f)
+        var x = pad
+        cards.forEachIndexed { i, card ->
+            val textW = body.measureText(shown(card.text))
+            val tagW = tp.measureText(listOfNotNull(if (card.starred) "★" else null, card.tag.takeIf { it.isNotEmpty() }).joinToString(" "))
+            widths[i] = (max(textW, tagW) + 2 * inner + dp(2f)).coerceIn(minW, cardW)
+            lefts[i] = x
+            x += widths[i] + gap
+        }
+    }
 
     private fun rectOf(i: Int): RectF {
-        val x = pad + i * step - scrollPos
-        return RectF(x, titleH, x + cardW, height - dp(6f))
+        val x = lefts[i] - scrollPos
+        return RectF(x, titleH, x + widths[i], height - dp(6f))
+    }
+
+    /** The card whose left edge is nearest to scroll position [p]. */
+    private fun nearest(p: Float): Int {
+        var best = 0; var bd = Float.MAX_VALUE
+        for (i in lefts.indices) { val d = abs(lefts[i] - pad - p); if (d < bd) { bd = d; best = i } }
+        return best
     }
 
     override fun onDraw(c: Canvas) {
@@ -130,7 +161,7 @@ class ClipStrip(context: Context, private val prefs: Prefs) : View(context) {
         }
         val w = (r.width() - 2 * inner).toInt().coerceAtLeast(1)
         val lay = layouts.getOrPut(i) {
-            body.textSize = sp(Ui.BODY)
+            body.textSize = sp(Ui.BODY + 0.5f)
             body.color = theme.ink
             val text = card.text.replace(Regex("\\s+"), " ").trim().let { t ->
                 if (t.length > prefs.clipMaxChars) t.take(prefs.clipMaxChars) + "…" else t
@@ -186,8 +217,8 @@ class ClipStrip(context: Context, private val prefs: Prefs) : View(context) {
     private fun snapTarget(v: Float): Float {
         // coasting distance under the friction setting; a stiffer feel stops sooner
         val coast = -v * 0.16f / prefs.clipFriction.coerceAtLeast(0.3f)
-        val idx = ((scrollPos + coast) / step).roundToInt()
-        return (idx * step).coerceIn(0f, maxScroll)
+        if (cards.isEmpty()) return 0f
+        return (lefts[nearest(scrollPos + coast)] - pad).coerceIn(0f, maxScroll)
     }
 
     @SuppressLint("ClickableViewAccessibility")
@@ -199,7 +230,7 @@ class ClipStrip(context: Context, private val prefs: Prefs) : View(context) {
                 scroller.forceFinished(true)
                 downX = e.x; downY = e.y; lastX = e.x; dragging = false; menuFor = -1
                 pressed = hit(e.x, e.y)
-                tickIndex = (scrollPos / step).roundToInt()
+                tickIndex = nearest(scrollPos)
                 if (pressed >= 0) { onFeedback?.invoke("press"); handler.postDelayed(longRunnable, 420) }
                 parent?.requestDisallowInterceptTouchEvent(true)
                 invalidate()
@@ -217,7 +248,7 @@ class ClipStrip(context: Context, private val prefs: Prefs) : View(context) {
                     if (p < 0f) p = scrollPos - (e.x - lastX) * 0.35f
                     if (p > maxScroll) p = scrollPos - (e.x - lastX) * 0.35f
                     scrollPos = p.coerceIn(-dp(60f), maxScroll + dp(60f))
-                    val idx = (scrollPos / step).roundToInt()
+                    val idx = nearest(scrollPos)
                     if (idx != tickIndex && scrollPos in 0f..maxScroll) { tickIndex = idx; onFeedback?.invoke("tick") }
                     invalidate()
                 }

@@ -63,6 +63,8 @@ class KeyboardView(context: Context, private val prefs: Prefs) : View(context) {
     /** Space above the first row and below the last; stacked keyboards use less. */
     var padTopDp = 6f
     var padBottom = true
+    /** Overrides the space swipe setting for this keyboard ("cursor" on the academic panel). */
+    var spaceSwipeOverride: String? = null
     /** How labeled function keys show: "text", "icon" (when an icon exists) or "both". */
     var iconLabels = "text"
 
@@ -481,7 +483,7 @@ class KeyboardView(context: Context, private val prefs: Prefs) : View(context) {
                 } else {
                     handler.removeCallbacks(longPressRunnable)
                     when {
-                        k.fn == "space" && abs(dx) > abs(dy) -> when (prefs.spaceSwipe) {
+                        k.fn == "space" && abs(dx) > abs(dy) -> when (spaceSwipeOverride ?: prefs.spaceSwipe) {
                             "language" -> { mode = Mode.SPACE_SWIPE; move(x, y); return }
                             "cursor" -> { enterCursor(); lastX = downX; move(x, y); return }
                         }

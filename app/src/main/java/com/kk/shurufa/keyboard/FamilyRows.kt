@@ -23,10 +23,14 @@ object FamilyRows {
         )
     }
 
+    /**
+     * Six keys like the other rows. Moving the cursor needs no arrow keys: sliding on space moves
+     * it (the academic panel sets that), so ⇥ and ⌫ get full-size keys.
+     */
     fun academic(): List<Key> = listOf(
         Key(fn = "abc", label = "ABC", width = 1.5f), symbolsKey(),
-        Key(fn = "left", width = 0.8f), Key(fn = "space", width = 2.8f), Key(fn = "right", width = 0.8f),
-        Key(fn = "next_slot", width = 0.8f), Key(fn = "backspace", width = 0.8f), Key(fn = "enter", width = 1.5f),
+        Key(fn = "space", label = "‹  空格  ›", width = 3f),
+        Key(fn = "next_slot", width = 1.5f), Key(fn = "backspace", width = 1.5f), Key(fn = "enter", width = 1.5f),
     )
 
     fun symbols(): List<Key> = listOf(

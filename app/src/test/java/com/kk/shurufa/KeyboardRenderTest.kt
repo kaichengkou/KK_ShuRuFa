@@ -296,10 +296,11 @@ class KeyboardRenderTest {
         clip.addView(strip, LinearLayout.LayoutParams(-1, (ctx.resources.displayMetrics.density * 118).toInt()))
         clip.addView(favs, LinearLayout.LayoutParams(-1, 0, 1f))
         strip.setCards(listOf(
+            com.kk.shurufa.keyboard.ClipStrip.Card("好的", "", false),
+            com.kk.shurufa.keyboard.ClipStrip.Card("482913", "验证码", false),
             com.kk.shurufa.keyboard.ClipStrip.Card("明天下午三点在学校门口见，别忘了带材料。路上小心，到了给我发消息。", "", false),
             com.kk.shurufa.keyboard.ClipStrip.Card("莫斯科市特维尔大街 7 号", "", true),
             com.kk.shurufa.keyboard.ClipStrip.Card("https://github.com/kaichengkou/KK_ShuRuFa", "链接", false),
-            com.kk.shurufa.keyboard.ClipStrip.Card("482913", "验证码", false),
         ), keepPosition = false)
         favs.tags = listOf("", "邮箱", "")
         favs.setItems(listOf("莫斯科市特维尔大街 7 号", "someone@example.com", "Спасибо, увидимся завтра!"))

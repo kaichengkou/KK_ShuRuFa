@@ -13,15 +13,10 @@ import android.view.View
 import com.kk.shurufa.Prefs
 
 /**
- * 文字编辑, built from the same keys as the keyboard (same gaps, radius, solid and soft styles):
- *
- *   行首  ↑   行尾 │ 删除
- *    ←  选择   →  │ 复制
- *   全选  ↓   撤销 │ 剪切
- *                 │ 粘贴
- *
- * Arrows are solid like letter keys, everything else is soft; 选择 turns accent while selecting.
- * Arrows and 删除 repeat while held. 复制 and 剪切 are dimmed while nothing is selected.
+ * 文字编辑: a round direction pad with 选择 in its middle, 行首 · 全选 · 行尾 under it, and
+ * 删除 / 复制 / 剪切 / 粘贴 down the right side. The pad's four sectors and the side keys use the
+ * keyboard's own soft and solid fills. Arrows and 删除 repeat while held (sliding to another
+ * sector keeps going in the new direction). 复制 and 剪切 are dimmed while nothing is selected.
  */
 @SuppressLint("ViewConstructor")
 class EditPanel(context: Context, private val prefs: Prefs) : View(context) {
@@ -52,12 +47,18 @@ class EditPanel(context: Context, private val prefs: Prefs) : View(context) {
     }
 
     private val buttons = listOf(
-        Btn("home", "home", "行首", Kind.SOFT, false), Btn("up", "up", "", Kind.ARROW, true), Btn("end", "end", "行尾", Kind.SOFT, false),
-        Btn("left", "left", "", Kind.ARROW, true), Btn("select", "cursor", "开始选择", Kind.SELECT, false), Btn("right", "right", "", Kind.ARROW, true),
-        Btn("select_all", "select_all", "全选", Kind.SOFT, false), Btn("down", "down", "", Kind.ARROW, true), Btn("undo", "undo", "撤销", Kind.SOFT, false),
+        Btn("home", "home", "行首", Kind.SOFT, false), Btn("select_all", "select_all", "全选", Kind.SOFT, false), Btn("end", "end", "行尾", Kind.SOFT, false),
         Btn("backspace", "backspace", "删除", Kind.SOFT, true), Btn("copy", "copy", "复制", Kind.SOFT, false),
         Btn("cut", "cut", "剪切", Kind.SOFT, false), Btn("paste", "paste", "粘贴", Kind.SOFT, false),
     )
+    // the dial: its four sectors and the center are buttons too, hit by angle and distance
+    private val arrows = mapOf(Dir.UP to Btn("up", "up", "", Kind.ARROW, true), Dir.DOWN to Btn("down", "down", "", Kind.ARROW, true),
+        Dir.LEFT to Btn("left", "left", "", Kind.ARROW, true), Dir.RIGHT to Btn("right", "right", "", Kind.ARROW, true))
+    private val center = Btn("select", "cursor", "选择", Kind.SELECT, false)
+    private var dcx = 0f
+    private var dcy = 0f
+    private var dr = 0f
+    private val innerR get() = dr * 0.4f
     private var pressed: Btn? = null
     private val tmp = RectF()
 
@@ -67,21 +68,24 @@ class EditPanel(context: Context, private val prefs: Prefs) : View(context) {
         // the keyboard's own margins, so the edges line up with the letters
         val side = dp(4f); val top = dp(6f); val bottom = height - dp(prefs.bottomPaddingDp + 2f)
         val g = dp(prefs.keyGapDp)
-        val unit = (width - 2 * side - 3 * g) / 4.4f
-        val colW = floatArrayOf(unit, unit * 1.4f, unit, unit)
-        val x = FloatArray(4); var cx = side
-        for (i in 0 until 4) { x[i] = cx; cx += colW[i] + g }
-        val lh = (bottom - top - 2 * g) / 3
-        for (i in 0 until 9) {
-            val c = i % 3; val r = i / 3
-            val y = top + r * (lh + g)
-            buttons[i].r.set(x[c], y, x[c] + colW[c], y + lh)
+        val colW = (width - 2 * side - g) * 0.24f
+        val leftW = width - 2 * side - g - colW
+        val stripH = ((bottom - top) * 0.25f).coerceIn(dp(38f), dp(52f))
+        val sw = (leftW - 2 * g) / 3
+        for (i in 0 until 3) {
+            val x = side + i * (sw + g)
+            buttons[i].r.set(x, bottom - stripH, x + sw, bottom)
         }
+        val rx = side + leftW + g
         val rh = (bottom - top - 3 * g) / 4
         for (i in 0 until 4) {
             val y = top + i * (rh + g)
-            buttons[9 + i].r.set(x[3], y, x[3] + colW[3], y + rh)
+            buttons[3 + i].r.set(rx, y, rx + colW, y + rh)
         }
+        val areaBottom = bottom - stripH - g
+        dcx = side + leftW / 2
+        dcy = (top + areaBottom) / 2
+        dr = minOf(leftW, areaBottom - top) / 2
     }
 
     private fun enabled(b: Btn) = when (b.id) { "copy", "cut" -> hasSelection || selecting; else -> true }
@@ -91,6 +95,7 @@ class EditPanel(context: Context, private val prefs: Prefs) : View(context) {
         var again = selAnim.running
         val rad = dp(prefs.keyRadiusDp)
         val s = selAnim.value
+        again = drawDial(c, s) || again
         for (b in buttons) {
             val pv = b.press.value
             if (b.press.running) again = true
@@ -108,6 +113,69 @@ class EditPanel(context: Context, private val prefs: Prefs) : View(context) {
             drawLabel(c, b, r, s)
         }
         if (again) postInvalidateOnAnimation()
+    }
+
+    private val sector = android.graphics.Path()
+    private val ring = RectF()
+    private val core = RectF()
+
+    /** Returns true while something on the dial is still animating. */
+    private fun drawDial(c: Canvas, s: Float): Boolean {
+        var again = false
+        bg.color = theme.soft
+        c.drawCircle(dcx, dcy, dr, bg)
+        ring.set(dcx - dr, dcy - dr, dcx + dr, dcy + dr)
+        core.set(dcx - innerR, dcy - innerR, dcx + innerR, dcy + innerR)
+        for ((d, b) in arrows) {
+            val pv = b.press.value
+            if (b.press.running) again = true
+            if (pv > 0.01f) {
+                val start = when (d) { Dir.RIGHT -> -45f; Dir.DOWN -> 45f; Dir.LEFT -> 135f; Dir.UP -> 225f }
+                sector.reset()
+                sector.arcTo(ring, start, 90f, true)
+                sector.arcTo(core, start + 90f, -90f)
+                sector.close()
+                bg.color = theme.accentSoft; bg.alpha = (255 * pv).toInt()
+                c.drawPath(sector, bg)
+                bg.alpha = 255
+            }
+            val mid = (dr + innerR) / 2
+            val (x, y) = when (d) { Dir.UP -> dcx to dcy - mid; Dir.DOWN -> dcx to dcy + mid; Dir.LEFT -> dcx - mid to dcy; Dir.RIGHT -> dcx + mid to dcy }
+            ip.color = blend(blend(theme.inkSoft, theme.accent, s), theme.accent, pv)
+            Icons.draw(c, b.icon, x, y, dp(24f), ip)
+        }
+        // hairlines between the sectors
+        bg.color = theme.divider
+        bg.strokeWidth = dp(1f)
+        for (k in 0 until 4) {
+            val ang = Math.toRadians(45.0 + 90 * k)
+            val cos = Math.cos(ang).toFloat(); val sin = Math.sin(ang).toFloat()
+            c.drawLine(dcx + cos * (innerR + dp(5f)), dcy + sin * (innerR + dp(5f)), dcx + cos * (dr - dp(8f)), dcy + sin * (dr - dp(8f)), bg)
+        }
+        // center: the selection toggle, solid like a key, accent while selecting
+        val pv = center.press.value
+        if (center.press.running) again = true
+        bg.color = blend(blend(theme.surface, theme.accent, s), if (s > 0.5f) theme.accentPressed else theme.surfacePressed, pv)
+        c.drawCircle(dcx, dcy, innerR - dp(3f) - dp(1.5f) * pv, bg)
+        tp.color = blend(theme.ink, theme.onAccent, s)
+        tp.textSize = sp(Ui.BODY); tp.typeface = Ui.medium
+        text(c, if (selecting) "选择中" else "选择", dcx, dcy)
+        tp.typeface = Ui.regular
+        return again
+    }
+
+    private fun dialAt(x: Float, y: Float): Btn? {
+        val dx = x - dcx; val dy = y - dcy
+        val dist = kotlin.math.hypot(dx, dy)
+        if (dist > dr + dp(6f)) return null
+        if (dist < innerR) return center
+        val deg = Math.toDegrees(kotlin.math.atan2(dy.toDouble(), dx.toDouble()))
+        return arrows[when {
+            deg >= -45 && deg < 45 -> Dir.RIGHT
+            deg >= 45 && deg < 135 -> Dir.DOWN
+            deg >= -135 && deg < -45 -> Dir.UP
+            else -> Dir.LEFT
+        }]
     }
 
     private fun drawLabel(c: Canvas, b: Btn, r: RectF, s: Float) {
@@ -183,7 +251,7 @@ class EditPanel(context: Context, private val prefs: Prefs) : View(context) {
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 val half = dp(prefs.keyGapDp) / 2
-                val b = buttons.firstOrNull { RectF(it.r).apply { inset(-half, -half) }.contains(e.x, e.y) } ?: return true
+                val b = dialAt(e.x, e.y) ?: buttons.firstOrNull { RectF(it.r).apply { inset(-half, -half) }.contains(e.x, e.y) } ?: return true
                 pressed = b; repeats = 0
                 b.press.animateTo(1f, dur(70))
                 if (b.repeat) { fire(b); handler.postDelayed(repeatRunnable, 380) }
@@ -192,6 +260,16 @@ class EditPanel(context: Context, private val prefs: Prefs) : View(context) {
             }
             MotionEvent.ACTION_MOVE -> {
                 val b = pressed ?: return true
+                if (b.kind == Kind.ARROW) {
+                    // sliding round the dial turns the repeat to the new direction
+                    val n = dialAt(e.x, e.y)
+                    if (n != null && n !== b && n.kind == Kind.ARROW) {
+                        b.press.animateTo(0f, dur(120)); n.press.animateTo(1f, dur(70))
+                        pressed = n; fire(n); invalidate()
+                    } else if (n == null) { handler.removeCallbacks(repeatRunnable); pressed = null; release(b) }
+                    return true
+                }
+                if (b === center) return true
                 if (!RectF(b.r).apply { inset(-dp(16f), -dp(16f)) }.contains(e.x, e.y)) {
                     handler.removeCallbacks(repeatRunnable); pressed = null; release(b)
                 }

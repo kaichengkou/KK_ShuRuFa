@@ -60,7 +60,7 @@ class LayoutTest {
         assertEquals("\\begin{pmatrix} ‸ & \\\\ & \\end{pmatrix}", m.tabs[4].rows[0][0].main!!.tex)
         // every label fits the academic key font: no tab has an empty key
         m.tabs.flatMap { it.rows.flatten() }.forEach { assertTrue(it.main!!.label.isNotBlank()) }
-        assertEquals(8, com.kk.shurufa.keyboard.FamilyRows.academic().size)
+        assertEquals(6, com.kk.shurufa.keyboard.FamilyRows.academic().size)
     }
 
     @Test fun symbols() {

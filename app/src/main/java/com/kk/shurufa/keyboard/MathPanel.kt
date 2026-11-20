@@ -23,7 +23,7 @@ class MathPanel(context: Context, private val prefs: Prefs, newKeyboard: () -> K
     val tabs = TabStrip(context, prefs)
     val func = newKeyboard().apply { heightScale = ROW; padTopDp = 2f; padBottom = false }
     val pad = newKeyboard().apply { heightScale = ROW; padTopDp = 2f; padBottom = false }
-    val bottom = newKeyboard().apply { padTopDp = prefs.keyGapDp; setRows(listOf(FamilyRows.academic())) }
+    val bottom = newKeyboard().apply { padTopDp = prefs.keyGapDp; spaceSwipeOverride = "cursor"; setRows(listOf(FamilyRows.academic())) }
     private var shownPad: MathLayout? = null
 
     private fun dp(v: Float) = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, resources.displayMetrics)
