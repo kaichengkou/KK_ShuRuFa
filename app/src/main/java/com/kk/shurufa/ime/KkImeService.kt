@@ -100,7 +100,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
     private var translateResult = ""
     private var translatedFor = ""
     private val translateRun = Runnable { runTranslate() }
-    private val sinkOn get() = emojiSearch || translateMode
+    private val sinkOn get() = emojiSearch || translateMode || aiCustomMode
 
     private lateinit var voicePanel: LinearLayout
     private lateinit var voiceView: com.kk.shurufa.keyboard.VoicePanel
@@ -412,7 +412,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
 
     override fun onFinishInputView(finishingInput: Boolean) {
         super.onFinishInputView(finishingInput)
-        emojiSearch = false; translateMode = false; searchQuery.setLength(0)
+        emojiSearch = false; translateMode = false; aiCustomMode = false; searchQuery.setLength(0)
         if (::translateStrip.isInitialized) translateStrip.visibility = View.GONE
         voice?.cancel()
         if (RimeEngine.ready) RimeBridge.clearComposition()
@@ -497,7 +497,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
 
     private fun showPanel(p: Panel) {
         if (p != Panel.LETTERS && sinkOn) {
-            emojiSearch = false; translateMode = false; searchQuery.setLength(0)
+            emojiSearch = false; translateMode = false; aiCustomMode = false; searchQuery.setLength(0)
             if (::translateStrip.isInitialized) translateStrip.visibility = View.GONE
         }
         if (p != Panel.VOICE && panel == Panel.VOICE) voice?.cancel()
@@ -552,7 +552,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
             }
         }
         bar.expanded = p == Panel.CANDIDATES
-        bar.activeTool = if (emojiSearch) "emoji" else if (translateMode) "translate" else toolFor(p)
+        bar.activeTool = if (emojiSearch) "emoji" else if (translateMode) "translate" else if (aiCustomMode) "ai" else toolFor(p)
         syncBar()
         animateHeight(oldTotal, if (noBar) 0 else barH)
     }
@@ -597,6 +597,11 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
             isZh && RimeEngine.state == RimeEngine.State.PREPARING && panel == Panel.LETTERS -> bar.showMessage("正在准备中文词库…")
             isZh && RimeEngine.state == RimeEngine.State.FAILED -> bar.showMessage("中文引擎启动失败：${RimeEngine.error ?: "未知错误"}")
             translateMode && !composing && panel == Panel.LETTERS -> { bar.showToolbar(); syncTranslate() }
+            aiCustomMode && !composing && panel == Panel.LETTERS -> {
+                val q = searchQuery.toString()
+                bar.showPredictions(if (q.isBlank()) emptyList() else listOf("▶ 执行"),
+                    if (q.isBlank()) "AI 指令：输入你想怎么改（如“改成适合发朋友圈的语气”）" else "AI 指令：$q")
+            }
             emojiSearch && !composing && panel == Panel.LETTERS -> {
                 val q = searchQuery.toString().trim()
                 val drawable = emojiGroups.flatMapTo(HashSet()) { it.second }
@@ -1251,6 +1256,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
                 syncBar()
             }
             "enter" -> if (composing) rimeKey(RimeBridge.XK_Return)
+            else if (aiCustomMode) runAiCustom()
             else if (translateMode) { if (translateResult.isNotEmpty() && translatedFor == searchQuery.toString()) commitTranslation() }
             else if (emojiSearch) { searchResults.firstOrNull()?.let { onEmoji(it) } }
             else { predictions = emptyList(); performEnter(); updateAutoCap(); syncBar() }
@@ -1529,6 +1535,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
     }
 
     override fun onCandidate(index: Int) {
+        if (index < 0 && aiCustomMode && !composing) { runAiCustom(); return }
         if (index < 0 && emojiSearch && !composing) {
             searchResults.getOrNull(-1 - index)?.let { onEmoji(it) }
             return
@@ -1786,16 +1793,18 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
                 if (translateResult.isNotEmpty() && !translateFromSelection) { searchQuery.setLength(0); searchQuery.append(translateResult) }
                 translatedFor = ""; syncTranslate()
             }
-            onPick = { which, lang ->
-                if (which == "from") translateFrom = lang else { translateTo = lang; prefs.put(Prefs.TRANSLATE_TARGET, lang) }
+            onPick = { which, value ->
+                when (which) {
+                    "from" -> translateFrom = value
+                    "engine" -> prefs.put(Prefs.TRANSLATE_ENGINE, value)
+                    else -> { translateTo = value; prefs.put(Prefs.TRANSLATE_TARGET, value) }
+                }
                 translatedFor = ""; syncTranslate()
             }
             onEngine = {
-                val engines = listOf("mlkit") + com.kk.shurufa.online.Llm.configuredIds(prefs)
-                val next = engines[(engines.indexOf(translateSvc.engine) + 1) % engines.size]
-                prefs.put(Prefs.TRANSLATE_ENGINE, next)
-                if (engines.size == 1) Toast.makeText(this@KkImeService, "在 设置 → 联网功能 里添加 AI 服务后，可以用它来翻译", Toast.LENGTH_SHORT).show()
-                translatedFor = ""; syncTranslate()
+                if (com.kk.shurufa.online.Llm.targets(prefs).isEmpty())
+                    Toast.makeText(this@KkImeService, "在 设置 → 联网功能 里添加 AI 服务后，可以用 AI 翻译", Toast.LENGTH_SHORT).show()
+                syncTranslate()
             }
         }
     }
@@ -1845,6 +1854,8 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
         st.fromName = if (translateFrom == "auto") (if (q.isBlank()) "自动" else "自动·" + com.kk.shurufa.online.TranslateService.name(src)) else com.kk.shurufa.online.TranslateService.name(translateFrom)
         st.toName = com.kk.shurufa.online.TranslateService.name(translateTo)
         st.engineName = translateSvc.engineName()
+        st.engine = translateSvc.engine
+        st.engines = listOf("mlkit" to "离线（ML Kit）") + com.kk.shurufa.online.Llm.targets(prefs)
         st.source = q; st.sourceIsSelection = translateFromSelection
         val fresh = translatedFor == q
         if (!fresh) { st.result = ""; st.busy = q.isNotBlank() }
@@ -1897,27 +1908,29 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
                         (getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(android.content.ClipData.newPlainText("AI", aiResult))
                         Toast.makeText(this@KkImeService, "已复制", Toast.LENGTH_SHORT).show()
                     }
-                    "provider" -> {
-                        val ids = com.kk.shurufa.online.Llm.configuredIds(prefs)
-                        if (ids.size > 1) { prefs.put(Prefs.AI_PROVIDER, ids[(ids.indexOf(aiProvider()) + 1) % ids.size]); syncAiHeader() }
-                        else openSettings("online")
-                    }
+                    "custom" -> startAiCustom()
+                    else -> if (b.startsWith("target:")) { prefs.put(Prefs.AI_PROVIDER, b.removePrefix("target:")); syncAiHeader() }
                 }
             }
         }
     }
 
-    private fun aiProvider(): String {
-        val ids = com.kk.shurufa.online.Llm.configuredIds(prefs)
-        return prefs.aiProvider.takeIf { it in ids } ?: ids.firstOrNull() ?: prefs.aiProvider
-    }
+    /** The service and model AI 改写 uses ("id|model"), or null when none is set up. */
+    private fun aiTarget(): String? = com.kk.shurufa.online.Llm.resolve(prefs, prefs.aiProvider)
 
     private fun syncAiHeader() {
-        val id = aiProvider()
-        aiPanel.needsSetup = com.kk.shurufa.online.Llm.configuredIds(prefs).isEmpty()
-        aiPanel.provider = com.kk.shurufa.online.Llm.provider(id).title + " · " + com.kk.shurufa.online.Llm.model(prefs, id).removePrefix("claude-")
+        val t = aiTarget()
+        aiPanel.needsSetup = t == null
+        aiPanel.targets = com.kk.shurufa.online.Llm.targets(prefs)
+        aiPanel.currentTarget = t.orEmpty()
+        aiPanel.provider = if (t == null) "" else com.kk.shurufa.online.Llm.provider(com.kk.shurufa.online.Llm.targetId(t)).title + " · " +
+            com.kk.shurufa.online.Llm.targetModel(prefs, t).removePrefix("claude-").removePrefix("models/")
+        aiPanel.actions = com.kk.shurufa.online.AiWriter.ACTIONS.map { com.kk.shurufa.keyboard.AiPanel.Act(it.id, it.title, it.group) } +
+            aiCustomRecent().mapIndexed { i, txt -> com.kk.shurufa.keyboard.AiPanel.Act("custom:$i", if (txt.length > 8) txt.take(8) + "…" else txt, "自定义") }
         aiPanel.invalidate()
     }
+
+    private fun aiCustomRecent(): List<String> = prefs.sp.getString("ai_custom_recent", "")!!.split('\n').filter { it.isNotBlank() }
 
     /** The text the AI works on: the selection, or else everything in the field. */
     private fun aiSource(): String {
@@ -1940,17 +1953,46 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
     }
 
     private fun runAi(id: String) {
-        val action = com.kk.shurufa.online.AiWriter.ACTIONS.firstOrNull { it.id == id } ?: return
+        val action = if (id.startsWith("custom:")) aiCustomRecent().getOrNull(id.removePrefix("custom:").toIntOrNull() ?: -1)?.let { com.kk.shurufa.online.AiWriter.custom(it) }
+            else com.kk.shurufa.online.AiWriter.ACTIONS.firstOrNull { it.id == id }
+        runAiAction(action ?: return)
+    }
+
+    // ---- 自定义: the keyboard types the instruction, the bar shows it, ▶ or ↵ runs it ----
+    private var aiCustomMode = false
+
+    private fun startAiCustom() {
+        aiCustomMode = true
+        emojiSearch = false; translateMode = false
+        searchQuery.setLength(0)
+        showPanel(Panel.LETTERS)
+        aiCustomMode = true
+        syncBar()
+    }
+
+    private fun runAiCustom() {
+        val instr = searchQuery.toString().trim()
+        aiCustomMode = false
+        searchQuery.setLength(0)
+        if (instr.isEmpty()) { showPanel(Panel.AI); return }
+        val recent = (listOf(instr) + aiCustomRecent().filter { it != instr }).take(5)
+        prefs.sp.edit().putString("ai_custom_recent", recent.joinToString("\n")).apply()
+        showPanel(Panel.AI)
+        runAiAction(com.kk.shurufa.online.AiWriter.custom(instr))
+    }
+
+    private fun runAiAction(action: com.kk.shurufa.online.AiWriter.Action) {
+        val id = action.id
         val src = aiSource()
         if (src.isBlank()) { aiPanel.status = "输入框里还没有文字"; aiPanel.setResult("", null); return }
         val run = ++aiRun
         aiAction = action
         aiPanel.running = id; aiPanel.doneTitle = action.title; aiPanel.status = ""
         aiPanel.setResult("", null)
-        val provider = aiProvider()
+        val target = aiTarget() ?: run { aiPanel.running = null; aiPanel.status = "先在设置里添加 AI 服务"; return }
         Thread {
             val r = runCatching {
-                com.kk.shurufa.online.Llm.complete(prefs, provider, com.kk.shurufa.online.AiWriter.SYSTEM, com.kk.shurufa.online.AiWriter.prompt(action, src),
+                com.kk.shurufa.online.Llm.completeTarget(prefs, target, com.kk.shurufa.online.AiWriter.SYSTEM, com.kk.shurufa.online.AiWriter.prompt(action, src),
                     onText = { t -> handler.post { if (run == aiRun) aiPanel.setResult(t, null) } }, cancelled = { run != aiRun })
             }
             handler.post {
@@ -2184,6 +2226,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
 
     override fun onDismissSuggestions() {
         if (emojiSearch) { stopEmojiSearch(); return }
+        if (aiCustomMode) { aiCustomMode = false; searchQuery.setLength(0); showPanel(Panel.AI); return }
         if (translateMode) { stopTranslate(); return }
         predictions = emptyList()
         pendingClip = null

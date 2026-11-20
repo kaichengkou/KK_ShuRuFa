@@ -96,7 +96,7 @@ class Prefs(context: Context) {
     val translateTarget get() = s(TRANSLATE_TARGET, "en")
     val translateWifiOnly get() = b(TRANSLATE_WIFI, false)
     /** "mlkit" or a provider id (see online.Llm). */
-    val translateEngine get() = s(TRANSLATE_ENGINE, "mlkit")
+    val translateEngine get() = s(TRANSLATE_ENGINE, "auto")
     val aiProvider get() = s(AI_PROVIDER, "claude")
     val voiceZhModel get() = s(VOICE_ZH_MODEL, "sensevoice")
     val voicePunct get() = s(VOICE_PUNCT, "full")

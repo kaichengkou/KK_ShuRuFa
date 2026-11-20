@@ -62,19 +62,79 @@ object Llm {
     fun configured(prefs: Prefs, id: String) = key(prefs, id).isNotEmpty() && model(prefs, id).isNotEmpty() && (id == "claude" || base(prefs, id).isNotEmpty())
     fun configuredIds(prefs: Prefs) = PROVIDERS.map { it.id }.filter { configured(prefs, it) }
 
+    // ---- models the user enabled, and "targets" (a service with one of its models) ----
+
+    /** Models switched on for [id] (选中启用); the default model when none are. */
+    fun enabledModels(prefs: Prefs, id: String): List<String> =
+        prefs.sp.getString("llm_${id}_enabled", "")!!.split('\n').filter { it.isNotBlank() }.ifEmpty { listOf(model(prefs, id)).filter { it.isNotBlank() } }
+    fun setEnabledModels(prefs: Prefs, id: String, models: List<String>) = prefs.put("llm_${id}_enabled", models.distinct().joinToString("\n"))
+    /** The last fetched model list, kept so it can be searched without fetching again. */
+    fun cachedModels(prefs: Prefs, id: String): List<String> = prefs.sp.getString("llm_${id}_models", "")!!.split('\n').filter { it.isNotBlank() }
+    fun setCachedModels(prefs: Prefs, id: String, models: List<String>) = prefs.put("llm_${id}_models", models.joinToString("\n"))
+
+    /** Every service and model that can be picked: ("id|model", "Service · model"). */
+    fun targets(prefs: Prefs): List<Pair<String, String>> = configuredIds(prefs).flatMap { id ->
+        enabledModels(prefs, id).map { m -> "$id|$m" to "${provider(id).title} · $m" }
+    }
+    fun targetId(t: String) = t.substringBefore('|')
+    fun targetModel(prefs: Prefs, t: String) = t.substringAfter('|', "").ifEmpty { model(prefs, targetId(t)) }
+    fun targetLabel(prefs: Prefs, t: String) = "${provider(targetId(t)).title} · ${targetModel(prefs, t)}"
+    /** [t] if it is still usable, else the first usable target (or null). */
+    fun resolve(prefs: Prefs, t: String?): String? {
+        val all = targets(prefs).map { it.first }
+        if (t != null && (t in all || (!t.contains('|') && configured(prefs, t)))) return if (t.contains('|')) t else "$t|${model(prefs, t)}"
+        return all.firstOrNull()
+    }
+    fun completeTarget(prefs: Prefs, target: String, system: String, user: String, onText: (String) -> Unit = {}, cancelled: () -> Boolean = { false }): String =
+        complete(prefs, targetId(target), system, user, onText, cancelled, targetModel(prefs, target))
+
     /**
      * Runs one request, calling [onText] with the text so far as it streams. Blocking; call
      * it off the main thread. Errors are thrown as [IllegalStateException] with a message for
      * the user. [cancelled] is polled while streaming.
      */
-    fun complete(prefs: Prefs, id: String, system: String, user: String, onText: (String) -> Unit = {}, cancelled: () -> Boolean = { false }): String {
+    fun complete(prefs: Prefs, id: String, system: String, user: String, onText: (String) -> Unit = {}, cancelled: () -> Boolean = { false }, model: String? = null): String {
         if (!configured(prefs, id)) error("还没有设置 ${provider(id).title} 的 API Key")
-        return when (protocol(prefs, id)) {
-            // Claude itself, or a service that speaks the Anthropic format at its own address
-            "claude" -> claude(key(prefs, id), model(prefs, id), system, user, onText, cancelled, if (id == "claude") null else base(prefs, id))
-            "gemini" -> gemini(base(prefs, id), key(prefs, id), model(prefs, id), system, user, onText, cancelled)
-            else -> openAi(base(prefs, id), key(prefs, id), model(prefs, id), system, user, onText, cancelled)
-        }.trim()
+        val m0 = model?.takeIf { it.isNotBlank() } ?: model(prefs, id)
+        // a busy free tier (503, 429) is common: wait and try again, then a lighter Gemini model
+        val models = if (protocol(prefs, id) == "gemini") listOf(m0) + GEMINI_FALLBACK.filter { it != m0 } else listOf(m0)
+        var last: HttpError? = null
+        for (m in models) {
+            for (attempt in 0..2) {
+                if (cancelled()) return ""
+                var streamed = false
+                try {
+                    return when (protocol(prefs, id)) {
+                        // Claude itself, or a service that speaks the Anthropic format at its own address
+                        "claude" -> claude(key(prefs, id), m, system, user, { streamed = true; onText(it) }, cancelled, if (id == "claude") null else base(prefs, id))
+                        "gemini" -> gemini(base(prefs, id), key(prefs, id), m, system, user, { streamed = true; onText(it) }, cancelled)
+                        else -> openAi(base(prefs, id), key(prefs, id), m, system, user, { streamed = true; onText(it) }, cancelled)
+                    }.trim()
+                } catch (e: HttpError) {
+                    last = e
+                    if (!e.retryable || streamed) error(e.userMessage())
+                    if (attempt < 2) Thread.sleep(if (attempt == 0) 1200L else 2800L)
+                }
+            }
+        }
+        error(last?.userMessage() ?: "出错了")
+    }
+
+    /** Lighter Gemini models to fall back on when the chosen one is overloaded. */
+    private val GEMINI_FALLBACK = listOf("gemini-2.5-flash-lite", "gemini-2.0-flash")
+
+    /** An HTTP failure, with the service's own explanation. */
+    class HttpError(val code: Int, val detail: String) : Exception("HTTP $code: $detail") {
+        val retryable get() = code == 429 || code == 500 || code in 502..504
+        fun userMessage() = when (code) {
+            401, 403 -> "API Key 无效或没有权限"
+            402 -> "账户余额不足"
+            404 -> "找不到这个模型或地址：$detail"
+            429 -> "请求太频繁或免费额度用完了，稍后再试（$detail）"
+            503 -> "服务繁忙，模型暂时过载，重试几次仍不行（$detail）"
+            in 500..599 -> "服务暂时不可用（$code：$detail）"
+            else -> "出错了（$code）：$detail"
+        }
     }
 
     /**
@@ -188,16 +248,11 @@ object Llm {
         val code = try { c.responseCode } catch (e: java.io.IOException) { error("连不上服务器，检查一下网络或地址") }
         if (code !in 200..299) {
             val msg = runCatching { c.errorStream?.bufferedReader()?.readText().orEmpty() }.getOrDefault("")
-            val detail = runCatching { JSONObject(msg).optJSONObject("error")?.optString("message") }.getOrNull()?.takeIf { it.isNotBlank() } ?: msg.take(120)
+            // {"error":{"message":…}} or, from Gemini's stream endpoint, [{"error":…}]
+            val obj = runCatching { if (msg.trimStart().startsWith("[")) JSONArray(msg).getJSONObject(0) else JSONObject(msg) }.getOrNull()
+            val detail = obj?.optJSONObject("error")?.optString("message")?.takeIf { it.isNotBlank() } ?: msg.take(120)
             c.disconnect()
-            error(when (code) {
-                401, 403 -> "API Key 无效或没有权限"
-                402 -> "账户余额不足"
-                404 -> "找不到这个模型或地址：$detail"
-                429 -> "请求太频繁或额度用完了，稍后再试"
-                in 500..599 -> "服务暂时不可用（$code）"
-                else -> "出错了（$code）：$detail"
-            })
+            throw HttpError(code, detail.take(160))
         }
         return c
     }

@@ -31,12 +31,16 @@ class AiPanel(context: Context, private val prefs: Prefs) : View(context) {
     var actions: List<Act> = emptyList()
         set(v) { field = v; invalidate() }
     var onAction: ((String) -> Unit)? = null
-    var onButton: ((String) -> Unit)? = null     // "replace" "insert" "copy" "retry" "provider" "setup"
+    var onButton: ((String) -> Unit)? = null     // "replace" "insert" "copy" "retry" "setup" "custom" "target:<id>"
     var onFeedback: (() -> Unit)? = null
 
     var source = ""
     var sourceLabel = ""
     var provider = ""
+    /** Services and models to pick from (header chip): (target, label). */
+    var targets: List<Pair<String, String>> = emptyList()
+    var currentTarget = ""
+    private var picking = false
     var needsSetup = false
     var running: String? = null
     var doneTitle = ""
@@ -68,13 +72,13 @@ class AiPanel(context: Context, private val prefs: Prefs) : View(context) {
         var y = dp(8f)
         // header: source preview, provider chip
         tp.textSize = sp(Ui.CAPTION + 0.5f)
-        val pw = tp.measureText(provider) + dp(22f)
+        val pw = tp.measureText("$provider ▾") + dp(22f)
         val pr = RectF(width - pad - pw, y, width - pad, y + dp(24f))
         if (!needsSetup) {
             bg.color = if (pressed == "provider") theme.softPressed else theme.soft
             c.drawRoundRect(pr, pr.height() / 2, pr.height() / 2, bg)
             tp.textAlign = Paint.Align.CENTER; tp.color = theme.inkSoft
-            text(c, provider, pr.centerX(), pr.centerY())
+            text(c, "$provider ▾", pr.centerX(), pr.centerY())
             hits += pr to "provider"
         }
         tp.textAlign = Paint.Align.LEFT; tp.textSize = sp(Ui.SMALL); tp.typeface = Ui.medium; tp.color = theme.hint
@@ -94,9 +98,31 @@ class AiPanel(context: Context, private val prefs: Prefs) : View(context) {
             hits += r to "setup"
             return
         }
-        // groups of chips, flowing
         val ch = dp(34f); val gap = dp(6f)
         var x = pad
+        if (picking) {
+            // 选择模型: every enabled service and model
+            tp.textAlign = Paint.Align.LEFT; tp.textSize = sp(Ui.CAPTION); tp.color = theme.hint
+            c.drawText("选择用来改写的模型（在设置里启用更多）", pad + dp(2f), y + tp.textSize, tp)
+            y += dp(20f)
+            for ((t, label) in targets) {
+                tp.textSize = sp(Ui.SMALL)
+                val w = tp.measureText(label) + dp(24f)
+                if (x + w > width - pad) { x = pad; y += ch + gap }
+                if (y + ch > height - dp(6f)) break
+                val r = RectF(x, y, x + w, y + ch)
+                val on = t == currentTarget
+                bg.color = if (on) theme.accentSoft else if (pressed == "target:$t") theme.softPressed else theme.soft
+                c.drawRoundRect(r, ch / 2, ch / 2, bg)
+                tp.textAlign = Paint.Align.CENTER; tp.color = if (on) theme.accent else theme.ink; tp.typeface = if (on) Ui.medium else Ui.regular
+                text(c, label, r.centerX(), r.centerY())
+                tp.typeface = Ui.regular
+                hits += r to "target:$t"
+                x += w + gap
+            }
+            return
+        }
+        // groups of chips, flowing
         if (running != null) { if (!pulse.running) { pulse.set(0f); pulse.animateTo(1f, 1000) }; postInvalidateOnAnimation() }
         var lastGroup = ""
         for (a in actions) {
@@ -127,6 +153,20 @@ class AiPanel(context: Context, private val prefs: Prefs) : View(context) {
             text(c, a.title, r.centerX(), r.centerY())
             hits += r to "act:${a.id}"
             x += w + gap
+        }
+        // ＋ 自定义: type your own instruction
+        run {
+            tp.textSize = sp(Ui.BODY)
+            val label = "＋ 自定义"
+            val w = tp.measureText(label) + dp(24f)
+            if (x + w > width - pad) { x = pad; y += ch + gap }
+            val r = RectF(x, y, x + w, y + ch)
+            bg.color = if (pressed == "custom") theme.accentPressed else theme.accent
+            c.drawRoundRect(r, ch / 2, ch / 2, bg)
+            tp.textAlign = Paint.Align.CENTER; tp.color = theme.onAccent; tp.typeface = Ui.medium
+            text(c, label, r.centerX(), r.centerY())
+            tp.typeface = Ui.regular
+            hits += r to "custom"
         }
         y += ch + dp(10f)
         // the result card
@@ -235,7 +275,9 @@ class AiPanel(context: Context, private val prefs: Prefs) : View(context) {
                 pressed = null
                 when {
                     p == null -> {}
-                    p in setOf("replace", "insert", "copy", "retry", "provider", "setup") -> onButton?.invoke(p)
+                    p == "provider" -> { picking = !picking; invalidate() }
+                    p.startsWith("target:") -> { picking = false; onButton?.invoke(p) }
+                    p in setOf("replace", "insert", "copy", "retry", "setup", "custom") -> onButton?.invoke(p)
                     running == null -> onAction?.invoke(p)
                 }
                 invalidate()

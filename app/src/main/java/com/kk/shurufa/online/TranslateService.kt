@@ -33,8 +33,13 @@ class TranslateService(private val prefs: Prefs) {
         }
     }
 
-    val engine get() = prefs.translateEngine.takeIf { it == "mlkit" || Llm.configured(prefs, it) } ?: "mlkit"
-    fun engineName(e: String = engine) = if (e == "mlkit") "离线" else Llm.provider(e).title
+    /** "mlkit", or an AI target ("id|model"). By default AI is preferred when one is set up. */
+    val engine: String get() {
+        val e = prefs.translateEngine
+        if (e == "mlkit") return "mlkit"
+        return Llm.resolve(prefs, if (e == "auto") null else e) ?: "mlkit"
+    }
+    fun engineName(e: String = engine) = if (e == "mlkit") "离线" else Llm.provider(Llm.targetId(e)).title
 
     /** Starts a translation; an older one still running is ignored when it finishes. */
     fun translate(text: String, from: String, to: String, onPartial: (String) -> Unit = {}, done: (Result<String>) -> Unit) {
@@ -48,9 +53,7 @@ class TranslateService(private val prefs: Prefs) {
         }
         Thread {
             val r = runCatching {
-                Llm.complete(prefs, e,
-                    "You are a translation engine inside a phone keyboard. Translate the user's text from ${ENGLISH_NAMES[src] ?: src} " +
-                        "into ${ENGLISH_NAMES[to] ?: to}. Reply with the translation only: no quotes, notes or explanations. Keep line breaks, emoji, names and numbers.",
+                Llm.completeTarget(prefs, e, AiWriter.translateSystem(ENGLISH_NAMES[src] ?: src, ENGLISH_NAMES[to] ?: to),
                     text, onText = { t -> if (gen == generation) main.post { if (gen == generation) onPartial(t) } }, cancelled = { gen != generation })
             }
             main.post { if (gen == generation) done(r) }

@@ -39,7 +39,10 @@ class TranslateStrip(context: Context, private val prefs: Prefs) : View(context)
     var busy = false
     /** Languages offered by the picker: (id, name). */
     var languages: List<Pair<String, String>> = emptyList()
-    private var picking: String? = null   // "from" | "to"
+    /** Engines offered by the engine chip: (engine, name); the current one is [engine]. */
+    var engines: List<Pair<String, String>> = emptyList()
+    var engine = "mlkit"
+    private var picking: String? = null   // "from" | "to" | "engine"
 
     fun refresh() { srcLayout = null; resLayout = null; invalidate() }
 
@@ -84,11 +87,11 @@ class TranslateStrip(context: Context, private val prefs: Prefs) : View(context)
         ip.color = theme.inkSoft; Icons.draw(c, "close", cl.centerX(), cl.centerY(), dp(15f), ip)
         hits += cl to "close"
         tp.textSize = sp(Ui.CAPTION + 0.5f)
-        val ew = tp.measureText(engineName) + dp(18f)
+        val ew = tp.measureText("$engineName ▾") + dp(18f)
         val er = RectF(cl.left - dp(4f) - ew, hy + dp(4f), cl.left - dp(4f), hy + hh - dp(4f))
-        bg.color = if (pressed == "engine") theme.softPressed else theme.soft
+        bg.color = if (picking == "engine") theme.accentSoft else if (pressed == "engine") theme.softPressed else theme.soft
         c.drawRoundRect(er, er.height() / 2, er.height() / 2, bg)
-        tp.color = theme.inkSoft; text(c, engineName, er.centerX(), er.centerY())
+        tp.color = if (picking == "engine") theme.accent else theme.inkSoft; text(c, "$engineName ▾", er.centerX(), er.centerY())
         hits += er to "engine"
         val inner = RectF(card.left + dp(12f), hy + hh + dp(4f), card.right - dp(12f), card.bottom - dp(8f))
         if (picking != null) { drawPicker(c, inner); return }
@@ -129,8 +132,8 @@ class TranslateStrip(context: Context, private val prefs: Prefs) : View(context)
     }
 
     private fun drawPicker(c: Canvas, area: RectF) {
-        val list = if (picking == "from") listOf("auto" to "自动识别") + languages else languages
-        val cur = if (picking == "from") from else to
+        val list = when (picking) { "from" -> listOf("auto" to "自动识别") + languages; "engine" -> engines; else -> languages }
+        val cur = when (picking) { "from" -> from; "engine" -> engine; else -> to }
         tp.textSize = sp(Ui.SMALL)
         val h = dp(30f); val gap = dp(6f)
         var x = area.left; var y = area.top + dp(2f)
@@ -187,7 +190,7 @@ class TranslateStrip(context: Context, private val prefs: Prefs) : View(context)
                     null -> {}
                     "from", "to" -> picking = if (picking == p) null else p
                     "swap" -> { picking = null; onSwap?.invoke() }
-                    "engine" -> onEngine?.invoke()
+                    "engine" -> { picking = if (picking == "engine") null else "engine"; onEngine?.invoke() }
                     "close" -> onClose?.invoke()
                     "commit" -> onCommit?.invoke()
                     else -> if (p.startsWith("lang:")) { val w = picking ?: "to"; picking = null; onPick?.invoke(w, p.removePrefix("lang:")) }

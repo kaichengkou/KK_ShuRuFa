@@ -919,72 +919,121 @@ private fun VoicePage(prefs: Prefs) {
 
 // ---- online --------------------------------------------------------------------------------
 
+/**
+ * A list to pick from in a dialog, with a search box when it is long. [checked] makes it a
+ * multi-select (选中启用); otherwise tapping a row picks it and closes.
+ */
 @Composable
-private fun ProviderCard(prefs: Prefs, p: com.kk.shurufa.online.Llm.Provider) {
+private fun PickerDialog(title: String, items: List<Pair<String, String>>, selected: String?, checked: Set<String>? = null,
+                         onPick: (String) -> Unit, onToggle: ((String, Boolean) -> Unit)? = null, onClose: () -> Unit) {
+    var q by remember { mutableStateOf("") }
+    val shown = items.filter { q.isBlank() || it.second.contains(q, ignoreCase = true) || it.first.contains(q, ignoreCase = true) }
+    AlertDialog(
+        onDismissRequest = onClose,
+        title = { Text(title) },
+        text = {
+            Column {
+                if (items.size > 8) OutlinedTextField(q, { q = it }, Modifier.fillMaxWidth().padding(bottom = 6.dp), singleLine = true,
+                    placeholder = { Text("搜索模型") })
+                if (shown.isEmpty()) Text("没有匹配的项", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                androidx.compose.foundation.lazy.LazyColumn(Modifier.heightIn(max = 380.dp)) {
+                    items(shown.size) { i ->
+                        val (id, label) = shown[i]
+                        Row(Modifier.fillMaxWidth().clickable {
+                            if (checked != null) onToggle?.invoke(id, id !in checked) else { onPick(id); onClose() }
+                        }.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            if (checked != null) androidx.compose.material3.Checkbox(checked = id in checked, onCheckedChange = { onToggle?.invoke(id, it) })
+                            else RadioButton(selected = id == selected, onClick = { onPick(id); onClose() })
+                            Text(label, Modifier.padding(start = 4.dp))
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onClose) { Text(if (checked != null) "完成" else "关闭") } },
+    )
+}
+
+/** A setting row whose value opens a [PickerDialog]. */
+@Composable
+private fun PickRow(title: String, value: String, onClick: () -> Unit) {
+    Row(Modifier.fillMaxWidth().clickable { onClick() }.padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(title, Modifier.weight(1f))
+        Text("$value ▾", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Medium)
+    }
+}
+
+@Composable
+private fun ProviderCard(prefs: Prefs, p: com.kk.shurufa.online.Llm.Provider, onChanged: () -> Unit) {
+    val L = com.kk.shurufa.online.Llm
     val main = remember { android.os.Handler(android.os.Looper.getMainLooper()) }
-    var open by remember { mutableStateOf(com.kk.shurufa.online.Llm.configured(prefs, p.id)) }
-    var key by remember { mutableStateOf(com.kk.shurufa.online.Llm.key(prefs, p.id)) }
-    var model by remember { mutableStateOf(prefs.sp.getString("llm_${p.id}_model", "")!!) }
+    var open by remember { mutableStateOf(L.configured(prefs, p.id)) }
+    var key by remember { mutableStateOf(L.key(prefs, p.id)) }
     var base by remember { mutableStateOf(prefs.sp.getString("llm_${p.id}_base", "")!!) }
     var shown by remember { mutableStateOf(false) }
     var test by remember { mutableStateOf("") }
+    var tick by remember { mutableIntStateOf(0) }
+    val enabled = remember(tick) { L.enabledModels(prefs, p.id) }
+    val current = remember(tick) { L.model(prefs, p.id) }
     Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
         Row(Modifier.fillMaxWidth().clickable { open = !open }.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(p.title, fontWeight = FontWeight.Medium)
-                Text(if (com.kk.shurufa.online.Llm.configured(prefs, p.id)) "已设置 · " + com.kk.shurufa.online.Llm.model(prefs, p.id) else p.site,
+                Text(if (L.configured(prefs, p.id)) "已启用 ${enabled.size} 个模型 · 默认 $current" else p.site,
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Text(if (open) "收起" else "设置", color = MaterialTheme.colorScheme.primary)
         }
         if (!open) return@Column
-        OutlinedTextField(key, { key = it.trim(); prefs.put("llm_${p.id}_key", key) }, Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        OutlinedTextField(key, { key = it.trim(); prefs.put("llm_${p.id}_key", key); onChanged() }, Modifier.fillMaxWidth().padding(vertical = 4.dp),
             label = { Text("API Key") }, singleLine = true, placeholder = { Text(p.keyHint) },
             visualTransformation = if (shown) androidx.compose.ui.text.input.VisualTransformation.None else androidx.compose.ui.text.input.PasswordVisualTransformation(),
             trailingIcon = { TextButton(onClick = { shown = !shown }) { Text(if (shown) "隐藏" else "显示") } })
-        OutlinedTextField(model, { model = it.trim(); prefs.put("llm_${p.id}_model", model) }, Modifier.fillMaxWidth().padding(vertical = 4.dp),
-            label = { Text("模型") }, singleLine = true, placeholder = { Text(p.defaultModel.ifEmpty { "模型名称" }) })
-        // 获取可用模型: the service's own list, to pick from
-        var models by remember { mutableStateOf<List<String>?>(null) }
+        if (p.id == "custom") Choice(prefs, "llm_custom_protocol", "接口格式", L.PROTOCOLS)
+        if (p.id != "claude") OutlinedTextField(base, { base = it.trim(); prefs.put("llm_${p.id}_base", base); onChanged() }, Modifier.fillMaxWidth().padding(vertical = 4.dp),
+            label = { Text("接口地址") }, singleLine = true, placeholder = { Text(p.defaultBase.ifEmpty { "https://…/v1" }) })
+        // models: the default one (tap for the list of enabled ones), and 管理模型 to enable more
+        var pickDefault by remember { mutableStateOf(false) }
+        var manage by remember { mutableStateOf(false) }
         var fetching by remember { mutableStateOf("") }
+        PickRow("默认模型", current.ifEmpty { "未选择" }) { pickDefault = true }
         Row(verticalAlignment = Alignment.CenterVertically) {
             TextButton(enabled = key.isNotBlank() && fetching != "…", onClick = {
                 fetching = "…"
                 Thread {
-                    val r = runCatching { com.kk.shurufa.online.Llm.listModels(prefs, p.id) }
-                    main.post { r.onSuccess { models = it; fetching = if (it.isEmpty()) "没有可用模型" else "" }.onFailure { fetching = it.message ?: "获取失败" } }
+                    val r = runCatching { L.listModels(prefs, p.id) }
+                    main.post {
+                        r.onSuccess { L.setCachedModels(prefs, p.id, it); fetching = ""; tick++; manage = true }
+                         .onFailure { fetching = it.message ?: "获取失败" }
+                    }
                 }.start()
             }) { Text(if (fetching == "…") "正在获取…" else "获取可用模型") }
-            if (fetching.isNotEmpty() && fetching != "…") Text(fetching, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            TextButton(onClick = { manage = true }) { Text("管理启用的模型") }
         }
-        models?.let { list ->
-            AlertDialog(
-                onDismissRequest = { models = null },
-                title = { Text("${p.title} 可用模型") },
-                text = {
-                    androidx.compose.foundation.lazy.LazyColumn(Modifier.heightIn(max = 420.dp)) {
-                        items(list.size) { i ->
-                            val m = list[i]
-                            Row(Modifier.fillMaxWidth().clickable { model = m; prefs.put("llm_${p.id}_model", m); models = null }.padding(vertical = 10.dp),
-                                verticalAlignment = Alignment.CenterVertically) {
-                                RadioButton(selected = m == model, onClick = { model = m; prefs.put("llm_${p.id}_model", m); models = null })
-                                Text(m, Modifier.padding(start = 4.dp))
-                            }
-                        }
-                    }
-                },
-                confirmButton = { TextButton(onClick = { models = null }) { Text("关闭") } },
-            )
+        if (fetching.isNotEmpty() && fetching != "…") Text(fetching, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+        if (pickDefault) PickerDialog("${p.title} 默认模型", enabled.map { it to it }, current, onPick = { m ->
+            prefs.put("llm_${p.id}_model", m); tick++; onChanged() }, onClose = { pickDefault = false })
+        if (manage) {
+            val all = (L.cachedModels(prefs, p.id) + L.MODEL_SUGGESTIONS[p.id].orEmpty() + enabled).distinct()
+            var checked by remember { mutableStateOf(enabled.toSet()) }
+            PickerDialog("选中启用（${p.title}）", all.map { it to it }, null, checked, onPick = {}, onToggle = { m, on ->
+                checked = if (on) checked + m else checked - m
+                L.setEnabledModels(prefs, p.id, all.filter { it in checked })
+                if (on && checked.size == 1) prefs.put("llm_${p.id}_model", m)
+                if (!on && m == L.model(prefs, p.id)) checked.firstOrNull()?.let { prefs.put("llm_${p.id}_model", it) }
+                tick++; onChanged()
+            }, onClose = { manage = false })
         }
-        val suggestions = com.kk.shurufa.online.Llm.MODEL_SUGGESTIONS[p.id].orEmpty()
-        if (suggestions.isNotEmpty()) Row(Modifier.padding(vertical = 2.dp)) {
-            for (m in suggestions) {
-                TextButton(onClick = { model = m; prefs.put("llm_${p.id}_model", m) }) { Text(m.removePrefix("claude-"), style = MaterialTheme.typography.bodySmall) }
-            }
+        var manual by remember { mutableStateOf("") }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(manual, { manual = it.trim() }, Modifier.weight(1f).padding(vertical = 4.dp), singleLine = true,
+                placeholder = { Text("手动添加模型名") })
+            TextButton(enabled = manual.isNotBlank(), onClick = {
+                L.setEnabledModels(prefs, p.id, enabled + manual)
+                if (enabled.isEmpty() || L.model(prefs, p.id).isBlank()) prefs.put("llm_${p.id}_model", manual)
+                manual = ""; tick++; onChanged()
+            }) { Text("添加") }
         }
-        if (p.id == "custom") Choice(prefs, "llm_custom_protocol", "接口格式", com.kk.shurufa.online.Llm.PROTOCOLS)
-        if (p.id != "claude") OutlinedTextField(base, { base = it.trim(); prefs.put("llm_${p.id}_base", base) }, Modifier.fillMaxWidth().padding(vertical = 4.dp),
-            label = { Text("接口地址") }, singleLine = true, placeholder = { Text(p.defaultBase.ifEmpty { "https://…/v1" }) })
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 4.dp)) {
             Text(test, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Button(enabled = key.isNotBlank(), onClick = {
@@ -992,7 +1041,7 @@ private fun ProviderCard(prefs: Prefs, p: com.kk.shurufa.online.Llm.Provider) {
                 Thread {
                     val r = runCatching {
                         val a = com.kk.shurufa.online.AiWriter.ACTIONS.first { it.id == "fix" }
-                        com.kk.shurufa.online.Llm.complete(prefs, p.id, com.kk.shurufa.online.AiWriter.SYSTEM, com.kk.shurufa.online.AiWriter.prompt(a, "今天天气真好，我门去公园吧"))
+                        L.complete(prefs, p.id, com.kk.shurufa.online.AiWriter.SYSTEM, com.kk.shurufa.online.AiWriter.prompt(a, "今天天气真好，我门去公园吧"))
                     }
                     main.post { test = r.fold({ "可以用：$it" }, { it.message ?: "失败" }) }
                 }.start()
@@ -1007,18 +1056,26 @@ private fun OnlinePage(prefs: Prefs) {
     val main = remember { android.os.Handler(android.os.Looper.getMainLooper()) }
     var tick by remember { mutableIntStateOf(0) }
     Group("AI 服务") {
-        Note("填哪家的 Key 就能用哪家，可以都填；AI 改写和翻译各自选用一个。Key 只保存在这台手机上，只有你点了操作，文字才会发出去。")
-        for (p in com.kk.shurufa.online.Llm.PROVIDERS) ProviderCard(prefs, p)
-        TextButton(onClick = { tick++ }) { Text("刷新可选服务") }
+        Note("填哪家的 Key 就能用哪家，可以都填。每家可以“获取可用模型”，搜索并勾选启用；启用的模型都能在改写和翻译里选。Key 只保存在这台手机上，只有你点了操作，文字才会发出去。")
+        for (p in com.kk.shurufa.online.Llm.PROVIDERS) ProviderCard(prefs, p) { tick++ }
     }
-    val configured = remember(tick) { com.kk.shurufa.online.Llm.configuredIds(prefs) }
+    val targets = remember(tick) { com.kk.shurufa.online.Llm.targets(prefs) }
+    var pickAi by remember { mutableStateOf(false) }
+    var pickTr by remember { mutableStateOf(false) }
     Group("AI 改写") {
-        if (configured.isEmpty()) Note("先在上面设置至少一个 AI 服务。")
-        else Choice(prefs, Prefs.AI_PROVIDER, "使用", configured.map { it to com.kk.shurufa.online.Llm.provider(it).title }, configured.first())
-        Note("工具栏的 ✦：润色、纠错、正式、口语、精简、扩写，翻译成英文 / 俄语 / 中文，帮我回复、婉拒。面板右上角可以临时切换服务。")
+        if (targets.isEmpty()) Note("先在上面设置至少一个 AI 服务。")
+        else {
+            val cur = com.kk.shurufa.online.Llm.resolve(prefs, prefs.aiProvider)
+            PickRow("使用", cur?.let { com.kk.shurufa.online.Llm.targetLabel(prefs, it) } ?: "未选择") { pickAi = true }
+            if (pickAi) PickerDialog("AI 改写使用", targets, cur, onPick = { prefs.put(Prefs.AI_PROVIDER, it); tick++ }, onClose = { pickAi = false })
+        }
+        Note("工具栏的 ✦：润色、纠错、正式、口语、精简、扩写，翻译成英文 / 俄语 / 中文，以及“＋ 自定义”——直接打字说要怎么改，最近用过的指令会留在面板上。面板右上角可以临时换模型。")
     }
     Group("翻译") {
-        Choice(prefs, Prefs.TRANSLATE_ENGINE, "翻译引擎", listOf("mlkit" to "离线（ML Kit）") + configured.map { it to com.kk.shurufa.online.Llm.provider(it).title })
+        val engines = listOf("auto" to "自动（有 AI 用 AI，否则离线）", "mlkit" to "离线（ML Kit）") + targets
+        val curE = prefs.translateEngine
+        PickRow("翻译引擎", engines.firstOrNull { it.first == curE }?.second ?: com.kk.shurufa.online.Llm.targetLabel(prefs, curE)) { pickTr = true }
+        if (pickTr) PickerDialog("翻译引擎", engines, curE, onPick = { prefs.put(Prefs.TRANSLATE_ENGINE, it); tick++ }, onClose = { pickTr = false })
         Choice(prefs, Prefs.TRANSLATE_TARGET, "默认翻译成", com.kk.shurufa.online.TranslateService.LANGS.take(3))
         Toggle(prefs, Prefs.TRANSLATE_WIFI, "离线模型只在 Wi-Fi 下载", "每种语言约 30 MB，下载一次后离线翻译", false)
         Note("点工具栏的翻译按钮，键盘上方会展开翻译栏：可以选语言、⇄ 对调、切换引擎；选中文字时直接翻译并可替换。AI 翻译更地道，离线翻译不联网也能用。")
