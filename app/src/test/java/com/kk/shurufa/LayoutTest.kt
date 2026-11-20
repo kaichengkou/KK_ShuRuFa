@@ -49,12 +49,17 @@ class LayoutTest {
     @Test fun mathLayout() {
         val m = repo.math()
         assertEquals(listOf("basic", "func", "calc", "rel", "lin", "greek", "phys"), m.tabs.map { it.id })
-        m.tabs.forEach { t -> t.rows.forEach { r -> assertEquals(6, r.size) } }
-        val frac = m.tabs[0].rows[2][0]
+        m.tabs.forEach { t -> assertEquals(4, t.rows.size); t.rows.forEach { r -> assertEquals(t.id, 4, r.size) } }
+        assertEquals(4, m.pad.size); m.pad.forEach { assertEquals(4, it.size) }
+        assertEquals(listOf("7", "8", "9", "÷"), m.pad[0].map { it.main!!.label })
+        val frac = m.tabs[0].rows[1][0]
         assertEquals("(‸)/()", frac.main!!.text)
         assertEquals("\\frac{‸}{}", frac.main!!.tex)
-        val integral = m.tabs[2].rows[0][4]
+        val integral = m.tabs[2].rows[1][0]
         assertEquals("\\int_{‸}^{} \\,dx", integral.flicks[Dir.UP]!!.tex)
+        assertEquals("\\begin{pmatrix} ‸ & \\\\ & \\end{pmatrix}", m.tabs[4].rows[0][0].main!!.tex)
+        // every label fits the academic key font: no tab has an empty key
+        m.tabs.flatMap { it.rows.flatten() }.forEach { assertTrue(it.main!!.label.isNotBlank()) }
         assertEquals(8, com.kk.shurufa.keyboard.FamilyRows.academic().size)
     }
 

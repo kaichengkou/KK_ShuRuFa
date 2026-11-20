@@ -26,6 +26,8 @@ interface KeyboardListener {
     fun onFunction(key: Key)
     /** Options for the long-press popup. */
     fun longOptions(key: Key): List<Output>
+    /** Long-press options in rows: the first row sits right above the key. */
+    fun longOptionRows(key: Key): List<List<Output>> = listOf(longOptions(key))
     fun onOption(key: Key, option: Output)
     fun onCursorMove(dx: Int, dy: Int)
     fun onCursorMode(active: Boolean)
@@ -58,6 +60,9 @@ class KeyboardView(context: Context, private val prefs: Prefs) : View(context) {
     var lockOn = false
     /** Height of one key, as a fraction of the configured height (smaller grids use less). */
     var heightScale = 1f
+    /** Space above the first row and below the last; stacked keyboards use less. */
+    var padTopDp = 6f
+    var padBottom = true
     /** How labeled function keys show: "text", "icon" (when an icon exists) or "both". */
     var iconLabels = "text"
 
@@ -86,20 +91,20 @@ class KeyboardView(context: Context, private val prefs: Prefs) : View(context) {
         requestLayout()
         if (changed && prefs.animations && isAttachedToWindow) {
             alpha = 0.6f
-            animate().alpha(1f).setDuration(dur(150)).start()
+            animate().alpha(1f).setDuration(dur(150)).withLayer().start()
         }
         invalidate()
     }
 
-    private val keyH get() = dp(prefs.keyHeightDp.toFloat() * heightScale * if (mathMode) 0.8f else 1f)
+    private val keyH get() = dp(prefs.keyHeightDp.toFloat() * heightScale)
     private val gap get() = dp(prefs.keyGapDp)
-    private val padTop get() = dp(6f)
-    private val padBottom get() = dp(prefs.bottomPaddingDp.toFloat() + 2f)
+    private val padTop get() = dp(padTopDp)
+    private val padBottomPx get() = if (padBottom) dp(prefs.bottomPaddingDp.toFloat() + 2f) else 0f
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val w = MeasureSpec.getSize(widthMeasureSpec)
         val n = rows.size
-        val natural = (padTop + padBottom + n * keyH + max(0, n - 1) * gap).roundToInt()
+        val natural = (padTop + padBottomPx + n * keyH + max(0, n - 1) * gap).roundToInt()
         val h = if (MeasureSpec.getMode(heightMeasureSpec) == MeasureSpec.EXACTLY) MeasureSpec.getSize(heightMeasureSpec) else natural
         setMeasuredDimension(w, h)
     }
@@ -109,8 +114,9 @@ class KeyboardView(context: Context, private val prefs: Prefs) : View(context) {
         val side = dp(4f)
         val avail = width - 2 * side
         val n = rows.size
-        // stretch keys when the parent gives more height than the natural size
-        val kh = if (n > 0) max(keyH, (height - padTop - padBottom - (n - 1) * gap) / n) else keyH
+        // keys fill the height the parent gives: taller than natural stretches them, shorter (five
+        // number rows in the letters' height) makes them a little shorter instead of cutting a row off
+        val kh = if (n > 0 && height > 0) ((height - padTop - padBottomPx - (n - 1) * gap) / n).coerceAtLeast(dp(24f)) else keyH
         var y = padTop
         for (row in rows) {
             val total = row.sumOf { it.width.toDouble() }.toFloat()
@@ -134,6 +140,8 @@ class KeyboardView(context: Context, private val prefs: Prefs) : View(context) {
     private val spaceSwap = Tween(1f)
     private var bsArmed: String? = null   // "clear" | "undo" while the backspace gesture is armed
 
+    private val tmpRect = RectF()
+
     override fun onDraw(c: Canvas) {
         c.drawColor(theme.background)
         val r = dp(prefs.keyRadiusDp)
@@ -146,7 +154,7 @@ class KeyboardView(context: Context, private val prefs: Prefs) : View(context) {
             val armed = k.fn == "backspace" && bsArmed != null
             val style = if (armed) KeyStyle.ACTION else k.style
             val inset = dp(1.6f) * pv
-            val kr = RectF(rect.left + inset, rect.top + inset, rect.right - inset, rect.bottom - inset)
+            val kr = tmpRect.apply { set(rect.left + inset, rect.top + inset, rect.right - inset, rect.bottom - inset) }
             when (style) {
                 KeyStyle.NORMAL -> {
                     if (prefs.keyBorders) {
@@ -197,9 +205,9 @@ class KeyboardView(context: Context, private val prefs: Prefs) : View(context) {
                 k.fn == "space" -> drawSpace(c, rect, k.label)
                 k.fn == "backspace" && bsArmed != null -> {
                     textPaint.textSize = sp(14f)
-                    textPaint.typeface = Typeface.DEFAULT_BOLD
+                    textPaint.typeface = Ui.medium
                     drawCentered(c, if (bsArmed == "clear") "清空" else "撤销", cx, cy, textPaint)
-                    textPaint.typeface = Typeface.DEFAULT
+                    textPaint.typeface = Ui.regular
                 }
                 k.fn == "shift" -> {
                     val st = listener?.shiftState() ?: 0
@@ -212,13 +220,13 @@ class KeyboardView(context: Context, private val prefs: Prefs) : View(context) {
                     if (iconLabels == "both") {
                         Icons.draw(c, k.fn, cx, cy - dp(7f), dp(20f), iconPaint)
                         textPaint.textSize = sp(10.5f)
-                        textPaint.typeface = Typeface.DEFAULT
+                        textPaint.typeface = Ui.regular
                         drawCentered(c, k.label, cx, cy + dp(13f), textPaint)
                     } else Icons.draw(c, k.fn, cx, cy, dp(22f), iconPaint)
                 }
                 k.label != null || !Icons.all.containsKey(k.fn) -> {
                     textPaint.textSize = sp(14.5f * prefs.labelScale)
-                    textPaint.typeface = Typeface.DEFAULT
+                    textPaint.typeface = Ui.regular
                     val label = k.label ?: k.fn
                     val maxW = rect.width() - dp(6f)
                     val tw = textPaint.measureText(label)
@@ -231,11 +239,13 @@ class KeyboardView(context: Context, private val prefs: Prefs) : View(context) {
         }
         val label = displayLabel(k)
         val single = label.codePointCount(0, label.length) <= 1
-        textPaint.typeface = if (mathMode) Typeface.SERIF else Typeface.DEFAULT
+        textPaint.typeface = Ui.regular
         textPaint.textSize = sp(
             when {
-                mathMode && label.length > 3 -> 12.5f
-                mathMode -> 17f
+                mathMode && label.length > 4 -> 12.5f
+                mathMode && label.length > 2 -> 15f
+                mathMode && label.singleOrNull()?.isDigit() == true -> 21f
+                mathMode -> 18f
                 single -> 22f
                 else -> 16f
             } * prefs.labelScale
@@ -244,15 +254,15 @@ class KeyboardView(context: Context, private val prefs: Prefs) : View(context) {
         val tw = textPaint.measureText(label)
         if (tw > maxW) textPaint.textSize *= maxW / tw
         if (!mathMode && single && label.isNotEmpty() && !label[0].isLetterOrDigit()) drawByBounds(c, label, cx, cy, textPaint)
-        else drawCentered(c, label, cx, cy + if (mathMode || !prefs.showHints) 0f else dp(2f), textPaint)
+        else drawCentered(c, label, cx, cy + if (!prefs.showHints || k.flicks[Dir.UP] == null) 0f else dp(2f), textPaint)
 
         if (!prefs.showHints) return
         hintPaint.color = if (k.style == KeyStyle.ACTION) theme.onAccent else theme.hint
         hintPaint.alpha = (255 * labelAlpha).toInt()
-        hintPaint.textSize = sp((if (mathMode) 9.5f else 10.5f) * prefs.hintScale)
-        hintPaint.typeface = if (mathMode) Typeface.SERIF else Typeface.DEFAULT
+        hintPaint.textSize = sp(Ui.CAPTION * 1.05f * prefs.hintScale)
+        hintPaint.typeface = Ui.regular
         val fl = k.flicks
-        if (mathMode || prefs.showAllHints) {
+        if (prefs.showAllHints) {
             fl[Dir.UP]?.let { drawCentered(c, hintLabel(it.label), cx, rect.top + hintPaint.textSize * 0.75f, hintPaint) }
             fl[Dir.DOWN]?.let { drawCentered(c, hintLabel(it.label), cx, rect.bottom - hintPaint.textSize * 0.45f, hintPaint) }
             fl[Dir.LEFT]?.let { drawCentered(c, hintLabel(it.label), rect.left + hintPaint.measureText(it.label) / 2 + dp(3f), cy, hintPaint) }
@@ -260,8 +270,18 @@ class KeyboardView(context: Context, private val prefs: Prefs) : View(context) {
         } else {
             fl[Dir.UP]?.let {
                 val h = hintLabel(it.label)
-                val w = hintPaint.measureText(h)
-                drawCentered(c, h, rect.right - w / 2 - dp(6f), rect.top + dp(4f) + hintPaint.textSize * 0.5f, hintPaint)
+                if (h.codePointCount(0, h.length) == 1 && !h[0].isLetterOrDigit()) {
+                    // punctuation: center the ink, not the glyph box (、 and ， sit low in theirs)
+                    hintPaint.getTextBounds(h, 0, h.length, bounds)
+                    val ink = max(bounds.width().toFloat(), hintPaint.textSize * 0.45f)
+                    drawByBounds(c, h, rect.right - ink / 2 - dp(6f), rect.top + dp(4f) + hintPaint.textSize * 0.5f, hintPaint)
+                } else {
+                    val w = hintPaint.measureText(h)
+                    if (w > rect.width() * 0.5f) {
+                        // too long for the corner (arcsin over sin): a dot says there is more
+                        c.drawCircle(rect.right - dp(7f), rect.top + dp(7f), dp(1.8f), hintPaint)
+                    } else drawCentered(c, h, rect.right - w / 2 - dp(6f), rect.top + dp(4f) + hintPaint.textSize * 0.5f, hintPaint)
+                }
             }
         }
     }
@@ -279,7 +299,7 @@ class KeyboardView(context: Context, private val prefs: Prefs) : View(context) {
     private fun drawSpace(c: Canvas, rect: RectF, fixedLabel: String?) {
         textPaint.textSize = sp(13f * prefs.labelScale)
         textPaint.color = theme.hint
-        textPaint.typeface = Typeface.DEFAULT
+        textPaint.typeface = Ui.regular
         c.save()
         c.clipRect(rect)
         if (cursorMode) {
@@ -500,13 +520,13 @@ class KeyboardView(context: Context, private val prefs: Prefs) : View(context) {
                 handler.postDelayed(repeatRunnable, prefs.backspaceRepeatMs.toLong())
             }
             else -> {
-                val opts = listener?.longOptions(k).orEmpty()
+                val opts = listener?.longOptionRows(k).orEmpty().filter { it.isNotEmpty() }
                 if (opts.isEmpty()) return
                 mode = Mode.POPUP
                 overlay?.hidePreview()
                 val o = overlayOffset()
                 val r = RectF(activeRect).apply { offset(o.first, o.second) }
-                overlay?.showOptions(r, keyH, opts, lastX + o.first, mathMode)
+                overlay?.showOptionRows(r, keyH, opts, lastX + o.first)
                 listener?.onFeedback("popup")
             }
         }

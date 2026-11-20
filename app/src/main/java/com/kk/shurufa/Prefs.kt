@@ -84,6 +84,7 @@ class Prefs(context: Context) {
     val topRowScripts get() = b(TOP_ROW_SCRIPTS, false)
     val clipMaxChars get() = i(CLIP_MAX_CHARS, 80)
     val clipFriction get() = f(CLIP_FRICTION, 1f)
+    val clipColumns get() = i(CLIP_COLUMNS, 2)
 
     // Symbols
     val autoPair get() = b(AUTO_PAIR, true)
@@ -170,6 +171,7 @@ class Prefs(context: Context) {
         const val TOP_ROW_SCRIPTS = "top_row_scripts"
         const val CLIP_MAX_CHARS = "clip_max_chars"
         const val CLIP_FRICTION = "clip_friction"
+        const val CLIP_COLUMNS = "clip_columns"
         const val ACCENT = "accent"
         const val AUTO_PAIR = "auto_pair"
         const val SYMBOL_RETURN = "symbol_return"

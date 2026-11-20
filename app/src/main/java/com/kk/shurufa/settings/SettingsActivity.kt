@@ -524,6 +524,7 @@ private fun ClipboardPage(prefs: Prefs) {
         IntSlider(prefs, Prefs.CLIP_KEEP, "保留的条数", 40, 10..200, "条", "收藏的条目不算在内")
     }
     Group("面板") {
+        IntSlider(prefs, Prefs.CLIP_COLUMNS, "收藏的列数", 2, 2..4, "列", "列越多，一屏看到的越多，每条显示得越短")
         IntSlider(prefs, Prefs.CLIP_MAX_CHARS, "每条最多显示", 80, 20..300, "字", "更长的内容截断显示，粘贴时仍是完整的")
         FloatSlider(prefs, Prefs.CLIP_FRICTION, "滑动阻尼", 1f, 0.4f..2.5f, "×", "越大越“沉”，甩一下滑过的条数越少")
         Note("最近：横向滑动，停下时总有一条对齐左边。收藏：竖向滑动。点按粘贴，其余操作在长按菜单里。拖动工具栏或顶部横条可以拉高面板。")

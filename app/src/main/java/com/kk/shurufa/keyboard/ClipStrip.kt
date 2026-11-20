@@ -83,11 +83,11 @@ class ClipStrip(context: Context, private val prefs: Prefs) : View(context) {
         if (scroller.computeScrollOffset()) { scrollPos = scroller.currX.toFloat(); postInvalidateOnAnimation() }
         val a = appear.value
         if (appear.running) postInvalidateOnAnimation()
-        tp.textAlign = Paint.Align.LEFT; tp.textSize = sp(11f); tp.color = theme.hint; tp.isFakeBoldText = true
+        tp.textAlign = Paint.Align.LEFT; tp.textSize = sp(Ui.SMALL); tp.color = theme.hint; tp.typeface = Ui.medium
         c.drawText(if (cards.isEmpty()) title else "$title ${cards.size}", pad + dp(2f), dp(14f), tp)
-        tp.isFakeBoldText = false
+        tp.typeface = Ui.regular
         if (cards.isEmpty()) {
-            tp.textAlign = Paint.Align.CENTER; tp.textSize = sp(12.5f)
+            tp.textAlign = Paint.Align.CENTER; tp.textSize = sp(Ui.BODY)
             val fm = tp.fontMetrics
             c.drawText(emptyText, width / 2f, (titleH + height) / 2f - (fm.ascent + fm.descent) / 2, tp)
             return
@@ -116,7 +116,7 @@ class ClipStrip(context: Context, private val prefs: Prefs) : View(context) {
 
     private fun drawCard(c: Canvas, i: Int, r: RectF, a: Float) {
         val card = cards[i]
-        val rad = dp(14f)
+        val rad = Ui.radiusLarge(dp(prefs.keyRadiusDp), dp(1f))
         bg.color = if (i == pressed) theme.surfacePressed else theme.surface
         bg.alpha = (255 * a).toInt()
         c.drawRoundRect(r, rad, rad, bg)
@@ -124,13 +124,13 @@ class ClipStrip(context: Context, private val prefs: Prefs) : View(context) {
         var top = r.top + inner
         val tag = listOfNotNull(if (card.starred) "★" else null, card.tag.takeIf { it.isNotEmpty() }).joinToString(" ")
         if (tag.isNotEmpty()) {
-            tp.textAlign = Paint.Align.LEFT; tp.textSize = sp(10f); tp.color = theme.accent; tp.alpha = (255 * a).toInt()
-            c.drawText(tag, r.left + inner, top + sp(9f), tp)
-            top += sp(14f)
+            tp.textAlign = Paint.Align.LEFT; tp.textSize = sp(Ui.CAPTION); tp.color = theme.accent; tp.alpha = (255 * a).toInt()
+            c.drawText(tag, r.left + inner, top + sp(Ui.CAPTION), tp)
+            top += sp(Ui.BODY)
         }
         val w = (r.width() - 2 * inner).toInt().coerceAtLeast(1)
         val lay = layouts.getOrPut(i) {
-            body.textSize = sp(14f)
+            body.textSize = sp(Ui.BODY)
             body.color = theme.ink
             val text = card.text.replace(Regex("\\s+"), " ").trim().let { t ->
                 if (t.length > prefs.clipMaxChars) t.take(prefs.clipMaxChars) + "…" else t

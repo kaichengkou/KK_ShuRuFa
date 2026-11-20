@@ -64,9 +64,6 @@ class CandidateBar(context: Context, private val prefs: Prefs) : View(context) {
     private var editCaret = 0
     private var editGaps: Set<Int> = emptySet()
     private val editPos = mutableListOf<Float>()   // x of each caret position 0..len
-    private val tabPillX = Tween(0f)
-    private val tabPillW = Tween(0f)
-    private var lastTab = ""
     var mode = Mode.TOOLBAR
         private set
 
@@ -161,7 +158,7 @@ class CandidateBar(context: Context, private val prefs: Prefs) : View(context) {
         val a = fade.value
         if (fade.running) postInvalidateOnAnimation()
         if (scroller.computeScrollOffset()) { scrollX0 = scroller.currX.toFloat(); postInvalidateOnAnimation() }
-        tp.typeface = Typeface.DEFAULT
+        tp.typeface = Ui.regular
         when (mode) {
             Mode.TOOLBAR -> drawToolbar(c, a)
             Mode.CANDIDATES, Mode.PREDICTIONS -> drawCandidates(c, a)
@@ -169,7 +166,7 @@ class CandidateBar(context: Context, private val prefs: Prefs) : View(context) {
             Mode.MATH -> drawMath(c, a)
             Mode.EDIT -> drawEdit(c, a)
             Mode.MESSAGE -> {
-                tp.color = theme.hint; tp.alpha = (255 * a).toInt(); tp.textSize = sp(13f); tp.textAlign = Paint.Align.CENTER
+                tp.color = theme.hint; tp.alpha = (255 * a).toInt(); tp.textSize = sp(Ui.BODY); tp.textAlign = Paint.Align.CENTER
                 text(c, message, width / 2f, height / 2f)
             }
         }
@@ -210,7 +207,7 @@ class CandidateBar(context: Context, private val prefs: Prefs) : View(context) {
         preeditRect = RectF()
         if (composing && preedit.isNotEmpty()) {
             tp.textAlign = Paint.Align.LEFT
-            tp.textSize = sp(11.5f)
+            tp.textSize = sp(Ui.SMALL)
             tp.color = theme.hint
             tp.alpha = (255 * a).toInt()
             val x0 = dp(12f)
@@ -223,7 +220,7 @@ class CandidateBar(context: Context, private val prefs: Prefs) : View(context) {
                 c.drawRect(cx - dp(0.8f), dp(3f), cx + dp(0.8f), dp(15f), bg)
             }
         } else if (!composing && predictionLabel.isNotEmpty()) {
-            tp.textAlign = Paint.Align.LEFT; tp.textSize = sp(10.5f); tp.color = theme.accent; tp.alpha = (255 * a).toInt()
+            tp.textAlign = Paint.Align.LEFT; tp.textSize = sp(Ui.CAPTION); tp.color = theme.accent; tp.alpha = (255 * a).toInt()
             c.drawText(predictionLabel, dp(12f), dp(12f), tp)
         }
         c.save()
@@ -233,7 +230,7 @@ class CandidateBar(context: Context, private val prefs: Prefs) : View(context) {
         val top = if (composing || predictionLabel.isNotEmpty()) dp(15f) else dp(4f)
         tp.textAlign = Paint.Align.LEFT
         val size = sp(18f * prefs.candidateScale)
-        val noteSize = sp(9f)
+        val noteSize = sp(Ui.CAPTION)
         candidates.forEachIndexed { i, s ->
             tp.textSize = size
             val note = notes.getOrNull(i).orEmpty()
@@ -244,7 +241,7 @@ class CandidateBar(context: Context, private val prefs: Prefs) : View(context) {
             val rect = RectF(x, top, x + cw, height.toFloat() - dp(3f))
             candRects += RectF(rect).apply { offset(scrollX0, 0f) }
             if (rect.right > 0 && rect.left < width) {
-                if (i == pressedCand) { bg.color = theme.soft; c.drawRoundRect(rect, dp(10f), dp(10f), bg) }
+                if (i == pressedCand) { bg.color = theme.soft; c.drawRoundRect(rect, dp(prefs.keyRadiusDp), dp(prefs.keyRadiusDp), bg) }
                 tp.textSize = size
                 tp.color = if (i == 0 && composing) theme.accent else theme.ink
                 tp.alpha = (255 * a).toInt()
@@ -276,9 +273,9 @@ class CandidateBar(context: Context, private val prefs: Prefs) : View(context) {
         val label = clipText.replace('\n', ' ').trim()
         val tag = "粘贴" + if (clipKind.isNotEmpty()) " · $clipKind" else ""
         tp.textAlign = Paint.Align.LEFT
-        tp.textSize = sp(12f)
+        tp.textSize = sp(Ui.SMALL)
         val tagW = tp.measureText(tag)
-        tp.textSize = sp(14f)
+        tp.textSize = sp(Ui.BODY)
         val avail = width - 2 * closeW
         val maxText = avail - tagW - dp(40f)
         var shown = label
@@ -292,10 +289,10 @@ class CandidateBar(context: Context, private val prefs: Prefs) : View(context) {
         val left = (width - w) / 2
         val r = RectF(left, dp(7f), left + w, height - dp(7f))
         pill(c, r, theme.accentSoft)
-        tp.color = theme.accent; tp.alpha = (255 * a).toInt(); tp.textSize = sp(12f); tp.isFakeBoldText = true
+        tp.color = theme.accent; tp.alpha = (255 * a).toInt(); tp.textSize = sp(Ui.SMALL); tp.typeface = Ui.medium
         text(c, tag, r.left + dp(14f), r.centerY())
-        tp.isFakeBoldText = false
-        tp.color = theme.ink; tp.alpha = (255 * a).toInt(); tp.textSize = sp(14f)
+        tp.typeface = Ui.regular
+        tp.color = theme.ink; tp.alpha = (255 * a).toInt(); tp.textSize = sp(Ui.BODY)
         text(c, shown, r.left + dp(24f) + tagW, r.centerY())
         hits += r to { listener?.onClipChip(clipText) }
         ip.color = theme.inkSoft
@@ -314,9 +311,9 @@ class CandidateBar(context: Context, private val prefs: Prefs) : View(context) {
             val on = (id == "simple") == simpleNum
             if (on) pill(c, r, theme.accent)
             tp.color = if (on) theme.onAccent else theme.inkSoft
-            tp.textSize = sp(12.5f); tp.isFakeBoldText = on
+            tp.textSize = sp(Ui.BODY); tp.typeface = if (on) Ui.medium else Ui.regular
             text(c, name, r.centerX(), r.centerY())
-            tp.isFakeBoldText = false
+            tp.typeface = Ui.regular
             hits += r to { listener?.onNumMode(id) }
         }
         val chip = resultChip
@@ -325,11 +322,11 @@ class CandidateBar(context: Context, private val prefs: Prefs) : View(context) {
             val fmtW = dp(92f)
             val fr = RectF(right - fmtW, dp(8f), right, height - dp(8f))
             pill(c, fr, theme.soft)
-            listOf("uni" to "符号", "tex" to "LaTeX").forEachIndexed { i, (id, name) ->
+            listOf("uni" to "文本", "tex" to "LaTeX").forEachIndexed { i, (id, name) ->
                 val r = RectF(fr.left + i * fmtW / 2 + dp(2f), fr.top + dp(2f), fr.left + (i + 1) * fmtW / 2 - dp(2f), fr.bottom - dp(2f))
                 if (id == mathFormat) pill(c, r, theme.accentSoft)
                 tp.color = if (id == mathFormat) theme.accent else theme.inkSoft
-                tp.textSize = sp(12f)
+                tp.textSize = sp(Ui.SMALL)
                 text(c, name, r.centerX(), r.centerY())
                 hits += r to { listener?.onMathFormat(id) }
             }
@@ -337,66 +334,29 @@ class CandidateBar(context: Context, private val prefs: Prefs) : View(context) {
         }
         val midL = sr.right + dp(6f)
         if (chip != null) {
-            tp.textSize = sp(16f)
+            tp.textSize = sp(Ui.TITLE)
             val label = "= $chip"
             val w = tp.measureText(label) + dp(28f)
             val r = RectF(midL, dp(7f), midL + w, height - dp(7f))
             pill(c, r, theme.accent)
             tp.color = theme.onAccent
             text(c, label, r.centerX(), r.centerY())
-            tp.color = theme.hint; tp.textSize = sp(11.5f); tp.textAlign = Paint.Align.LEFT
+            tp.color = theme.hint; tp.textSize = sp(Ui.SMALL); tp.textAlign = Paint.Align.LEFT
             if (r.right + dp(70f) < right) text(c, "点一下上屏", r.right + dp(8f), height / 2f)
             hits += r to { listener?.onResultChip(chip) }
             return
         }
-        if (simpleNum) {
-            tp.textAlign = Paint.Align.LEFT
-            tp.color = theme.hint; tp.textSize = sp(12f)
-            text(c, "输入算式后点 = 出结果", midL + dp(4f), height / 2f)
-            return
-        }
-        // scrollable math tabs between the switch and the format toggle
-        tabArea = RectF(midL, 0f, right, height.toFloat())
-        c.save()
-        c.clipRect(tabArea)
-        var x = midL - tabScroll
-        tp.textSize = sp(13.5f)
-        tp.typeface = Typeface.SERIF
-        // the highlight slides from the previous tab to the current one
-        var px = 0f; var pw = 0f; var xx = x
-        for ((id, name) in mathTabs) {
-            val w = tp.measureText(name) + dp(13f)
-            if (id == mathTab) { px = xx + tabScroll; pw = w }
-            xx += w + dp(1f)
-        }
-        if (mathTab != lastTab) {
-            if (lastTab.isEmpty()) { tabPillX.set(px); tabPillW.set(pw) }
-            else { tabPillX.animateTo(px, dur(220)); tabPillW.animateTo(pw, dur(220)) }
-            lastTab = mathTab
-        }
-        if (tabPillX.running || tabPillW.running) postInvalidateOnAnimation()
-        pill(c, RectF(tabPillX.value - tabScroll, dp(8f), tabPillX.value - tabScroll + tabPillW.value, height - dp(8f)), theme.accentSoft)
-        for ((id, name) in mathTabs) {
-            val w = tp.measureText(name) + dp(13f)
-            val r = RectF(x, dp(8f), x + w, height - dp(8f))
-            val on = id == mathTab
-            tp.color = if (on) theme.accent else theme.inkSoft; tp.alpha = (255 * a).toInt()
-            tp.isFakeBoldText = on
-            text(c, name, r.centerX(), r.centerY())
-            tp.isFakeBoldText = false
-            val hit = RectF(r).apply { left = max(left, tabArea.left); right = min(right, tabArea.right) }
-            if (hit.width() > 0) hits += hit to { listener?.onMathTab(id) }
-            x += w + dp(1f)
-        }
-        tabContentW = x + tabScroll - midL
-        c.restore()
-        tp.typeface = Typeface.DEFAULT
+        // the calculator line (标准) or how the academic keys work (学术)
+        tp.textAlign = Paint.Align.LEFT
+        tp.color = theme.hint; tp.textSize = sp(Ui.SMALL)
+        val hint = if (simpleNum) "输入算式后点 = 出结果" else "长按看全部 · ⇥ 跳到下一个空位"
+        if (tp.measureText(hint) < right - midL - dp(8f)) text(c, hint, midL + dp(4f), height / 2f)
     }
 
     private fun drawEdit(c: Canvas, a: Float) {
         val doneW = dp(56f)
         val size = sp(21f)
-        tp.textSize = size; tp.textAlign = Paint.Align.LEFT; tp.typeface = Typeface.MONOSPACE
+        tp.textSize = size; tp.textAlign = Paint.Align.LEFT; tp.typeface = Ui.regular
         editPos.clear()
         var x = dp(16f)
         val cy = height / 2f
@@ -413,10 +373,10 @@ class CandidateBar(context: Context, private val prefs: Prefs) : View(context) {
         val cx = editPos.getOrElse(editCaret) { x }
         bg.color = theme.accent
         c.drawRoundRect(cx - dp(1.2f), cy - size * 0.62f, cx + dp(1.2f), cy + size * 0.62f, dp(1f), dp(1f), bg)
-        tp.typeface = Typeface.DEFAULT
+        tp.typeface = Ui.regular
         val r = RectF(width - doneW - dp(6f), dp(8f), width - dp(6f), height - dp(8f))
         pill(c, r, theme.accent)
-        tp.color = theme.onAccent; tp.textSize = sp(13f); tp.textAlign = Paint.Align.CENTER
+        tp.color = theme.onAccent; tp.textSize = sp(Ui.BODY); tp.textAlign = Paint.Align.CENTER
         text(c, "完成", r.centerX(), r.centerY())
         hits += r to { listener?.onEditDone() }
     }
@@ -554,7 +514,7 @@ class CandidateBar(context: Context, private val prefs: Prefs) : View(context) {
                     }
                     draggingTabs -> {}
                     preeditRect.contains(e.x, e.y) && mode == Mode.CANDIDATES && abs(e.x - downX) < slop -> {
-                        tp.textSize = sp(11.5f)
+                        tp.textSize = sp(Ui.SMALL)
                         val x = e.x - dp(12f)
                         var idx = 0
                         while (idx < preedit.length && tp.measureText(preedit, 0, idx + 1) - tp.measureText(preedit, idx, idx + 1) / 2 < x) idx++

@@ -101,7 +101,7 @@ class GridPanel(context: Context, private val prefs: Prefs) : View(context) {
             // least for words), rows are filled greedily, and the units left at the end of a row
             // are handed to its widest words, so every row is flush and cell edges line up.
             val unit = width.toFloat() / columns
-            val noteP = Paint(tp).apply { textSize = sp(9.5f) }
+            val noteP = Paint(tp).apply { textSize = sp(Ui.CAPTION) }
             val need = items.mapIndexed { i, s ->
                 val w = max(tp.measureText(s), notes.getOrNull(i)?.let { noteP.measureText(it) } ?: 0f)
                 ceil((w + dp(16f)) / unit).toInt().coerceIn(1, columns)
@@ -161,7 +161,7 @@ class GridPanel(context: Context, private val prefs: Prefs) : View(context) {
                 CellStyle.FLAT -> drawFlatCell(c, i, s, r, a)
                 CellStyle.CARD -> drawCard(c, i, s, r, a)
                 CellStyle.PLAIN -> {
-                    if (i == pressed) { bg.color = theme.soft; c.drawRoundRect(r, dp(10f), dp(10f), bg) }
+                    if (i == pressed) { bg.color = theme.soft; c.drawRoundRect(r, dp(prefs.keyRadiusDp), dp(prefs.keyRadiusDp), bg) }
                     label(c, s, r, sp(textSp), theme.ink, a)
                 }
             }
@@ -170,12 +170,12 @@ class GridPanel(context: Context, private val prefs: Prefs) : View(context) {
         if (header.isNotEmpty()) {
             bg.color = theme.background
             c.drawRect(0f, 0f, width.toFloat(), headerH(), bg)
-            tp.textAlign = Paint.Align.LEFT; tp.textSize = sp(11f); tp.color = theme.hint; tp.isFakeBoldText = true
+            tp.textAlign = Paint.Align.LEFT; tp.textSize = sp(Ui.SMALL); tp.color = theme.hint; tp.typeface = Ui.medium
             c.drawText(header, dp(12f), dp(14f), tp)
-            tp.isFakeBoldText = false; tp.textAlign = Paint.Align.CENTER
+            tp.typeface = Ui.regular; tp.textAlign = Paint.Align.CENTER
         }
         if (items.isEmpty() && emptyText.isNotEmpty()) {
-            tp.textSize = sp(13f); tp.color = theme.hint
+            tp.textSize = sp(Ui.BODY); tp.color = theme.hint
             val fm = tp.fontMetrics
             c.drawText(emptyText, width / 2f, height / 2f - (fm.ascent + fm.descent) / 2, tp)
         }
@@ -187,13 +187,13 @@ class GridPanel(context: Context, private val prefs: Prefs) : View(context) {
         tp.textSize = size
         tp.color = color
         tp.alpha = (255 * alpha).toInt()
-        tp.isFakeBoldText = bold
+        tp.typeface = if (bold) Ui.medium else Ui.regular
         val maxW = r.width() - dp(10f)
         val tw = tp.measureText(s)
         if (tw > maxW) tp.textSize = size * maxW / tw
         val fm = tp.fontMetrics
         c.drawText(s, r.centerX(), r.centerY() - (fm.ascent + fm.descent) / 2, tp)
-        tp.isFakeBoldText = false
+        tp.typeface = Ui.regular
     }
 
     private fun drawKeyCell(c: Canvas, i: Int, s: String, r: RectF, a: Float) {
@@ -212,7 +212,7 @@ class GridPanel(context: Context, private val prefs: Prefs) : View(context) {
         val sel = i == selectedIndex
         if (sel) {
             bg.color = theme.accentSoft
-            c.drawRoundRect(r.left, r.top + dp(1f), r.right, r.bottom - dp(1f), dp(10f), dp(10f), bg)
+            c.drawRoundRect(r.left, r.top + dp(1f), r.right, r.bottom - dp(1f), dp(prefs.keyRadiusDp), dp(prefs.keyRadiusDp), bg)
         }
         label(c, s, r, sp(textSp), if (sel) theme.accent else theme.inkSoft, a, bold = sel)
     }
@@ -224,7 +224,7 @@ class GridPanel(context: Context, private val prefs: Prefs) : View(context) {
         if (r.right < width - 1) c.drawRect(r.right - dp(0.7f), r.top + dp(14f), r.right, r.bottom - dp(14f), bg)
         val note = notes.getOrNull(i).orEmpty()
         if (note.isNotEmpty()) {
-            tp.textSize = sp(9.5f); tp.color = if (note.contains('→') || note.contains('⇄')) theme.accent else theme.hint
+            tp.textSize = sp(Ui.CAPTION); tp.color = if (note.contains('→') || note.contains('⇄')) theme.accent else theme.hint
             tp.alpha = (255 * a).toInt()
             c.drawText(note, r.centerX(), r.top + dp(12f), tp)
             label(c, s, RectF(r.left, r.top + dp(6f), r.right, r.bottom), sp(textSp), if (highlightFirst && i == 0) theme.accent else theme.ink, a)
@@ -234,19 +234,19 @@ class GridPanel(context: Context, private val prefs: Prefs) : View(context) {
     private fun drawCard(c: Canvas, i: Int, s: String, r: RectF, a: Float) {
         bg.color = if (i == pressed) theme.surfacePressed else theme.surface
         bg.alpha = (255 * a).toInt()
-        val rad = dp(12f)
+        val rad = Ui.radiusLarge(dp(prefs.keyRadiusDp), dp(1f))
         c.drawRoundRect(r, rad, rad, bg)
         val tag = tags.getOrNull(i).orEmpty()
         var top = r.top + dp(10f)
         if (tag.isNotEmpty() || i in marks) {
             tp.textAlign = Paint.Align.LEFT
-            tp.textSize = sp(10.5f)
+            tp.textSize = sp(Ui.CAPTION)
             tp.color = theme.accent
-            tp.isFakeBoldText = true
-            c.drawText(if (i in marks) "已固定" + (if (tag.isNotEmpty()) " · $tag" else "") else tag, r.left + dp(12f), top + sp(10f), tp)
-            tp.isFakeBoldText = false
+            tp.typeface = Ui.medium
+            c.drawText(if (i in marks) "已固定" + (if (tag.isNotEmpty()) " · $tag" else "") else tag, r.left + dp(12f), top + sp(Ui.CAPTION), tp)
+            tp.typeface = Ui.regular
             tp.textAlign = Paint.Align.CENTER
-            top += sp(15f)
+            top += sp(Ui.TITLE)
         }
         val w = (r.width() - dp(24f)).toInt().coerceAtLeast(1)
         val maxLines = if (tag.isNotEmpty() || i in marks) 2 else 3

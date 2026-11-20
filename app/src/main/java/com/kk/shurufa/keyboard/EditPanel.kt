@@ -91,14 +91,14 @@ class EditPanel(context: Context, private val prefs: Prefs) : View(context) {
         c.drawColor(theme.background)
         if (selAnim.running) postInvalidateOnAnimation()
         // header
-        tp.textAlign = Paint.Align.LEFT; tp.textSize = sp(15f); tp.color = theme.ink; tp.isFakeBoldText = true
+        tp.textAlign = Paint.Align.LEFT; tp.textSize = sp(Ui.TITLE); tp.color = theme.ink; tp.typeface = Ui.medium
         val fm0 = tp.fontMetrics
         c.drawText("文字编辑", dp(16f), headerH / 2 - (fm0.ascent + fm0.descent) / 2, tp)
-        tp.isFakeBoldText = false; tp.textAlign = Paint.Align.CENTER
+        tp.typeface = Ui.regular; tp.textAlign = Paint.Align.CENTER
         val rad = dp(prefs.keyRadiusDp)
         // card
         bg.color = theme.surface
-        c.drawRoundRect(card, rad + dp(6f), rad + dp(6f), bg)
+        c.drawRoundRect(card, Ui.radiusLarge(rad, dp(1f)), Ui.radiusLarge(rad, dp(1f)), bg)
         val strip = buttons.first { it.id == "home" }.r
         bg.color = theme.divider
         c.drawRect(card.left + dp(12f), strip.top, card.right - dp(12f), strip.top + dp(0.8f), bg)
@@ -125,7 +125,7 @@ class EditPanel(context: Context, private val prefs: Prefs) : View(context) {
                 bg.color = blend(theme.soft, theme.accent, s)
                 if (on) bg.color = if (selecting) theme.accentPressed else theme.softPressed
                 c.drawRoundRect(r, rad + dp(4f), rad + dp(4f), bg)
-                tp.textSize = sp(14.5f)
+                tp.textSize = sp(Ui.BODY)
                 tp.color = blend(theme.ink, theme.onAccent, s)
                 text(c, if (selecting) "结束选择" else "开始选择", r.centerX(), r.centerY())
                 return
@@ -149,14 +149,14 @@ class EditPanel(context: Context, private val prefs: Prefs) : View(context) {
         tp.color = theme.ink; tp.alpha = alpha
         when (labels) {
             "icon" -> Icons.draw(c, b.icon!!, r.centerX(), r.centerY(), dp(22f), ip)
-            "text" -> { tp.textSize = sp(14f); text(c, b.text, r.centerX(), r.centerY()) }
+            "text" -> { tp.textSize = sp(Ui.BODY); text(c, b.text, r.centerX(), r.centerY()) }
             else -> {
                 if (r.height() > dp(48f)) {
                     Icons.draw(c, b.icon!!, r.centerX(), r.centerY() - dp(9f), dp(20f), ip)
-                    tp.textSize = sp(11.5f); tp.color = theme.inkSoft; tp.alpha = alpha
+                    tp.textSize = sp(Ui.SMALL); tp.color = theme.inkSoft; tp.alpha = alpha
                     text(c, b.text, r.centerX(), r.centerY() + dp(13f))
                 } else {
-                    tp.textSize = sp(13f)
+                    tp.textSize = sp(Ui.BODY)
                     val tw = tp.measureText(b.text)
                     Icons.draw(c, b.icon!!, r.centerX() - tw / 2 - dp(6f), r.centerY(), dp(18f), ip)
                     text(c, b.text, r.centerX() + dp(8f), r.centerY())

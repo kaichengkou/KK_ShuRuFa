@@ -34,21 +34,35 @@ class Haptics(context: Context, private val prefs: Prefs) {
     fun amp(e: HapticEvent) = prefs.sp.getInt("hap_${e.id}_amp", e.defAmp)
     fun ms(e: HapticEvent) = prefs.sp.getInt("hap_${e.id}_ms", e.defMs)
 
+    // Vibrator calls are binder transactions; on some phones they take milliseconds. They run on
+    // their own thread so a slide that ticks on every step never waits for them.
+    private val thread = android.os.HandlerThread("kk-haptics").apply { start() }
+    val worker = android.os.Handler(thread.looper)
+    private val effects = java.util.concurrent.ConcurrentHashMap<HapticEvent, Any>()
+    private val NONE = Any()
+
+    /** Settings changed: build the effects again on next use. */
+    fun invalidate() = effects.clear()
+
     fun play(e: HapticEvent) {
         if (!prefs.vibrate) return
-        val effect = when (type(e)) {
-            "off" -> return
-            "custom" -> custom(e)
-            else -> if (Build.VERSION.SDK_INT >= 29) VibrationEffect.createPredefined(
-                when (type(e)) {
-                    "tick" -> VibrationEffect.EFFECT_TICK
-                    "heavy" -> VibrationEffect.EFFECT_HEAVY_CLICK
-                    "double" -> VibrationEffect.EFFECT_DOUBLE_CLICK
-                    else -> VibrationEffect.EFFECT_CLICK
-                }
-            ) else custom(e)
+        worker.post {
+            val effect = effects.getOrPut(e) { build(e) ?: NONE }
+            if (effect is VibrationEffect) runCatching { vib.vibrate(effect) }
         }
-        runCatching { vib.vibrate(effect) }
+    }
+
+    private fun build(e: HapticEvent): VibrationEffect? = when (type(e)) {
+        "off" -> null
+        "custom" -> custom(e)
+        else -> if (Build.VERSION.SDK_INT >= 29) VibrationEffect.createPredefined(
+            when (type(e)) {
+                "tick" -> VibrationEffect.EFFECT_TICK
+                "heavy" -> VibrationEffect.EFFECT_HEAVY_CLICK
+                "double" -> VibrationEffect.EFFECT_DOUBLE_CLICK
+                else -> VibrationEffect.EFFECT_CLICK
+            }
+        ) else custom(e)
     }
 
     private fun custom(e: HapticEvent): VibrationEffect =

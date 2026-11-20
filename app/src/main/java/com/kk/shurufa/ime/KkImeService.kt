@@ -17,6 +17,7 @@ import android.view.ViewGroup
 import android.view.WindowInsets
 import android.view.WindowInsetsController
 import android.view.Gravity
+import android.inputmethodservice.InputMethodService.Insets
 import android.animation.ValueAnimator
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.ExtractedTextRequest
@@ -63,6 +64,10 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
     private lateinit var tones: PinyinTones
 
     private lateinit var root: FrameLayout
+    private lateinit var column: LinearLayout
+    private var navInset = 0
+    /** Height told to the app (from the bottom); -1 means the column's current height. */
+    private var reportH = -1
     private lateinit var bar: CandidateBar
     private lateinit var content: FrameLayout
     private lateinit var keyboard: KeyboardView
@@ -74,6 +79,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
     private lateinit var symCells: GridPanel
     private lateinit var symBottom: KeyboardView
     private lateinit var editPanel: EditPanel
+    private lateinit var mathPanel: com.kk.shurufa.keyboard.MathPanel
     private lateinit var clipPanel: LinearLayout
     private lateinit var clipStrip: ClipStrip
     private lateinit var clipFavs: GridPanel
@@ -194,11 +200,12 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
         "sym_recent", Prefs.ZH_TRAD, Prefs.ZH_EMOJI, Prefs.ZH_PREDICT, Prefs.PINYIN_MODE, Prefs.MATH_FORMAT,
         Prefs.VIBRATE, Prefs.SOUND, Prefs.CLIP_KEEP, Prefs.CLIP_SUGGEST, Prefs.ZH_CORRECTION, Prefs.STRESS_MODE,
         Prefs.BACKSPACE_RESELECT, Prefs.NUM_MODE, Prefs.TYPO_MARK, Prefs.RARE_ANNOTATE, Prefs.PACK_POETRY, Prefs.SYMBOL_MEMORY,
-        Prefs.CLIP_MAX_CHARS, Prefs.CLIP_FRICTION,
+        Prefs.CLIP_MAX_CHARS, Prefs.CLIP_FRICTION, Prefs.CLIP_COLUMNS,
     )
 
     override fun onSharedPreferenceChanged(sp: SharedPreferences?, key: String?) {
-        if (key == null || key.startsWith("app_lang_") || key.startsWith("hap_")) return
+        if (key != null && key.startsWith("hap_")) { haptics.invalidate(); return }
+        if (key == null || key.startsWith("app_lang_")) return
         when (key) {
             Prefs.ZH_EMOJI, Prefs.ZH_TRAD -> applyRimeOptions()
             Prefs.ZH_PREDICT -> if (prefs.zhPredict) predictor.load() else { predictions = emptyList(); syncBar() }
@@ -206,7 +213,9 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
             Prefs.PACK_POETRY -> { if (prefs.packPoetry) predictor.loadPoetry() else predictor.dropPoetry(); RimeEngine.redeploy(this) }
             Prefs.MATH_FORMAT -> if (::bar.isInitialized) syncBar()
             Prefs.STRESS_MODE -> if (::keyboard.isInitialized && panel == Panel.LETTERS) keyboard.setRows(lettersRows())
-            Prefs.CLIP_FRICTION, Prefs.CLIP_MAX_CHARS -> if (::clipFavs.isInitialized) { clipFavs.friction = prefs.clipFriction; refreshClips(keep = true) }
+            Prefs.CLIP_FRICTION, Prefs.CLIP_MAX_CHARS, Prefs.CLIP_COLUMNS -> if (::clipFavs.isInitialized) {
+                clipFavs.friction = prefs.clipFriction; clipFavs.columns = prefs.clipColumns; clipFavs.textSp = clipFavText(); refreshClips(keep = true)
+            }
         }
         if (key in liveKeys) { if (panel == Panel.QUICK && ::quickPanel.isInitialized) refreshQuick(); return }
         layouts.clear(); math = null
@@ -223,9 +232,15 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
     override fun onCreateInputView(): View {
         theme = KbTheme.resolve(this, prefs)
         loadData()
-        root = FrameLayout(this)
-        root.setBackgroundColor(theme.background)
-        val column = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        // The input window keeps one tall, mostly transparent size. Panels then change height inside
+        // it, so no animation or drag ever resizes the window or makes the app below lay out again;
+        // onComputeInsets tells the app (and touch dispatch) where the keyboard actually is.
+        root = object : FrameLayout(this) {
+            override fun onMeasure(w: Int, h: Int) {
+                super.onMeasure(w, MeasureSpec.makeMeasureSpec(windowH(), MeasureSpec.EXACTLY))
+            }
+        }
+        column = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(theme.background) }
         overlay = PopupOverlay(this, prefs).also { it.theme = theme; it.onTick = { haptics.play(HapticEvent.OPTION) } }
         bar = CandidateBar(this, prefs).also { it.theme = theme; it.listener = this; it.overlay = overlay }
         // 按住工具栏拖动: with a resizable panel open, the toolbar works as its grab bar too
@@ -238,22 +253,47 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
         buildCandidatePanel()
         buildSymbolPanel()
         buildEditPanel()
+        buildMathPanel()
         buildClipPanel()
         buildEmojiPanel()
         quickPanel = QuickPanel(this, prefs).also { it.theme = theme; it.onTile = { id -> onQuickTile(id) }; it.onPress = { haptics.play(HapticEvent.LETTER) } }
         column.addView(bar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         column.addView(content, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-        root.addView(column, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        root.addView(column, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM))
         root.addView(overlay, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         root.setOnApplyWindowInsetsListener { v, ins ->
             val bottom = if (Build.VERSION.SDK_INT >= 30) ins.getInsets(WindowInsets.Type.navigationBars()).bottom
             else @Suppress("DEPRECATION") ins.systemWindowInsetBottom
-            v.setPadding(0, 0, 0, bottom)
+            navInset = bottom
+            column.setPadding(0, 0, 0, bottom)
             ins
         }
         paintNavigationBar()
         showPanel(panel)
         return root
+    }
+
+    /** Tall enough for the tallest panel plus room above it for key previews and long-press menus. */
+    private fun windowH(): Int {
+        val tallest = maxOf(tallH(), mathH() + dp(8f).toInt()) + barH
+        return minOf((resources.displayMetrics.heightPixels * 0.86f).toInt(), tallest + navInset + dp(96f).toInt())
+    }
+
+    override fun onComputeInsets(outInsets: Insets) {
+        super.onComputeInsets(outInsets)
+        if (!::root.isInitialized || root.height == 0 || !root.isShown) return
+        val loc = IntArray(2)
+        root.getLocationInWindow(loc)
+        val bottom = loc[1] + root.height
+        val shown = column.height
+        // a temporarily raised panel covers the app instead of pushing it up
+        var reported = if (reportH > 0) reportH else shown
+        if (tall && (panel == Panel.CLIPBOARD || panel == Panel.CANDIDATES)) reported = minOf(reported, baseH + barH + navInset)
+        val top = bottom - reported
+        outInsets.contentTopInsets = top
+        outInsets.visibleTopInsets = top
+        outInsets.touchableInsets = Insets.TOUCHABLE_INSETS_REGION
+        outInsets.touchableRegion.set(0, minOf(top, bottom - shown), root.width, bottom)
     }
 
     /** The system draws its IME buttons below the keys; give that strip the keyboard's color. */
@@ -391,8 +431,13 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
 
     private val barH get() = dp(50f).toInt()
     private val baseH get() = kbHeight(lettersRows().size.coerceAtLeast(4))
-    /** 数字/学术/符号 share one height, a little taller than the letters, so they switch in place. */
-    private val familyH get() = (kbHeight(4) * 1.14f).toInt()
+    /** 学术 is taller than the letters: a tab row, four rows of keys and the bottom row. */
+    private fun mathH(): Int {
+        val kh = dp(prefs.keyHeightDp.toFloat())
+        val g = dp(prefs.keyGapDp)
+        return (dp(38f) + dp(2f) + 4 * kh * com.kk.shurufa.keyboard.MathPanel.ROW + 3 * g + g + kh + dp(prefs.bottomPaddingDp + 2f)).toInt()
+    }
+    private fun tallH() = maxOf(baseH + dp(40f).toInt(), (resources.displayMetrics.heightPixels * 0.56f).toInt() - barH)
     private fun inFamily(p: Panel) = p == Panel.NUM || p == Panel.MATH || p == Panel.SYMBOLS
 
     private fun showPanel(p: Panel) {
@@ -402,8 +447,9 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
         val oldTotal = (if (bar.visibility == View.VISIBLE) bar.height else 0) + content.height
         content.removeAllViews()
         heightAnim?.cancel()
+        reportH = -1
         val base = baseH
-        val tallH = maxOf(base + dp(40f).toInt(), (resources.displayMetrics.heightPixels * 0.56f).toInt() - barH)
+        val tallH = tallH()
         val canTall = p == Panel.CLIPBOARD || p == Panel.CANDIDATES
         if (from == Panel.SYMBOLS && p != Panel.SYMBOLS) lastSymbolsAt = SystemClock.uptimeMillis()
         listOf(clipHandle, candHandle).forEach { it.low = base; it.high = tallH; it.current = if (tall) tallH else base }
@@ -411,8 +457,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
         val noBar = p == Panel.SYMBOLS || p == Panel.CURSOR
         bar.visibility = if (noBar) View.GONE else View.VISIBLE
         val h = when {
-            p == Panel.SYMBOLS -> familyH + barH
-            inFamily(p) -> familyH
+            p == Panel.MATH -> -1
             noBar -> base + barH
             canTall && tall -> tallH
             p == Panel.LETTERS || p == Panel.PHONE -> -1
@@ -425,15 +470,13 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
             Panel.LETTERS -> { keyboard.setRows(lettersRows()); content.addView(keyboard, fixed) }
             Panel.PHONE -> { keyboard.setRows(layout("phone").rows); content.addView(keyboard, fixed) }
             Panel.MATH -> {
-                val m = math
-                if (m == null) { showPanel(Panel.LETTERS); return }
-                val tab = m.tabs.firstOrNull { it.id == mathTab } ?: m.tabs.first()
-                keyboard.setRows(tab.rows + listOf(FamilyRows.academic()), math = true)
-                content.addView(keyboard, fixed)
+                if (math == null) { showPanel(Panel.LETTERS); return }
+                refreshMath(slide = 0)
+                content.addView(mathPanel, fixed)
             }
             Panel.NUM -> { keyboard.setRows(layout("num").rows + listOf(FamilyRows.number(isZh))); content.addView(keyboard, fixed) }
             Panel.CURSOR -> { syncEditPanel(); content.addView(editPanel, fixed); if (from != p) animateIn(editPanel) }
-            Panel.SYMBOLS -> { refreshSymbols(); content.addView(symbolPanel, fixed); if (from != p && !inFamily(from)) animateIn(symbolPanel) }
+            Panel.SYMBOLS -> { refreshSymbols(); content.addView(symbolPanel, fixed); if (from != p) animateIn(symbolPanel) }
             Panel.CLIPBOARD -> { refreshClips(); content.addView(clipPanel, fixed); if (from != p) animateIn(clipPanel) }
             Panel.QUICK -> { refreshQuick(); content.addView(quickPanel, fixed); quickPanel.animateIn() }
             Panel.EMOJI -> { refreshEmoji(); content.addView(emojiPanel, fixed); if (from != p) animateIn(emojiPanel) }
@@ -458,12 +501,15 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
         val target = content.measuredHeight
         val start = oldTotal - newBar
         if (start <= 0 || abs(start - target) < dp(2f)) return
+        // while it moves the app keeps the larger of the two sizes, so it lays out at most once
+        reportH = maxOf(start, target) + newBar + navInset
         heightAnim = ValueAnimator.ofInt(start, target).apply {
             duration = (230 * prefs.animSpeed).toLong()
             interpolator = android.view.animation.PathInterpolator(0.2f, 0f, 0f, 1f)
             addUpdateListener { content.layoutParams = content.layoutParams.apply { height = it.animatedValue as Int }; content.requestLayout() }
             addListener(object : android.animation.AnimatorListenerAdapter() {
                 override fun onAnimationEnd(a: android.animation.Animator) {
+                    reportH = -1
                     content.layoutParams = content.layoutParams.apply { height = ViewGroup.LayoutParams.WRAP_CONTENT }; content.requestLayout()
                 }
             })
@@ -475,14 +521,14 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
         if (!prefs.animations) return
         v.alpha = 0f; v.translationY = dp(12f)
         v.animate().alpha(1f).translationY(0f).setDuration((190 * prefs.animSpeed).toLong())
-            .setInterpolator(android.view.animation.PathInterpolator(0.2f, 0f, 0f, 1f)).start()
+            .setInterpolator(android.view.animation.PathInterpolator(0.2f, 0f, 0f, 1f)).withLayer().start()
     }
 
     private fun syncBar() {
         if (!::bar.isInitialized) return
         val clipFresh = pendingClip != null && SystemClock.uptimeMillis() - pendingClipAt < 90_000
         when {
-            panel == Panel.MATH -> math?.let { m -> bar.showMath(m.tabs.map { it.id to it.name }, mathTab, prefs.mathFormat, simple = false) }
+            panel == Panel.MATH -> bar.showMath(emptyList(), mathTab, prefs.mathFormat, simple = false)
             panel == Panel.NUM -> bar.showMath(emptyList(), "", prefs.mathFormat, simple = true)
             isZh && RimeEngine.state == RimeEngine.State.DEPLOYING && panel == Panel.LETTERS -> bar.showMessage("正在部署雾凇拼音词库，首次约需一分钟…")
             isZh && RimeEngine.state == RimeEngine.State.PREPARING && panel == Panel.LETTERS -> bar.showMessage("正在准备中文词库…")
@@ -670,7 +716,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
         }
         clipFavs = GridPanel(this, prefs).apply {
             theme = this@KkImeService.theme; overlay = this@KkImeService.overlay
-            cellStyle = GridPanel.CellStyle.CARD; columns = 2; rowHeightDp = 66f; textSp = 13.5f
+            cellStyle = GridPanel.CellStyle.CARD; columns = prefs.clipColumns; rowHeightDp = 66f; textSp = clipFavText()
             friction = prefs.clipFriction
             emptyText = "长按「最近」里的一条，把它收藏到这里"
             onFeedback = fb
@@ -683,6 +729,9 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
         clipPanel.addView(clipStrip, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(118f).toInt()))
         clipPanel.addView(clipFavs, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
     }
+
+    /** Narrower favorite cards use slightly smaller text so a line still holds a few words. */
+    private fun clipFavText() = when (prefs.clipColumns) { 2 -> 13.5f; 3 -> 12.5f; else -> 11.5f }
 
     private fun pasteClip(text: String) {
         commitComposingFirst()
@@ -1153,28 +1202,39 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
 
     private fun shiftMeta() = if (selectMode) KeyEvent.META_SHIFT_ON else 0
 
-    override fun longOptions(key: Key): List<Output> {
-        key.fn?.let { return fnOptions(it, key) }
+    override fun longOptions(key: Key): List<Output> = longOptionRows(key).flatten()
+
+    /**
+     * 长按选项, grouped: symbols (the flick characters, the digit, extra punctuation) in one
+     * row right above the key, letters (both cases, accented forms) in another. Short lists
+     * stay on one row, symbols first.
+     */
+    override fun longOptionRows(key: Key): List<List<Output>> {
+        key.fn?.let { return listOf(fnOptions(it, key)) }
         val m = key.main ?: return emptyList()
-        val list = mutableListOf<Output>()
         if (panel == Panel.MATH) {
-            listOf(Dir.UP, Dir.DOWN, Dir.LEFT, Dir.RIGHT).forEach { d -> key.flicks[d]?.let { list += it } }
-            if (list.isNotEmpty()) list += m
-            return list
+            val list = listOf(Dir.UP, Dir.DOWN, Dir.LEFT, Dir.RIGHT).mapNotNull { key.flicks[it] }
+            return if (list.isEmpty()) emptyList() else listOf(list + m)
         }
-        if (prefs.lpHints) listOf(Dir.UP, Dir.DOWN, Dir.LEFT, Dir.RIGHT).forEach { d -> key.flicks[d]?.let { list += it } }
+        val symbols = mutableListOf<Output>()
+        val letters = mutableListOf<Output>()
+        if (prefs.lpHints) listOf(Dir.UP, Dir.DOWN, Dir.LEFT, Dir.RIGHT).forEach { d -> key.flicks[d]?.let { symbols += it } }
         if (prefs.lpDigits && panel == Panel.LETTERS) {
             val row0 = layout(curLang).rows.firstOrNull()
             val col = row0?.indexOf(key) ?: -1
-            if (col in 0..9) list += Output.of(((col + 1) % 10).toString())
+            if (col in 0..9) symbols += Output.of(((col + 1) % 10).toString())
         }
         if (prefs.lpCase && key.isLetter) {
             val up = m.text.uppercase(); val low = m.text.lowercase()
-            if (shift > 0) { list += Output.of(low); list += Output.of(up) } else { list += Output.of(up); list += Output.of(low) }
+            if (shift > 0) { letters += Output.of(low); letters += Output.of(up) } else { letters += Output.of(up); letters += Output.of(low) }
         }
-        if (curLang == "ru" && m.text.length == 1 && m.text[0] in vowels) list += Output.of(m.text + "́")
-        list += key.long
-        return list.distinctBy { it.text }.takeIf { it.size > 1 || (it.size == 1 && it[0].text != m.text) } ?: emptyList()
+        if (curLang == "ru" && m.text.length == 1 && m.text[0] in vowels) letters += Output.of(m.text + "́")
+        for (o in key.long) if (o.text.firstOrNull()?.isLetter() == true) letters += o else symbols += o
+        val s = symbols.distinctBy { it.text }
+        val l = letters.distinctBy { it.text }.filter { o -> s.none { it.text == o.text } }
+        val all = s + l
+        if (all.isEmpty() || (all.size == 1 && all[0].text == m.text)) return emptyList()
+        return if (s.isEmpty() || l.isEmpty() || all.size <= 5) listOf(all) else listOf(s, l)
     }
 
     private fun fnOptions(fn: String, key: Key): List<Output> = when (fn) {
@@ -1278,7 +1338,8 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
                 "enter" -> AudioManager.FX_KEYPRESS_RETURN
                 else -> AudioManager.FX_KEYPRESS_STANDARD
             }
-            am.playSoundEffect(fx, prefs.soundVolume)
+            val vol = prefs.soundVolume
+            haptics.worker.post { am.playSoundEffect(fx, vol) }
         }
     }
 
@@ -1502,7 +1563,27 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
         syncBar()
     }
 
-    override fun onMathTab(id: String) { mathTab = id; showPanel(Panel.MATH) }
+    override fun onMathTab(id: String) {
+        val m = math ?: return
+        val from = m.tabs.indexOfFirst { it.id == mathTab }
+        val to = m.tabs.indexOfFirst { it.id == id }
+        mathTab = id
+        refreshMath(slide = (to - from).coerceIn(-1, 1))
+    }
+
+    private fun buildMathPanel() {
+        mathPanel = com.kk.shurufa.keyboard.MathPanel(this, prefs) { newKeyboard() }
+        mathPanel.tabs.theme = theme
+        mathPanel.tabs.onTab = { id -> onMathTab(id) }
+        mathPanel.tabs.onFeedback = { haptics.play(HapticEvent.FUNCTION) }
+    }
+
+    private fun refreshMath(slide: Int) {
+        val m = math ?: return
+        if (m.tabs.none { it.id == mathTab }) mathTab = m.tabs.first().id
+        mathPanel.show(m, mathTab, slide)
+    }
+
     override fun onMathFormat(format: String) { prefs.put(Prefs.MATH_FORMAT, format) }
     override fun onResultChip(text: String) { commit(text, pairable = false); bar.showResult(null) }
 

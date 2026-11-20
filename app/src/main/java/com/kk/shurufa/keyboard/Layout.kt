@@ -58,7 +58,8 @@ class KeyboardLayout(
 )
 
 class MathTab(val id: String, val name: String, val rows: List<List<Key>>)
-class MathLayout(val tabs: List<MathTab>, val bottom: List<Key>)
+/** 学术键盘: [pad] is the fixed number block on the right, each tab fills the 4×4 block on the left. */
+class MathLayout(val tabs: List<MathTab>, val pad: List<List<Key>>)
 
 class SymbolCategory(val id: String, val name: String, val items: List<Output>, val wide: Boolean)
 
@@ -107,17 +108,16 @@ class LayoutRepo(
         val m = read("math.yaml") as Map<*, *>
         val tabs = (m["tabs"] as List<*>).map { t ->
             t as Map<*, *>
-            val id = t["id"].toString()
-            MathTab(id, t["name"].toString(),
-                (t["rows"] as List<*>).map { r ->
-                    (r as List<*>).map { parseMathKey(it) }.map { k ->
-                        // on the number page digits are solid and everything else is soft
-                        if (id == "basic" && k.main?.text?.singleOrNull()?.isDigit() != true) k.copy(style = KeyStyle.SOFT) else k
-                    }
-                })
+            MathTab(t["id"].toString(), t["name"].toString(),
+                (t["keys"] as List<*>).map { r -> (r as List<*>).map { parseMathKey(it).copy(style = KeyStyle.SOFT) } })
         }
-        val bottom = (m["bottom"] as? List<*>)?.map { parseKey(it, emptyMap()) } ?: emptyList()
-        return MathLayout(tabs, bottom)
+        // digits are solid like on every number pad; operators are soft
+        val pad = (m["pad"] as List<*>).map { r ->
+            (r as List<*>).map { parseMathKey(it) }.map { k ->
+                if (k.main?.text?.singleOrNull()?.isDigit() == true) k else k.copy(style = KeyStyle.SOFT)
+            }
+        }
+        return MathLayout(tabs, pad)
     }
 
     fun symbols(): List<SymbolCategory> {

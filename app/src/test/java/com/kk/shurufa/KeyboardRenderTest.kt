@@ -48,6 +48,9 @@ class KeyboardRenderTest {
         override fun onFunction(key: Key) { events += "fn:${key.fn}" }
         override fun longOptions(key: Key): List<Output> =
             if (key.main?.text == "a") listOf(Output.of("～"), Output.of("A"), Output.of("a"), Output.of("á")) else emptyList()
+        override fun longOptionRows(key: Key): List<List<Output>> =
+            if (key.main?.text == "l") listOf(listOf(Output.of("？"), Output.of("?"), Output.of("¿")), listOf(Output.of("L"), Output.of("l"), Output.of("ł")))
+            else listOf(longOptions(key))
         override fun onOption(key: Key, option: Output) { events += "opt:${option.text}" }
         override fun onCursorMove(dx: Int, dy: Int) { events += "cur:$dx,$dy" }
         override fun onCursorMode(active: Boolean) { events += "curmode:$active" }
@@ -134,6 +137,18 @@ class KeyboardRenderTest {
         touch(MotionEvent.ACTION_MOVE, ax + 6, ay - 4)
         touch(MotionEvent.ACTION_UP, ax + 6, ay - 4)
 
+        // on the right half the options run leftwards: one cell left is the second symbol,
+        // one row up is the letters
+        val (lx, ly) = keyCenter { it.main?.text == "l" }
+        touch(MotionEvent.ACTION_DOWN, lx, ly)
+        idle(400)
+        touch(MotionEvent.ACTION_MOVE, lx + 1, ly)
+        shot("zh_longpress_right")
+        val cell = maxOf(ctx.resources.displayMetrics.density * 40f, 0f)
+        touch(MotionEvent.ACTION_MOVE, lx - cell * 1.1f, ly - 8)
+        touch(MotionEvent.ACTION_UP, lx - cell * 1.1f, ly - 8)
+        assertTrue(events.toString(), "opt:?" in events)
+
         // swipe space left → next language
         val (sx, sy) = keyCenter { it.fn == "space" }
         touch(MotionEvent.ACTION_DOWN, sx, sy); touch(MotionEvent.ACTION_MOVE, sx - 60, sy); touch(MotionEvent.ACTION_MOVE, sx - 200, sy); touch(MotionEvent.ACTION_UP, sx - 200, sy)
@@ -173,11 +188,6 @@ class KeyboardRenderTest {
         kb.setRows(repo.keyboard("en").rows); layoutRoot(); shot("en")
         val m = repo.math()
         bar.showMath(m.tabs.map { it.id to it.name }, "basic", "uni")
-        val ab = com.kk.shurufa.keyboard.FamilyRows.academic()
-        kb.setRows(m.tabs[0].rows + listOf(ab), math = true); layoutRoot(); shot("math_basic")
-        kb.setRows(m.tabs[2].rows + listOf(ab), math = true); layoutRoot(); shot("math_calculus")
-        bar.showMath(m.tabs.map { it.id to it.name }, "phys", "tex")
-        kb.setRows(m.tabs[6].rows + listOf(ab), math = true); layoutRoot(); shot("math_physics")
         bar.showPredictions(listOf("人民", "经济", "政府", "市场", "企业", "特色"))
         kb.setRows(repo.keyboard("zh").rows, math = false); layoutRoot(); shot("zh_predictions")
         bar.showClip("https://github.com/kaichengkou/KK_ShuRuFa", "链接")
@@ -204,16 +214,27 @@ class KeyboardRenderTest {
         File("build/screens/$name.png").outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
     }
 
+    /** Like panelShot, at the view's own height. */
+    private fun panelShotWrap(name: String, v: View, setup: ((CandidateBar) -> Unit)? = null) {
+        val w = ctx.resources.displayMetrics.widthPixels
+        (v.parent as? android.view.ViewGroup)?.removeView(v)
+        v.measure(View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
+        panelShot(name, v, (v.measuredHeight / ctx.resources.displayMetrics.density).toInt(), setup = setup)
+    }
+
     @Test fun renderPanels() {
         val repo = LayoutRepo(ctx)
-        val fam = 250
+        val fam = 220
         // 数字·标准
         val num = KeyboardView(ctx, prefs).apply { listener = this@KeyboardRenderTest.listener; setRows(repo.keyboard("num").rows + listOf(com.kk.shurufa.keyboard.FamilyRows.number(true))) }
         panelShot("num", num, fam) { it.showMath(emptyList(), "", "uni", simple = true) }
         // 数字·学术
         val m = repo.math()
-        val sci = KeyboardView(ctx, prefs).apply { listener = this@KeyboardRenderTest.listener; setRows(m.tabs[0].rows + listOf(com.kk.shurufa.keyboard.FamilyRows.academic()), math = true) }
-        panelShot("sci", sci, fam) { it.showMath(m.tabs.map { t -> t.id to t.name }, "basic", "uni", simple = false) }
+        val sci = com.kk.shurufa.keyboard.MathPanel(ctx, prefs) { KeyboardView(ctx, prefs).apply { listener = this@KeyboardRenderTest.listener } }
+        for ((i, t) in m.tabs.withIndex()) {
+            sci.show(m, t.id)
+            panelShotWrap("sci_${i}_${t.id}", sci) { it.showMath(emptyList(), t.id, if (t.id == "lin") "tex" else "uni", simple = false) }
+        }
         // symbols: no toolbar, so the panel takes its height
         val sym = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
         val symTop = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }

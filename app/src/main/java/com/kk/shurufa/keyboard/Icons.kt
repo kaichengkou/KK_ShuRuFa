@@ -37,8 +37,8 @@ object Icons {
     }
     private val smile = p {
         addCircle(12f, 12f, 8.5f, Path.Direction.CW)
-        moveTo(8.5f, 14f); quadTo(12f, 17.5f, 15.5f, 14f)
-        addCircle(9f, 9.6f, 0.4f, Path.Direction.CW); addCircle(15f, 9.6f, 0.4f, Path.Direction.CW)
+        moveTo(8.2f, 13.6f); cubicTo(9.6f, 16.4f, 14.4f, 16.4f, 15.8f, 13.6f)
+        moveTo(9.3f, 9.6f); lineTo(9.3f, 10.2f); moveTo(14.7f, 9.6f); lineTo(14.7f, 10.2f)
     }
     private val translate = p {
         addRoundRect(RectF(3f, 8f, 14f, 20f), 2f, 2f, Path.Direction.CW)
@@ -116,22 +116,24 @@ object Icons {
         "settings" to gear, "collapse" to chevDown, "expand" to chevUp, "lock" to lock, "unlock" to unlock,
     )
 
-    private val m = android.graphics.Matrix()
-    private val tmp = Path()
-
-    /** Draws icon [name] centered at (cx, cy) with the given size in pixels. */
+    /**
+     * Draws icon [name] centered at (cx, cy) with the given size in pixels. The canvas is scaled
+     * instead of the path, so the GPU's path cache keeps every icon from frame to frame.
+     */
     fun draw(c: Canvas, name: String, cx: Float, cy: Float, size: Float, paint: Paint, filled: Boolean = false): Boolean {
         val src = all[name] ?: return false
         val s = size / 24f
-        m.reset(); m.setScale(s, s); m.postTranslate(cx - size / 2, cy - size / 2)
-        tmp.reset(); src.transform(m, tmp)
         val oldStyle = paint.style
         val oldWidth = paint.strokeWidth
         paint.style = if (filled) Paint.Style.FILL_AND_STROKE else Paint.Style.STROKE
-        paint.strokeWidth = 1.7f * s
+        paint.strokeWidth = 1.7f
         paint.strokeCap = Paint.Cap.ROUND
         paint.strokeJoin = Paint.Join.ROUND
-        c.drawPath(tmp, paint)
+        val save = c.save()
+        c.translate(cx - size / 2, cy - size / 2)
+        c.scale(s, s)
+        c.drawPath(src, paint)
+        c.restoreToCount(save)
         paint.style = oldStyle
         paint.strokeWidth = oldWidth
         return true

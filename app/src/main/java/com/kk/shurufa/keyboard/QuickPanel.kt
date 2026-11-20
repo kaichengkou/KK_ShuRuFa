@@ -62,23 +62,23 @@ class QuickPanel(context: Context, private val prefs: Prefs) : View(context) {
                 else -> if (i == pressed) theme.surfacePressed else theme.surface
             }
             bg.alpha = (bg.alpha * p).toInt()
-            c.drawRoundRect(r, dp(14f), dp(14f), bg)
+            c.drawRoundRect(r, Ui.radiusLarge(dp(prefs.keyRadiusDp), dp(1f)), Ui.radiusLarge(dp(prefs.keyRadiusDp), dp(1f)), bg)
             val ink = if (on) theme.onAccent else theme.ink
             tp.color = ink; tp.alpha = (255 * p).toInt()
-            tp.textSize = sp(13.5f); tp.isFakeBoldText = true
+            tp.textSize = sp(Ui.BODY); tp.typeface = Ui.medium
             val tx = r.left + dp(11f)
             if (t.sub.isNotEmpty()) {
                 c.drawText(t.title, tx, r.centerY() - dp(2f), tp)
-                tp.isFakeBoldText = false
-                tp.textSize = sp(10.5f)
+                tp.typeface = Ui.regular
+                tp.textSize = sp(Ui.CAPTION)
                 tp.color = if (on) theme.onAccent else theme.hint
                 tp.alpha = (255 * p * if (on) 0.85f else 1f).toInt()
-                c.drawText(t.sub, tx, r.centerY() + sp(12f), tp)
+                c.drawText(t.sub, tx, r.centerY() + sp(Ui.SMALL), tp)
             } else {
                 val fm = tp.fontMetrics
                 c.drawText(t.title, tx, r.centerY() - (fm.ascent + fm.descent) / 2, tp)
             }
-            tp.isFakeBoldText = false
+            tp.typeface = Ui.regular
         }
     }
 
