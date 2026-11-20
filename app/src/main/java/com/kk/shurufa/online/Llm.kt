@@ -24,15 +24,28 @@ import java.net.URL
  * protocol; Gemini has its own. All stream, so text appears while it is written.
  */
 object Llm {
-    class Provider(val id: String, val title: String, val defaultModel: String, val defaultBase: String, val keyHint: String, val site: String)
+    /** [protocol]: "claude" (Anthropic Messages, official SDK), "openai" (Chat Completions) or "gemini". */
+    class Provider(val id: String, val title: String, val defaultModel: String, val defaultBase: String, val keyHint: String, val site: String, val protocol: String)
 
     val PROVIDERS = listOf(
-        Provider("claude", "Claude", "claude-opus-5-5", "", "sk-ant-…", "console.anthropic.com"),
-        Provider("openai", "OpenAI", "gpt-5-mini", "https://api.openai.com/v1", "sk-…", "platform.openai.com"),
-        Provider("deepseek", "DeepSeek", "deepseek-chat", "https://api.deepseek.com/v1", "sk-…", "platform.deepseek.com"),
-        Provider("gemini", "Gemini", "gemini-2.5-flash", "https://generativelanguage.googleapis.com/v1beta", "AIza…", "aistudio.google.com"),
-        Provider("custom", "自定义（OpenAI 兼容）", "", "", "", "任何兼容 /chat/completions 的服务"),
+        Provider("claude", "Claude", "claude-opus-5-5", "", "sk-ant-…", "console.anthropic.com", "claude"),
+        Provider("openai", "OpenAI", "gpt-5-mini", "https://api.openai.com/v1", "sk-…", "platform.openai.com", "openai"),
+        Provider("gemini", "Gemini", "gemini-2.5-flash", "https://generativelanguage.googleapis.com/v1beta", "AIza…", "aistudio.google.com", "gemini"),
+        Provider("deepseek", "DeepSeek", "deepseek-chat", "https://api.deepseek.com/v1", "sk-…", "platform.deepseek.com", "openai"),
+        Provider("qwen", "通义千问", "qwen-plus", "https://dashscope.aliyuncs.com/compatible-mode/v1", "sk-…", "bailian.console.aliyun.com", "openai"),
+        Provider("kimi", "Kimi", "moonshot-v1-8k", "https://api.moonshot.cn/v1", "sk-…", "platform.moonshot.cn", "openai"),
+        Provider("glm", "智谱 GLM", "glm-4-flash", "https://open.bigmodel.cn/api/paas/v4", "", "open.bigmodel.cn", "openai"),
+        Provider("doubao", "豆包（火山方舟）", "", "https://ark.cn-beijing.volces.com/api/v3", "", "console.volcengine.com/ark（模型填接入点 ID）", "openai"),
+        Provider("siliconflow", "硅基流动", "deepseek-ai/DeepSeek-V3", "https://api.siliconflow.cn/v1", "sk-…", "cloud.siliconflow.cn", "openai"),
+        Provider("openrouter", "OpenRouter", "openai/gpt-5-mini", "https://openrouter.ai/api/v1", "sk-or-…", "openrouter.ai", "openai"),
+        Provider("grok", "Grok（xAI）", "grok-4", "https://api.x.ai/v1", "xai-…", "console.x.ai", "openai"),
+        Provider("mistral", "Mistral", "mistral-small-latest", "https://api.mistral.ai/v1", "", "console.mistral.ai", "openai"),
+        Provider("custom", "自定义", "", "", "", "任何服务，选择接口格式", "openai"),
     )
+
+    val PROTOCOLS = listOf("openai" to "OpenAI 格式", "claude" to "Anthropic 格式", "gemini" to "Gemini 格式")
+    /** The protocol a provider speaks (the custom one is chosen in settings). */
+    fun protocol(prefs: Prefs, id: String) = if (id == "custom") prefs.sp.getString("llm_custom_protocol", "openai")!! else provider(id).protocol
 
     /** Suggested models per provider (any model name can be typed in settings). */
     val MODEL_SUGGESTIONS = mapOf(
@@ -56,8 +69,9 @@ object Llm {
      */
     fun complete(prefs: Prefs, id: String, system: String, user: String, onText: (String) -> Unit = {}, cancelled: () -> Boolean = { false }): String {
         if (!configured(prefs, id)) error("还没有设置 ${provider(id).title} 的 API Key")
-        return when (id) {
-            "claude" -> claude(key(prefs, id), model(prefs, id), system, user, onText, cancelled)
+        return when (protocol(prefs, id)) {
+            // Claude itself, or a service that speaks the Anthropic format at its own address
+            "claude" -> claude(key(prefs, id), model(prefs, id), system, user, onText, cancelled, if (id == "claude") null else base(prefs, id))
             "gemini" -> gemini(base(prefs, id), key(prefs, id), model(prefs, id), system, user, onText, cancelled)
             else -> openAi(base(prefs, id), key(prefs, id), model(prefs, id), system, user, onText, cancelled)
         }.trim()
@@ -65,19 +79,21 @@ object Llm {
 
     // ---- Claude (official SDK) ----
 
-    private fun claude(key: String, model: String, system: String, user: String, onText: (String) -> Unit, cancelled: () -> Boolean): String {
-        val client = AnthropicOkHttpClient.builder().apiKey(key).build()
-        val params = MessageCreateParams.builder()
+    private fun claude(key: String, model: String, system: String, user: String, onText: (String) -> Unit, cancelled: () -> Boolean, baseUrl: String? = null): String {
+        val client = AnthropicOkHttpClient.builder().apiKey(key).apply { if (baseUrl != null) baseUrl(baseUrl) }.build()
+        val b = MessageCreateParams.builder()
             .model(model)
             .maxTokens(8000L)
             .system(system)
             .addUserMessage(user)
-            // short rewrites and translations: low effort is quick and good enough
-            .outputConfig(BetaOutputConfig.builder().effort(BetaOutputConfig.Effort.LOW).build())
-            // if a safety classifier declines, the API retries on a suitable model by itself
-            .addBeta("server-side-fallback-2026-07-01")
-            .putAdditionalBodyProperty("fallbacks", JsonValue.from("default"))
-            .build()
+        if (baseUrl == null) {
+            // Claude: short rewrites and translations are quick at low effort, and if a safety
+            // classifier declines, the API retries on a suitable model by itself
+            b.outputConfig(BetaOutputConfig.builder().effort(BetaOutputConfig.Effort.LOW).build())
+                .addBeta("server-side-fallback-2026-07-01")
+                .putAdditionalBodyProperty("fallbacks", JsonValue.from("default"))
+        }
+        val params = b.build()
         val sb = StringBuilder()
         var refused = false
         try {

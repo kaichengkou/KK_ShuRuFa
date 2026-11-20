@@ -226,7 +226,7 @@ class KeyboardRenderTest {
         val repo = LayoutRepo(ctx)
         val fam = 220
         // 数字·标准
-        val num = KeyboardView(ctx, prefs).apply { listener = this@KeyboardRenderTest.listener; setRows(repo.keyboard("num").rows + listOf(com.kk.shurufa.keyboard.FamilyRows.number(true))) }
+        val num = KeyboardView(ctx, prefs).apply { listener = this@KeyboardRenderTest.listener; setRows(repo.keyboard("num").rows) }
         panelShot("num", num, fam) { it.showMath(emptyList(), "", "uni", simple = true) }
         // 数字·学术
         val m = repo.math()
@@ -308,14 +308,18 @@ class KeyboardRenderTest {
         // emoji
         val emo = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
         val erail = com.kk.shurufa.keyboard.GridPanel(ctx, prefs).apply { columns = 1; rowHeightDp = 36f; textSp = 13.5f; cellStyle = com.kk.shurufa.keyboard.GridPanel.CellStyle.RAIL; selectedIndex = 1 }
-        val ecells = com.kk.shurufa.keyboard.GridPanel(ctx, prefs).apply { columns = 7; rowHeightDp = 46f; textSp = 25f; cellStyle = com.kk.shurufa.keyboard.GridPanel.CellStyle.PLAIN }
+        val ecells = com.kk.shurufa.keyboard.GridPanel(ctx, prefs).apply { columns = 8; rowHeightDp = 40f; textSp = 22f; cellStyle = com.kk.shurufa.keyboard.GridPanel.CellStyle.PLAIN }
         emo.addView(erail, LinearLayout.LayoutParams((ctx.resources.displayMetrics.density * 64).toInt(), -1))
         emo.addView(ecells, LinearLayout.LayoutParams(0, -1, 1f))
         val groups = ctx.assets.open("data/emoji.txt").bufferedReader().readLines().map { it.substringBefore('\t') to it.substringAfter('\t').split(' ') }
         erail.setItems(listOf("⌕ 查找", "最近") + groups.map { it.first } + "颜文字")
         erail.selectedIndex = 2
-        ecells.setItems(groups[0].second)
+        ecells.setItems(groups[1].second)
+        val vmap = com.kk.shurufa.ime.EmojiData(ctx).apply { load() }.variants
+        ecells.marks = groups[1].second.indices.filter { vmap.containsKey(groups[1].second[it]) }.toSet()
+        erail.selectedIndex = 3
         panelShot("emoji", emo)
+        ecells.marks = emptySet()
         erail.selectedIndex = groups.size + 2
         ecells.columns = 3; ecells.textSp = 14f; ecells.rowHeightDp = 44f
         ecells.setItems(ctx.assets.open("data/kaomoji.txt").bufferedReader().readLines().filter { it.isNotBlank() })

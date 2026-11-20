@@ -30,6 +30,7 @@ class QuickPanel(context: Context, private val prefs: Prefs) : View(context) {
 
     private val bg = Paint(Paint.ANTI_ALIAS_FLAG)
     private val tp = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.LEFT }
+    private val ip = Paint(Paint.ANTI_ALIAS_FLAG)
     private val rects = mutableListOf<RectF>()
     private var pressed = -1
     private val appear = Tween(1f)
@@ -43,7 +44,7 @@ class QuickPanel(context: Context, private val prefs: Prefs) : View(context) {
         val pad = dp(8f); val g = dp(7f)
         val rowsN = (tiles.size + cols - 1) / cols
         val w = (width - 2 * pad - g * (cols - 1)) / cols
-        val h = ((height - 2 * pad - g * (rowsN - 1)) / rowsN).coerceAtMost(dp(64f))
+        val h = ((height - 2 * pad - g * (rowsN - 1)) / rowsN).coerceAtMost(dp(72f))
         val a = appear.value
         if (appear.running) postInvalidateOnAnimation()
         tiles.forEachIndexed { i, t ->
@@ -64,22 +65,44 @@ class QuickPanel(context: Context, private val prefs: Prefs) : View(context) {
             bg.alpha = (bg.alpha * p).toInt()
             c.drawRoundRect(r, Ui.radiusLarge(dp(prefs.keyRadiusDp), dp(1f)), Ui.radiusLarge(dp(prefs.keyRadiusDp), dp(1f)), bg)
             val ink = if (on) theme.onAccent else theme.ink
-            tp.color = ink; tp.alpha = (255 * p).toInt()
-            tp.textSize = sp(Ui.BODY); tp.typeface = Ui.medium
-            val tx = r.left + dp(11f)
-            if (t.sub.isNotEmpty()) {
-                c.drawText(t.title, tx, r.centerY() - dp(2f), tp)
-                tp.typeface = Ui.regular
-                tp.textSize = sp(Ui.CAPTION)
-                tp.color = if (on) theme.onAccent else theme.hint
-                tp.alpha = (255 * p * if (on) 0.85f else 1f).toInt()
-                c.drawText(t.sub, tx, r.centerY() + sp(Ui.SMALL), tp)
-            } else {
-                val fm = tp.fontMetrics
-                c.drawText(t.title, tx, r.centerY() - (fm.ascent + fm.descent) / 2, tp)
+            // a glyph says at a glance what the tile is; the state is the fill (accent = on)
+            val gx = r.left + dp(12f) + dp(10f)
+            val gy = r.top + r.height() * 0.34f
+            val glyph = GLYPHS[t.id]
+            if (glyph != null) {
+                if (Icons.all.containsKey(glyph)) {
+                    ip.color = if (on) theme.onAccent else theme.accent; ip.alpha = (255 * p).toInt()
+                    Icons.draw(c, glyph, gx, gy, dp(19f), ip, filled = glyph == "ai")
+                } else {
+                    tp.textAlign = Paint.Align.CENTER; tp.typeface = Ui.medium; tp.textSize = sp(Ui.TITLE)
+                    tp.color = if (on) theme.onAccent else theme.accent; tp.alpha = (255 * p).toInt()
+                    val fm = tp.fontMetrics
+                    c.drawText(glyph, gx, gy - (fm.ascent + fm.descent) / 2, tp)
+                    tp.textAlign = Paint.Align.LEFT
+                }
             }
+            if (t.on != null) {
+                // a small switch mark in the corner
+                val sx = r.right - dp(16f); val sy = r.top + dp(14f)
+                bg.color = if (on) theme.onAccent else theme.hint; bg.alpha = ((if (on) 230 else 120) * p).toInt()
+                c.drawCircle(sx, sy, dp(3.2f), bg)
+            }
+            tp.color = ink; tp.alpha = (255 * p).toInt()
+            tp.textSize = sp(Ui.SMALL + 0.5f); tp.typeface = Ui.medium
+            val title = if (t.sub.isNotEmpty() && t.on == null && t.id == "theme") "${t.title} · ${t.sub}" else t.title
+            c.drawText(title, r.left + dp(12f), r.bottom - dp(12f), tp)
             tp.typeface = Ui.regular
         }
+    }
+
+    companion object {
+        /** Tile id → an icon name, or a short text glyph. */
+        val GLYPHS = mapOf(
+            "trad" to "繁", "emoji" to "emoji", "predict" to "ai", "correct" to "check", "pinyin" to "ā", "stress" to "á",
+            "latex" to "∑", "theme" to "moon", "vibrate" to "vibrate", "sound" to "speaker", "math" to "π", "symbols" to "§",
+            "cursor" to "cursor", "clipboard" to "clipboard", "picker" to "abc", "settings" to "settings",
+            "voice" to "mic", "translate" to "translate", "toolbar" to "grid",
+        )
     }
 
     @SuppressLint("ClickableViewAccessibility")

@@ -1,17 +1,22 @@
 package com.kk.shurufa.voice
 
 /**
- * Cuts a live 16 kHz stream into sentences with a voice-activity detector. Fed 512-sample
- * chunks, it reports a growing sentence for live display ([Event.Partial]), each finished
- * sentence with the pause before it ([Event.Final]), and [Event.Stop] once nobody has spoken
- * for [autoStopMs]. Time is counted in samples, so the result does not depend on the clock.
+ * Turns a live 16 kHz stream into utterances. A pause for thinking does not end anything: the
+ * utterance keeps growing across pauses and is recognized again as a whole, so the model, seeing
+ * the full context, decides where commas and full stops go. Only a long pause ([commitPauseMs])
+ * or the end of the stream finishes it ([Event.Final]). Silences inside an utterance are shortened
+ * to [keepGapMs] before recognition, so thinking time costs no extra work.
+ *
+ * Fed 512-sample chunks; time is counted in samples, so results do not depend on the clock.
  */
 class Segmenter(
     private val vad: (FloatArray) -> Float,
     pauseMs: Int,
+    commitPauseMs: Int,
     private val autoStopMs: Long,
     private val partialEveryChunks: Int = 16,
-    private val maxSentenceSec: Int = 25,
+    private val maxUtteranceSec: Int = 24,
+    keepGapMs: Int = 400,
 ) {
     sealed class Event {
         class Partial(val pcm: FloatArray) : Event()
@@ -20,57 +25,65 @@ class Segmenter(
     }
 
     private val chunkMs = SileroVad.CHUNK / 16L
-    private val endChunks = (pauseMs / chunkMs).toInt().coerceAtLeast(8)
-    private val preRoll = 10 * SileroVad.CHUNK
+    /** A pause this long refreshes the text (the model may now place a comma). */
+    private val pauseChunks = (pauseMs / chunkMs).toInt().coerceAtLeast(6)
+    private val commitChunks = (commitPauseMs / chunkMs).toInt().coerceAtLeast(pauseChunks + 1)
+    private val keepGapChunks = (keepGapMs / chunkMs).toInt()
+    private val preRollChunks = 10
+    private val pre = ArrayDeque<FloatArray>()
     private val audio = FloatArrayBuilder()
-    private var speaking = false
-    private var segStart = 0
-    private var silence = 0
+    private var inUtterance = false
     private var voiced = 0
+    private var silence = 0
     private var sinceLast = 0
+    private var refreshedAtPause = false
     private var now = 0L
     private var lastSpeechEnd = 0L
-    private var speechStart = 0L
+    private var utteranceStart = 0L
     private var heardAny = false
-
-    val isSpeaking get() = speaking
 
     fun feed(chunk: FloatArray): List<Event> {
         now += chunkMs
-        audio.add(chunk, chunk.size)
         val p = vad(chunk)
-        if (!speaking) {
-            voiced = if (p > 0.5f) voiced + 1 else 0
+        val speech = p > 0.5f
+        if (!inUtterance) {
+            pre.addLast(chunk.copyOf()); if (pre.size > preRollChunks) pre.removeFirst()
+            voiced = if (speech) voiced + 1 else 0
             if (voiced >= 2) {
-                speaking = true; silence = 0; sinceLast = 0
-                speechStart = now - voiced * chunkMs
-                segStart = (audio.size - voiced * SileroVad.CHUNK - preRoll).coerceAtLeast(0)
+                inUtterance = true; silence = 0; sinceLast = 0; refreshedAtPause = false
+                utteranceStart = now - voiced * chunkMs
+                audio.clear()
+                for (c in pre) audio.add(c, c.size)
+                pre.clear()
                 return emptyList()
             }
-            // keep only a little silence before the next sentence
-            if (audio.size > preRoll * 3) audio.dropFront(audio.size - preRoll)
-            // before anything was said, allow a few seconds more to start
             val idle = now - (if (heardAny) lastSpeechEnd else 0L)
+            // before anything was said, allow a few seconds more to start
             return if (autoStopMs > 0 && idle > autoStopMs + (if (heardAny) 0 else 4000)) listOf(Event.Stop) else emptyList()
         }
         silence = if (p < 0.35f) silence + 1 else 0
-        sinceLast++
-        if (silence >= endChunks || audio.size - segStart > maxSentenceSec * 16000) return listOf(finish(trailing = silence))
-        if (sinceLast >= partialEveryChunks) { sinceLast = 0; return listOf(Event.Partial(audio.toArray(segStart, audio.size))) }
-        return emptyList()
+        // thinking time is not kept beyond a short gap
+        if (silence <= keepGapChunks) audio.add(chunk, chunk.size)
+        if (silence == 0) refreshedAtPause = false
+        val events = ArrayList<Event>(1)
+        when {
+            silence >= commitChunks || audio.size > maxUtteranceSec * 16000 -> events += finish()
+            silence >= pauseChunks && !refreshedAtPause -> { refreshedAtPause = true; sinceLast = 0; events += Event.Partial(audio.toArray()) }
+            silence == 0 && ++sinceLast >= partialEveryChunks -> { sinceLast = 0; events += Event.Partial(audio.toArray()) }
+        }
+        return events
     }
 
-    /** The sentence being spoken when the stream ends, if any. */
-    fun flush(): Event.Final? = if (speaking) finish(trailing = 0) else null
+    /** The utterance still open when the stream ends, if any. */
+    fun flush(): Event.Final? = if (inUtterance) finish() else null
 
-    private fun finish(trailing: Int): Event.Final {
-        val segEnd = audio.size - (trailing - 3).coerceAtLeast(0) * SileroVad.CHUNK
-        val pause = if (heardAny) (speechStart - lastSpeechEnd).coerceAtLeast(0L) else 0L
-        val e = Event.Final(audio.toArray(segStart, segEnd), pause)
+    private fun finish(): Event.Final {
+        val pause = if (heardAny) (utteranceStart - lastSpeechEnd).coerceAtLeast(0L) else 0L
+        val e = Event.Final(audio.toArray(), pause)
         heardAny = true
-        lastSpeechEnd = now - trailing * chunkMs
-        speaking = false; voiced = 0
-        audio.dropFront((segEnd - preRoll).coerceAtLeast(0))
+        lastSpeechEnd = now - silence * chunkMs
+        inUtterance = false; voiced = 0
+        audio.clear()
         return e
     }
 }

@@ -1,26 +1,32 @@
 package com.kk.shurufa.voice
 
 /**
- * 断句和标点: turns one recognized sentence into what goes into the field, given the text
- * already before the cursor and the pause before the sentence.
+ * 断句和标点: turns one recognized utterance into what goes into the field, given the text
+ * already before the cursor. Punctuation inside an utterance comes from the model, which sees
+ * the whole utterance; nothing here is decided by how long the speaker paused.
  *
- * Styles: "full" keeps the model's punctuation; "chat" drops the full stop at the end of each
- * sentence (the way people type messages); "none" removes punctuation and separates sentences
- * with spaces. With [joinComma], a short pause after a sentence that ended in 。 is treated as
- * the same sentence going on, and that 。 becomes ，.
+ * Styles: "full" keeps the model's punctuation; "chat" drops the full stop at the end (the way
+ * people type messages) and joins the next utterance with a comma; "none" removes punctuation
+ * and separates with spaces. [fillers] removes hesitation sounds (嗯、呃) the model wrote down.
  */
 object VoiceText {
     class Edit(val deleteBefore: Int, val insert: String)
 
     private val zhPunct = "，。！？、；：,.!?;:"
     private fun isCjk(c: Char) = Character.UnicodeScript.of(c.code) == Character.UnicodeScript.HAN
+    private val filler = Regex("(^|(?<=[，。！？、；：,.!?\\s]))(嗯+|呃+|额+|唔+|emm+|uh+|um+)[，、,。.\\s]*", RegexOption.IGNORE_CASE)
 
-    fun format(raw: String, before: String, pauseMs: Long, continuing: Boolean, style: String, joinComma: Boolean, pangu: Boolean, shortPauseMs: Long = 900): Edit {
+    /** Removes hesitation sounds standing on their own (not 嗯 in “嗯，好的” said as an answer when it is the only word). */
+    fun dropFillers(t: String): String {
+        val out = filler.replace(t, "").trim()
+        return out.ifEmpty { t }
+    }
+
+    fun format(raw: String, before: String, continuing: Boolean, style: String, pangu: Boolean, fillers: Boolean = true): Edit {
         var t = raw.trim()
+        if (fillers) t = dropFillers(t)
         if (t.isEmpty()) return Edit(0, "")
-        val chinese = t.any { isCjk(it) }
-        if (!chinese) return latin(t, before)
-        var delete = 0
+        if (!t.any { isCjk(it) }) return latin(t, before)
         val prevChar = before.lastOrNull()
         when (style) {
             "none" -> {
@@ -29,18 +35,12 @@ object VoiceText {
             }
             "chat" -> {
                 t = t.trimEnd('。', '.')
-                // a sentence going on gets a comma, a new thought after a longer pause a space
-                if (continuing && prevChar != null && prevChar !in zhPunct && !prevChar.isWhitespace())
-                    t = (if (pauseMs < shortPauseMs * 2) "，" else " ") + t
-            }
-            else -> {
-                if (joinComma && continuing && prevChar == '。' && pauseMs < shortPauseMs) { delete = 1; t = "，$t" }
+                if (continuing && prevChar != null && prevChar !in zhPunct && !prevChar.isWhitespace()) t = "，$t"
             }
         }
         if (pangu) t = spaced(t)
-        return Edit(delete, t)
+        return Edit(0, t)
     }
-
     /** English, Russian: a space between sentences, a capital after a sentence end. */
     private fun latin(t0: String, before: String): Edit {
         var t = t0

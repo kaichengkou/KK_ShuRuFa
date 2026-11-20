@@ -40,6 +40,8 @@ class ClipStrip(context: Context, private val prefs: Prefs) : View(context) {
     var longOptions: ((Int) -> List<Output>)? = null
     var onLongOption: ((Int, Output) -> Unit)? = null
     var onFeedback: ((String) -> Unit)? = null
+    /** Vertical drags anywhere on the strip resize the clipboard (phase 0 start, 1 move, 2 end). */
+    var onVerticalDrag: ((phase: Int, rawY: Float, velocityY: Float) -> Unit)? = null
 
     private var cards: List<Card> = emptyList()
     private val layouts = HashMap<Int, StaticLayout>()
@@ -185,6 +187,8 @@ class ClipStrip(context: Context, private val prefs: Prefs) : View(context) {
     private var lastX = 0f
     private var dragging = false
     private var pressed = -1
+    private var vDrag = false
+    private var downAt = 0L
     private var menuFor = -1
     private var tickIndex = 0
     private var vt: VelocityTracker? = null
@@ -216,7 +220,7 @@ class ClipStrip(context: Context, private val prefs: Prefs) : View(context) {
     /** Where a fling of [v] px/s from here would come to rest, rounded to a card edge. */
     private fun snapTarget(v: Float): Float {
         // coasting distance under the friction setting; a stiffer feel stops sooner
-        val coast = -v * 0.16f / prefs.clipFriction.coerceAtLeast(0.3f)
+        val coast = -v * 0.3f / prefs.clipFriction.coerceAtLeast(0.3f)
         if (cards.isEmpty()) return 0f
         return (lefts[nearest(scrollPos + coast)] - pad).coerceIn(0f, maxScroll)
     }
@@ -228,7 +232,8 @@ class ClipStrip(context: Context, private val prefs: Prefs) : View(context) {
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 scroller.forceFinished(true)
-                downX = e.x; downY = e.y; lastX = e.x; dragging = false; menuFor = -1
+                downX = e.x; downY = e.y; lastX = e.x; dragging = false; menuFor = -1; vDrag = false
+                downAt = android.os.SystemClock.uptimeMillis()
                 pressed = hit(e.x, e.y)
                 tickIndex = nearest(scrollPos)
                 if (pressed >= 0) { onFeedback?.invoke("press"); handler.postDelayed(longRunnable, 420) }
@@ -239,6 +244,12 @@ class ClipStrip(context: Context, private val prefs: Prefs) : View(context) {
                 if (menuFor >= 0) {
                     val (ox, oy) = overlayOffset()
                     overlay?.moveSelection(e.x + ox, e.y + oy)
+                    return true
+                }
+                if (vDrag) { onVerticalDrag?.invoke(1, e.rawY, 0f); return true }
+                if (!dragging && onVerticalDrag != null && abs(e.y - downY) > slop && abs(e.y - downY) > abs(e.x - downX)) {
+                    vDrag = true; pressed = -1; handler.removeCallbacks(longRunnable); invalidate()
+                    onVerticalDrag?.invoke(0, e.rawY - (e.y - downY), 0f); onVerticalDrag?.invoke(1, e.rawY, 0f)
                     return true
                 }
                 if (!dragging && abs(e.x - downX) > slop) { dragging = true; pressed = -1; handler.removeCallbacks(longRunnable) }
@@ -256,6 +267,13 @@ class ClipStrip(context: Context, private val prefs: Prefs) : View(context) {
             }
             MotionEvent.ACTION_UP -> {
                 handler.removeCallbacks(longRunnable)
+                if (vDrag) {
+                    vt?.computeCurrentVelocity(1000)
+                    onVerticalDrag?.invoke(2, e.rawY, vt?.yVelocity ?: 0f)
+                    vDrag = false; pressed = -1; vt?.recycle(); vt = null; invalidate()
+                    return true
+                }
+                val held = android.os.SystemClock.uptimeMillis() - downAt
                 when {
                     menuFor >= 0 -> {
                         overlay?.selected()?.let { onLongOption?.invoke(menuFor, it) }
@@ -266,11 +284,12 @@ class ClipStrip(context: Context, private val prefs: Prefs) : View(context) {
                         vt?.computeCurrentVelocity(1000)
                         val target = snapTarget(vt?.xVelocity ?: 0f)
                         val dist = abs(target - scrollPos)
-                        val ms = (220 + dist / step * 70).coerceAtMost(620f) * (if (prefs.animations) prefs.animSpeed else 0f)
+                        val ms = (180 + dist / step * 55).coerceAtMost(520f) * (if (prefs.animations) prefs.animSpeed else 0f)
                         scroller.startScroll(scrollPos.toInt(), 0, (target - scrollPos).toInt(), 0, ms.toInt())
                         postInvalidateOnAnimation()
                     }
-                    pressed >= 0 -> onTap?.invoke(pressed)
+                    // only a clean tap pastes: no slide, not held for long
+                    pressed >= 0 && (prefs.holdCancelMs <= 0 || held < prefs.holdCancelMs) -> onTap?.invoke(pressed)
                 }
                 pressed = -1
                 vt?.recycle(); vt = null
@@ -278,6 +297,7 @@ class ClipStrip(context: Context, private val prefs: Prefs) : View(context) {
             }
             MotionEvent.ACTION_CANCEL -> {
                 handler.removeCallbacks(longRunnable)
+                if (vDrag) { onVerticalDrag?.invoke(2, e.rawY, 0f); vDrag = false }
                 if (menuFor >= 0) { overlay?.hideOptions(); menuFor = -1 }
                 if (scrollPos !in 0f..maxScroll) { val t = scrollPos.coerceIn(0f, maxScroll); scroller.startScroll(scrollPos.toInt(), 0, (t - scrollPos).toInt(), 0, 240) }
                 pressed = -1; dragging = false; vt?.recycle(); vt = null; invalidate()

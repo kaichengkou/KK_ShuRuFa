@@ -82,7 +82,8 @@ class CandidateBar(context: Context, private val prefs: Prefs) : View(context) {
     private var message = ""
     var expanded = false
 
-    private val tools = listOf("ai", "emoji", "mic", "translate", "cursor", "clipboard", "quick")
+    /** The user's toolbar (settings → 工具栏); 快捷面板 is always last. */
+    private val tools get() = prefs.toolbar + "quick"
 
     private fun dp(v: Float) = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, resources.displayMetrics)
     private fun sp(v: Float) = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, v, resources.displayMetrics)
@@ -190,20 +191,44 @@ class CandidateBar(context: Context, private val prefs: Prefs) : View(context) {
     }
 
     private fun drawToolbar(c: Canvas, a: Float) {
-        val slot = width / tools.size.toFloat()
-        tools.forEachIndexed { i, id ->
+        val list = tools
+        val slot = width / list.size.toFloat()
+        val cy = height / 2f
+        val rad = minOf(dp(18f), slot / 2 - dp(4f))
+        list.forEachIndexed { i, id ->
             val cx = slot * i + slot / 2
-            val cy = height / 2f
             val active = id == activeTool
-            if (active || pressedTool == id) {
-                val w = dp(46f); val h = dp(32f)
-                pill(c, RectF(cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2), if (active) theme.accentSoft else theme.soft)
+            // every button sits on a soft disc; the open panel's button is filled with the accent
+            bg.color = when {
+                active -> if (pressedTool == id) theme.accentPressed else theme.accent
+                pressedTool == id -> theme.softPressed
+                else -> theme.soft
             }
-            ip.color = if (active || id == "ai") theme.accent else theme.inkSoft
-            ip.alpha = (255 * a).toInt()
-            Icons.draw(c, id, cx, cy, dp(21f), ip, filled = id == "ai")
+            bg.alpha = (bg.alpha * a).toInt()
+            c.drawCircle(cx, cy, rad, bg)
+            val ink = if (active) theme.onAccent else if (id == "ai") theme.accent else theme.inkSoft
+            val glyph = TOOL_GLYPHS[id]
+            if (glyph != null) {
+                tp.textAlign = Paint.Align.CENTER; tp.typeface = Ui.medium; tp.textSize = sp(Ui.TITLE + 1f)
+                tp.color = ink; tp.alpha = (255 * a).toInt()
+                text(c, glyph, cx, cy)
+                tp.typeface = Ui.regular
+            } else {
+                ip.color = ink; ip.alpha = (255 * a).toInt()
+                Icons.draw(c, id, cx, cy, dp(19f), ip, filled = id == "ai")
+            }
             hits += RectF(cx - slot / 2, 0f, cx + slot / 2, height.toFloat()) to { listener?.onTool(id) }
         }
+    }
+
+    companion object {
+        /** Tools that show a text glyph instead of a line icon. */
+        val TOOL_GLYPHS = mapOf("symbols" to "§", "math" to "π")
+        /** Every tool the toolbar can hold: id to name. */
+        val ALL_TOOLS = listOf(
+            "ai" to "AI 改写", "emoji" to "表情", "mic" to "语音", "translate" to "翻译", "cursor" to "文字编辑",
+            "clipboard" to "剪贴板", "symbols" to "符号", "math" to "学术键盘", "undo" to "撤销", "settings" to "设置",
+        )
     }
 
     private var pressedTool: String? = null

@@ -28,6 +28,10 @@ class SheetHandle(context: Context, private val prefs: Prefs) : View(context) {
     var onHeight: ((Int) -> Unit)? = null
     var onSettled: ((tall: Boolean) -> Unit)? = null
     var onFeedback: ((String) -> Unit)? = null
+    /** After a drag, once the sheet has come to rest at a detent. */
+    var onRest: (() -> Unit)? = null
+    /** Being dragged or still settling: the app below should not be resized meanwhile. */
+    val moving get() = active || anim?.isRunning == true
 
     private fun dp(v: Float) = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, resources.displayMetrics)
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -108,6 +112,9 @@ class SheetHandle(context: Context, private val prefs: Prefs) : View(context) {
             duration = if (prefs.animations) (300 * prefs.animSpeed).toLong() else 0L
             interpolator = OvershootInterpolator(0.9f)
             addUpdateListener { current = it.animatedValue as Int; onHeight?.invoke(current) }
+            addListener(object : android.animation.AnimatorListenerAdapter() {
+                override fun onAnimationEnd(a: android.animation.Animator) { onRest?.invoke() }
+            })
             start()
         }
         onFeedback?.invoke("gesture")

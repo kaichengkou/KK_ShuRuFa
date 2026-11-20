@@ -106,7 +106,24 @@ object Icons {
         moveTo(8f, 14.5f); lineTo(16f, 14.5f)
     }
 
+    private val check = p { moveTo(5f, 12.5f); lineTo(10f, 17.5f); lineTo(19.5f, 7f) }
+    private val moon = p { moveTo(19f, 14.5f); quadTo(12.5f, 17f, 9f, 12.5f); quadTo(6.5f, 8.5f, 9.5f, 4.5f); quadTo(3.5f, 6.5f, 4f, 13f); quadTo(5f, 20f, 12f, 20f); quadTo(17f, 20f, 19f, 14.5f); close() }
+    private val vibrate = p {
+        addRoundRect(RectF(8f, 4f, 16f, 20f), 2f, 2f, Path.Direction.CW)
+        moveTo(4.5f, 8f); lineTo(4.5f, 16f); moveTo(19.5f, 8f); lineTo(19.5f, 16f)
+        moveTo(2f, 10f); lineTo(2f, 14f); moveTo(22f, 10f); lineTo(22f, 14f)
+    }
+    private val speaker = p {
+        moveTo(4f, 9.5f); lineTo(7.5f, 9.5f); lineTo(12f, 5.5f); lineTo(12f, 18.5f); lineTo(7.5f, 14.5f); lineTo(4f, 14.5f); close()
+        moveTo(15.5f, 9f); quadTo(17.5f, 12f, 15.5f, 15f); moveTo(18f, 6.5f); quadTo(22f, 12f, 18f, 17.5f)
+    }
+    private val grid = p {
+        addRoundRect(RectF(4f, 4f, 10.5f, 10.5f), 2f, 2f, Path.Direction.CW); addRoundRect(RectF(13.5f, 4f, 20f, 10.5f), 2f, 2f, Path.Direction.CW)
+        addRoundRect(RectF(4f, 13.5f, 10.5f, 20f), 2f, 2f, Path.Direction.CW); addRoundRect(RectF(13.5f, 13.5f, 20f, 20f), 2f, 2f, Path.Direction.CW)
+    }
+
     val all = mapOf(
+        "check" to check, "moon" to moon, "vibrate" to vibrate, "speaker" to speaker, "grid" to grid,
         "select_all" to selectAll, "copy" to copy, "paste" to paste, "cut" to cut, "undo" to undo,
         "home" to lineStart, "end" to lineEnd, "abc" to keyboardIcon,
         "quick" to quick, "close" to close, "up" to up, "down" to down, "pin" to pin,

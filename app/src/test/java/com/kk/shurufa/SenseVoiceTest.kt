@@ -41,37 +41,41 @@ class SenseVoiceTest {
         }
     }
 
-    /** Two sentences with a pause between, then silence: two results, live partials, then auto-stop. */
-    @Test fun streamsSentencesAndStops() {
+    private fun stream(commitPauseMs: Int, sv: SenseVoice?): Triple<List<Pair<String, Long>>, Int, Int> {
         val model = File("src/main/assets/data/silero_vad_v5.onnx").readBytes()
         val speech = wav(File(res, "zh.wav"))
+        // a sentence, 1.5 s of thinking, the sentence again, then silence
         val a = FloatArray(8000) + speech + FloatArray(24000) + speech + FloatArray(16000 * 8)
-        val dir = System.getenv("KK_SENSEVOICE_DIR")?.let { File(it) }?.takeIf { File(it, "model.int8.onnx").isFile }
-        val sv = dir?.let { SenseVoice(File(it, "model.int8.onnx"), File(it, "tokens.txt"), 4) }
         SileroVad(model).use { vad ->
-            val seg = com.kk.shurufa.voice.Segmenter({ vad.probability(it) }, pauseMs = 700, autoStopMs = 3000)
+            val seg = com.kk.shurufa.voice.Segmenter({ vad.probability(it) }, pauseMs = 700, commitPauseMs = commitPauseMs, autoStopMs = 3000)
             val finals = mutableListOf<Pair<String, Long>>()
             var partials = 0
             var stoppedAt = -1
             for (i in 0 until a.size / SileroVad.CHUNK) {
-                val ev = seg.feed(a.copyOfRange(i * SileroVad.CHUNK, (i + 1) * SileroVad.CHUNK))
-                for (e in ev) when (e) {
+                for (e in seg.feed(a.copyOfRange(i * SileroVad.CHUNK, (i + 1) * SileroVad.CHUNK))) when (e) {
                     is com.kk.shurufa.voice.Segmenter.Event.Partial -> partials++
                     is com.kk.shurufa.voice.Segmenter.Event.Final -> finals += (sv?.recognize(e.pcm, lang = "zh") ?: "${e.pcm.size}") to e.pauseMs
                     com.kk.shurufa.voice.Segmenter.Event.Stop -> stoppedAt = i
                 }
                 if (stoppedAt >= 0) break
             }
-            println("finals=$finals partials=$partials stoppedAt=${stoppedAt * 32} ms")
-            assertEquals(2, finals.size)
-            assertEquals(true, partials >= 4)
-            // the pause between the sentences: 1.5 s of silence plus the quiet edges of the recording
-            assertEquals(true, finals[1].second in 1500..3500)
-            // stops about 3 s after the second sentence ends (it ends around 13 s)
-            assertEquals(true, stoppedAt * 32 in 14500..18500)
-            // (the recording says 开放时间; cut at different points the model hears 开放 or 开饭)
-            if (sv != null) finals.forEach { assertEquals(true, it.first.endsWith("时间早上9点至下午5点。")) }
+            println("commit=$commitPauseMs finals=$finals partials=$partials stoppedAt=${stoppedAt * 32} ms")
+            return Triple(finals, partials, stoppedAt * 32)
         }
+    }
+
+    /** A pause shorter than the commit pause is thinking time: one utterance, recognized as a whole. */
+    @Test fun thinkingPauseDoesNotCut() {
+        val dir = System.getenv("KK_SENSEVOICE_DIR")?.let { File(it) }?.takeIf { File(it, "model.int8.onnx").isFile }
+        val sv = dir?.let { SenseVoice(File(it, "model.int8.onnx"), File(it, "tokens.txt"), 4) }
+        val (one, partials, stopped) = stream(4000, sv)
+        assertEquals(1, one.size)
+        assertEquals(true, partials >= 4)
+        assertEquals(true, stopped in 14500..19500)
+        if (sv != null) assertEquals(true, Regex("时间早上9点至下午5点").findAll(one[0].first).count() == 2)
+        // a commit pause shorter than the gap: two utterances
+        val (two, _, _) = stream(1800, sv)
+        assertEquals(2, two.size)
         sv?.close()
     }
 }

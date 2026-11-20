@@ -137,6 +137,7 @@ private val PAGES = listOf(
     PageInfo("packs", "扩展词库", "古诗文等，可整句输入并自动接下句"),
     PageInfo("symbols", "符号与数学", "括号配对、数字后标点、数学键盘"),
     PageInfo("clipboard", "剪贴板", "保留条数、复制后的粘贴提示"),
+    PageInfo("toolbar", "工具栏", "选择和排列键盘上方的按钮"),
     PageInfo("voice", "语音输入", "本地识别模型、识别语言、系统识别"),
     PageInfo("online", "联网功能", "翻译、词库更新、AI 改写"),
     PageInfo("files", "布局文件", "导出和重新加载 YAML 布局"),
@@ -170,6 +171,7 @@ private fun SettingsApp(prefs: Prefs, start: String) {
                     "symbols" -> SymbolsPage(prefs)
                     "clipboard" -> ClipboardPage(prefs)
                     "voice" -> VoicePage(prefs)
+                    "toolbar" -> ToolbarPage(prefs)
                     "online" -> OnlinePage(prefs)
                     "files" -> FilesPage()
                 }
@@ -436,6 +438,8 @@ private fun GesturesPage(prefs: Prefs) {
         Toggle(prefs, Prefs.LP_HINTS, "长按包含滑动字符", "角标上的符号排在最前面", true)
         Toggle(prefs, Prefs.LP_CASE, "长按包含大写和小写", null, true)
         Toggle(prefs, Prefs.LP_DIGITS, "第一排长按包含数字", null, true)
+        Toggle(prefs, Prefs.DRAG_CANCEL, "拖远了就不上屏", "按下后手指滑出很远，当作误触取消", true)
+        IntSlider(prefs, Prefs.HOLD_CANCEL_MS, "按住太久不上屏", 1000, 0..3000, "ms", "没有长按菜单的键和剪贴板、候选：按住超过这么久松开不算点击；0 为关闭")
         Toggle(prefs, Prefs.TOP_ROW_SCRIPTS, "第一排左右滑输入上下角标数字", "左滑 ¹²³，右滑 ₁₂₃", false)
     }
     Group("空格") {
@@ -566,7 +570,7 @@ private fun ClipboardPage(prefs: Prefs) {
     Group("面板") {
         IntSlider(prefs, Prefs.CLIP_COLUMNS, "收藏的列数", 2, 2..4, "列", "列越多，一屏看到的越多，每条显示得越短")
         IntSlider(prefs, Prefs.CLIP_MAX_CHARS, "每条最多显示", 80, 20..300, "字", "更长的内容截断显示，粘贴时仍是完整的")
-        FloatSlider(prefs, Prefs.CLIP_FRICTION, "滑动阻尼", 1f, 0.4f..2.5f, "×", "越大越“沉”，甩一下滑过的条数越少")
+        FloatSlider(prefs, Prefs.CLIP_FRICTION, "滑动阻尼", 0.8f, 0.4f..2.5f, "×", "越大越“沉”，甩一下滑过的条数越少")
         Note("最近：横向滑动，停下时总有一条对齐左边。收藏：竖向滑动。点按粘贴，其余操作在长按菜单里。拖动工具栏或顶部横条可以拉高面板。")
     }
     Group {
@@ -825,7 +829,9 @@ private fun VoicePage(prefs: Prefs) {
     val granted = remember(tick) { com.kk.shurufa.voice.PermissionActivity.granted(ctx) }
     Group("识别方式") {
         Choice(prefs, Prefs.VOICE_ENGINE, "引擎", listOf("whisper" to "本地模型", "system" to "系统语音识别"))
-        Note("本地模型在手机上离线识别，边说边出字：中文用 SenseVoice（专为中文训练，带标点，也认得夹杂的英文），英文和俄语用 Whisper。系统识别用手机自带的服务，准确度取决于手机。")
+        Note("本地模型在手机上离线识别，边说边出字。中文和英文都用 SenseVoice（专为中文训练，英文也很好，带标点）；俄语它不支持，用 Whisper。系统识别用手机自带的服务，准确度取决于手机。")
+        Choice(prefs, Prefs.VOICE_EN_MODEL, "英文用", listOf("sensevoice" to "SenseVoice（流式）", "whisper" to "Whisper"))
+        Toggle(prefs, Prefs.VOICE_RETURN, "说完自动回到键盘", "自动结束收音后回到字母键盘", false)
         Choice(prefs, Prefs.VOICE_LANG, "识别语言", listOf("follow" to "跟随键盘", "zh" to "中文", "en" to "英文", "ru" to "俄语"))
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 4.dp)) {
             Text(if (granted) "已允许使用麦克风" else "还没有麦克风权限", Modifier.weight(1f))
@@ -834,10 +840,10 @@ private fun VoicePage(prefs: Prefs) {
     }
     Group("断句和标点") {
         Choice(prefs, Prefs.VOICE_PUNCT, "标点", listOf("full" to "完整标点", "chat" to "聊天风格", "none" to "不加标点"))
-        Note("完整标点：模型给的逗号句号问号都保留。聊天风格：每句末尾不加句号，短停顿用逗号接上，长停顿空一格——像平时发消息。不加标点：只用空格分开。")
-        Toggle(prefs, Prefs.VOICE_JOIN_COMMA, "短停顿接成一句", "停顿不到一秒时把上一句的句号改成逗号", true)
+        Note("边想边说时中途的停顿不会把话截断：一段话会整体识别，逗号和句号由模型按意思决定。完整标点：保留模型的标点。聊天风格：每段末尾不加句号，下一段用逗号接上。不加标点：只用空格分开。")
+        Toggle(prefs, Prefs.VOICE_FILLERS, "去掉语气词", "嗯、呃、额这类停顿时的声音不上屏", true)
         Toggle(prefs, Prefs.VOICE_PANGU, "中英文之间加空格", "“我用 iPhone 拍了 3 张”", false)
-        IntSlider(prefs, Prefs.VOICE_PAUSE_MS, "断句停顿", 700, 400..1500, "ms", "停顿超过这么久算一句话说完，马上上屏")
+        IntSlider(prefs, Prefs.VOICE_COMMIT_PAUSE, "一段话说完的停顿", 2000, 1000..4000, "ms", "停顿超过这么久，这段话才算说完并定稿；想得慢可以调长")
         IntSlider(prefs, Prefs.VOICE_AUTO_STOP, "自动结束", 3, 0..10, "秒", "这么久没有说话就停止收音；0 为不自动结束")
     }
     Group("模型") {
@@ -893,6 +899,7 @@ private fun ProviderCard(prefs: Prefs, p: com.kk.shurufa.online.Llm.Provider) {
                 TextButton(onClick = { model = m; prefs.put("llm_${p.id}_model", m) }) { Text(m.removePrefix("claude-"), style = MaterialTheme.typography.bodySmall) }
             }
         }
+        if (p.id == "custom") Choice(prefs, "llm_custom_protocol", "接口格式", com.kk.shurufa.online.Llm.PROTOCOLS)
         if (p.id != "claude") OutlinedTextField(base, { base = it.trim(); prefs.put("llm_${p.id}_base", base) }, Modifier.fillMaxWidth().padding(vertical = 4.dp),
             label = { Text("接口地址") }, singleLine = true, placeholder = { Text(p.defaultBase.ifEmpty { "https://…/v1" }) })
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 4.dp)) {
@@ -966,5 +973,35 @@ private fun OnlinePage(prefs: Prefs) {
             }) { Text("下载并部署") }
         }
         Note("更新后的词库放在应用自己的文件夹里，优先于安装包自带的版本；你自己造的词和学习记录不受影响。")
+    }
+}
+
+// ---- toolbar -------------------------------------------------------------------------------
+
+@Composable
+private fun ToolbarPage(prefs: Prefs) {
+    val all = com.kk.shurufa.keyboard.CandidateBar.ALL_TOOLS
+    var order by remember { mutableStateOf(prefs.toolbar) }
+    fun save(l: List<String>) { order = l; prefs.put(Prefs.TOOLBAR_ITEMS, l.joinToString(",")) }
+    Group("已显示（最多 6 个，快捷面板固定在最右）") {
+        order.forEachIndexed { i, id ->
+            Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(all.firstOrNull { it.first == id }?.second ?: id, Modifier.weight(1f))
+                TextButton(enabled = i > 0, onClick = { save(order.toMutableList().apply { add(i - 1, removeAt(i)) }) }) { Text("上移") }
+                TextButton(enabled = i < order.size - 1, onClick = { save(order.toMutableList().apply { add(i + 1, removeAt(i)) }) }) { Text("下移") }
+                TextButton(enabled = order.size > 1, onClick = { save(order - id) }) { Text("移除") }
+            }
+        }
+    }
+    Group("可添加") {
+        val rest = all.filter { it.first !in order }
+        if (rest.isEmpty()) Note("全部都已添加。")
+        rest.forEach { (id, name) ->
+            Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(name, Modifier.weight(1f))
+                TextButton(enabled = order.size < 6, onClick = { save(order + id) }) { Text("添加") }
+            }
+        }
+        Note("顺序就是从左到右的位置。打开某个面板时，它的按钮会变成主题色。")
     }
 }

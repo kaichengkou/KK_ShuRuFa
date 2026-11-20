@@ -232,8 +232,11 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
 
     /** Settings that only change behavior; everything else rebuilds the keyboard. */
     private val liveKeys = setOf(
-        "sym_recent", "emoji_recent", "kao_recent", "emoji_tone", Prefs.EMOJI_AUTO_UPDATE, Prefs.AI_KEY, Prefs.AI_MODEL, Prefs.TRANSLATE_TARGET, Prefs.TRANSLATE_WIFI,
-        Prefs.VOICE_ENGINE, Prefs.VOICE_MODEL, Prefs.VOICE_SOURCE, Prefs.VOICE_LANG, Prefs.VOICE_MAX_SEC, Prefs.ZH_TRAD, Prefs.ZH_EMOJI, Prefs.ZH_PREDICT, Prefs.PINYIN_MODE, Prefs.MATH_FORMAT,
+        "sym_recent", "emoji_recent", Prefs.TOOLBAR_ITEMS, "kao_recent", "emoji_tone", Prefs.EMOJI_AUTO_UPDATE, Prefs.AI_KEY, Prefs.AI_MODEL, Prefs.TRANSLATE_TARGET, Prefs.TRANSLATE_WIFI,
+        Prefs.VOICE_ENGINE, Prefs.VOICE_MODEL, Prefs.VOICE_SOURCE, Prefs.VOICE_LANG, Prefs.VOICE_MAX_SEC,
+        Prefs.TRANSLATE_ENGINE, Prefs.AI_PROVIDER, Prefs.VOICE_ZH_MODEL, Prefs.VOICE_PUNCT, Prefs.VOICE_JOIN_COMMA, Prefs.VOICE_PANGU,
+        Prefs.VOICE_PAUSE_MS, Prefs.VOICE_AUTO_STOP, Prefs.DRAG_CANCEL, Prefs.HOLD_CANCEL_MS, Prefs.VOICE_RETURN, Prefs.VOICE_EN_MODEL,
+        Prefs.VOICE_FILLERS, Prefs.VOICE_COMMIT_PAUSE, Prefs.ZH_TRAD, Prefs.ZH_EMOJI, Prefs.ZH_PREDICT, Prefs.PINYIN_MODE, Prefs.MATH_FORMAT,
         Prefs.VIBRATE, Prefs.SOUND, Prefs.CLIP_KEEP, Prefs.CLIP_SUGGEST, Prefs.ZH_CORRECTION, Prefs.STRESS_MODE,
         Prefs.BACKSPACE_RESELECT, Prefs.NUM_MODE, Prefs.TYPO_MARK, Prefs.RARE_ANNOTATE, Prefs.PACK_POETRY, Prefs.SYMBOL_MEMORY,
         Prefs.CLIP_MAX_CHARS, Prefs.CLIP_FRICTION, Prefs.CLIP_COLUMNS,
@@ -242,7 +245,8 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
     override fun onSharedPreferenceChanged(sp: SharedPreferences?, key: String?) {
         if (key != null && key.startsWith("hap_")) { haptics.invalidate(); return }
         if (key == "seen_emoji_reload") { loadEmoji(); return }
-        if (key == null || key.startsWith("app_lang_") || key.startsWith("seen_")) return
+        // settings that change behavior only must never rebuild the keyboard: that resets open panels
+        if (key == null || key.startsWith("app_lang_") || key.startsWith("seen_") || key.startsWith("llm_")) return
         when (key) {
             Prefs.ZH_EMOJI, Prefs.ZH_TRAD -> applyRimeOptions()
             Prefs.ZH_PREDICT -> if (prefs.zhPredict) predictor.load() else { predictions = emptyList(); syncBar() }
@@ -327,9 +331,11 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
         root.getLocationInWindow(loc)
         val bottom = loc[1] + root.height
         val shown = column.height
-        // a temporarily raised panel covers the app instead of pushing it up
+        // while a panel is dragged taller it covers the app; once it rests, the app makes room once,
+        // so what is pasted is not hidden behind it
         var reported = if (reportH > 0) reportH else shown
-        if (tall && (panel == Panel.CLIPBOARD || panel == Panel.CANDIDATES)) reported = minOf(reported, baseH + barH + navInset)
+        val sheet = if (panel == Panel.CLIPBOARD) clipHandle else if (panel == Panel.CANDIDATES) candHandle else null
+        if (sheet != null && sheet.moving) reported = minOf(reported, baseH + barH + navInset)
         val top = bottom - reported
         outInsets.contentTopInsets = top
         outInsets.visibleTopInsets = top
@@ -501,7 +507,8 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
         val base = baseH
         val tallH = tallH()
         val canTall = p == Panel.CLIPBOARD || p == Panel.CANDIDATES
-        if (from == Panel.SYMBOLS && p != Panel.SYMBOLS) lastSymbolsAt = SystemClock.uptimeMillis()
+        // 记住符号: back to the symbols only if they were the last panel of the family used
+        if (from == Panel.SYMBOLS && p != Panel.SYMBOLS) lastSymbolsAt = if (inFamily(p)) 0L else SystemClock.uptimeMillis()
         listOf(clipHandle, candHandle).forEach { it.low = base; it.high = tallH; it.current = if (tall) tallH else base }
         // the symbol and edit panels hide the toolbar and use its height themselves
         val noBar = p == Panel.SYMBOLS
@@ -524,7 +531,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
                 refreshMath(slide = 0)
                 content.addView(mathPanel, fixed)
             }
-            Panel.NUM -> { keyboard.setRows(layout("num").rows + listOf(FamilyRows.number(isZh))); content.addView(keyboard, fixed) }
+            Panel.NUM -> { keyboard.setRows(layout("num").rows); content.addView(keyboard, fixed) }
             Panel.CURSOR -> { syncEditPanel(); content.addView(editPanel, fixed); if (from != p) animateIn(editPanel) }
             Panel.SYMBOLS -> { refreshSymbols(); content.addView(symbolPanel, fixed); if (from != p) animateIn(symbolPanel) }
             Panel.CLIPBOARD -> { refreshClips(); content.addView(clipPanel, fixed); if (from != p) animateIn(clipPanel) }
@@ -589,7 +596,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
             emojiSearch && !composing && panel == Panel.LETTERS -> {
                 val q = searchQuery.toString().trim()
                 val drawable = emojiGroups.flatMapTo(HashSet()) { it.second }
-                searchResults = emojiData.search(q, 120).filter { it in drawable }.map { toneChoice[it] ?: it }
+                searchResults = emojiData.search(q, 120).filter { it in drawable }
                 bar.showPredictions(searchResults, when {
                     q.isEmpty() -> "查找表情：输入中文或英文关键词"
                     searchResults.isEmpty() -> "没有找到和「$q」相关的表情"
@@ -648,6 +655,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
         onFeedback = { k -> haptics.play(if (k == "gesture") HapticEvent.GESTURE else HapticEvent.OPTION) }
         onHeight = { h -> content.getChildAt(0)?.let { v -> v.layoutParams = v.layoutParams.apply { height = h }; v.requestLayout() } }
         onSettled = { t -> tall = t }
+        onRest = { root.requestLayout() }
     }
 
     private fun buildSymbolPanel() {
@@ -705,10 +713,10 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
                 // leaving selection mode drops the selection back to a caret at its end
                 if (!selectMode && selStart != selEnd) ic?.setSelection(selEnd, selEnd)
             }
-            "up" -> sendKey(KeyEvent.KEYCODE_DPAD_UP, shiftMeta())
-            "down" -> sendKey(KeyEvent.KEYCODE_DPAD_DOWN, shiftMeta())
-            "left" -> sendKey(KeyEvent.KEYCODE_DPAD_LEFT, shiftMeta())
-            "right" -> sendKey(KeyEvent.KEYCODE_DPAD_RIGHT, shiftMeta())
+            "up" -> caretStep(KeyEvent.KEYCODE_DPAD_UP)
+            "down" -> caretStep(KeyEvent.KEYCODE_DPAD_DOWN)
+            "left" -> caretStep(KeyEvent.KEYCODE_DPAD_LEFT)
+            "right" -> caretStep(KeyEvent.KEYCODE_DPAD_RIGHT)
             "home" -> sendKey(KeyEvent.KEYCODE_MOVE_HOME, shiftMeta())
             "end" -> sendKey(KeyEvent.KEYCODE_MOVE_END, shiftMeta())
             "select_all" -> { ic?.performContextMenuAction(android.R.id.selectAll); selectMode = true }
@@ -788,6 +796,10 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
             onLongOption = { i, o -> clipFavItems.getOrNull(i)?.let { onClipOption(it, o.text) } }
         }
         clipHandle = newHandle()
+        // the strip and the gaps between favorites resize the panel too, not only the grab bar
+        val drag: (Int, Float, Float) -> Unit = { phase, y, v -> when (phase) { 0 -> clipHandle.begin(y); 1 -> clipHandle.drag(y); else -> clipHandle.end(v) } }
+        clipStrip.onVerticalDrag = drag
+        clipFavs.onGapDrag = drag
         clipPanel.addView(clipHandle, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         clipPanel.addView(clipStrip, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(118f).toInt()))
         clipPanel.addView(clipFavs, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
@@ -829,7 +841,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
     }
 
     private fun refreshQuick() {
-        val themeName = when (prefs.theme) { "light" -> "浅色"; "dark" -> "深色"; else -> "跟随系统" }
+        val themeName = when (prefs.theme) { "light" -> "浅色"; "dark" -> "深色"; else -> "系统" }
         quickPanel.tiles = listOf(
             QuickPanel.Tile("trad", "繁体", "简繁切换", prefs.zhTraditional),
             QuickPanel.Tile("emoji", "Emoji", "候选里带表情", prefs.zhEmoji),
@@ -846,6 +858,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
             QuickPanel.Tile("cursor", "文字编辑"),
             QuickPanel.Tile("clipboard", "剪贴板"),
             QuickPanel.Tile("picker", "切换输入法"),
+            QuickPanel.Tile("toolbar", "工具栏"),
             QuickPanel.Tile("settings", "完整设置"),
         )
     }
@@ -868,6 +881,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
             "clipboard" -> showPanel(Panel.CLIPBOARD)
             "picker" -> (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager).showInputMethodPicker()
             "settings" -> openSettings()
+            "toolbar" -> openSettings("toolbar")
         }
         if (panel == Panel.QUICK) refreshQuick()
     }
@@ -1262,10 +1276,10 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
             "undo" -> undo()
             "lock" -> { symLock = !symLock; symBottom.lockOn = symLock; symBottom.invalidate()
                 Toast.makeText(this, if (symLock) "已锁定，可以连续输入符号" else "已解锁，点一个符号就回到字母键盘", Toast.LENGTH_SHORT).show() }
-            "left" -> sendKey(KeyEvent.KEYCODE_DPAD_LEFT, shiftMeta())
-            "right" -> sendKey(KeyEvent.KEYCODE_DPAD_RIGHT, shiftMeta())
-            "up" -> sendKey(KeyEvent.KEYCODE_DPAD_UP, shiftMeta())
-            "down" -> sendKey(KeyEvent.KEYCODE_DPAD_DOWN, shiftMeta())
+            "left" -> caretStep(KeyEvent.KEYCODE_DPAD_LEFT)
+            "right" -> caretStep(KeyEvent.KEYCODE_DPAD_RIGHT)
+            "up" -> caretStep(KeyEvent.KEYCODE_DPAD_UP)
+            "down" -> caretStep(KeyEvent.KEYCODE_DPAD_DOWN)
             "word_left" -> sendKey(KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.META_CTRL_ON or shiftMeta())
             "word_right" -> sendKey(KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.META_CTRL_ON or shiftMeta())
             "home" -> sendKey(KeyEvent.KEYCODE_MOVE_HOME, shiftMeta())
@@ -1356,10 +1370,45 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
     }
 
     override fun onCursorMove(dx: Int, dy: Int) {
-        val meta = shiftMeta()
-        repeat(abs(dx)) { sendKey(if (dx < 0) KeyEvent.KEYCODE_DPAD_LEFT else KeyEvent.KEYCODE_DPAD_RIGHT, meta) }
-        repeat(abs(dy)) { sendKey(if (dy < 0) KeyEvent.KEYCODE_DPAD_UP else KeyEvent.KEYCODE_DPAD_DOWN, meta) }
-        if (dx != 0 || dy != 0) haptics.play(HapticEvent.CURSOR)
+        var moved = false
+        repeat(abs(dx)) { moved = caretStep(if (dx < 0) KeyEvent.KEYCODE_DPAD_LEFT else KeyEvent.KEYCODE_DPAD_RIGHT) || moved }
+        repeat(abs(dy)) { moved = caretStep(if (dy < 0) KeyEvent.KEYCODE_DPAD_UP else KeyEvent.KEYCODE_DPAD_DOWN) || moved }
+        if (moved) haptics.play(HapticEvent.CURSOR)
+    }
+
+    /**
+     * Moves the caret one character (or line) inside the field. At the start or end of the text it
+     * stops there: arrow keys sent past the edge would move the focus to other parts of the app.
+     * In selection mode the moving end of the selection is extended. Returns false at an edge.
+     */
+    private fun caretStep(code: Int): Boolean {
+        val ic = currentInputConnection ?: return false
+        val et = ic.getExtractedText(ExtractedTextRequest(), 0)
+        val text = et?.text?.toString()
+        if (et == null || text == null) { sendKey(code, shiftMeta()); return true }
+        val anchor = et.selectionStart.coerceIn(0, text.length)
+        val caret = et.selectionEnd.coerceIn(0, text.length)
+        val bi = android.icu.text.BreakIterator.getCharacterInstance().apply { setText(text) }
+        fun prev(i: Int) = if (i <= 0) 0 else bi.preceding(i).let { if (it == android.icu.text.BreakIterator.DONE) 0 else it }
+        fun next(i: Int) = if (i >= text.length) text.length else bi.following(i).let { if (it == android.icu.text.BreakIterator.DONE) text.length else it }
+        val target: Int = when (code) {
+            KeyEvent.KEYCODE_DPAD_LEFT -> if (!selectMode && anchor != caret) minOf(anchor, caret) else prev(caret)
+            KeyEvent.KEYCODE_DPAD_RIGHT -> if (!selectMode && anchor != caret) maxOf(anchor, caret) else next(caret)
+            KeyEvent.KEYCODE_DPAD_UP -> {
+                // a line break above: let the editor move by line; otherwise go to the start
+                if (caret > 0 && text.lastIndexOf('\n', caret - 1) >= 0) { sendKey(code, shiftMeta()); return true }
+                0
+            }
+            KeyEvent.KEYCODE_DPAD_DOWN -> {
+                if (text.indexOf('\n', caret) >= 0) { sendKey(code, shiftMeta()); return true }
+                text.length
+            }
+            else -> caret
+        }
+        if (target == caret && (selectMode || anchor == caret)) return false
+        val base = et.startOffset
+        if (selectMode) ic.setSelection(base + anchor, base + target) else ic.setSelection(base + target, base + target)
+        return true
     }
 
     override fun onCursorMode(active: Boolean) {
@@ -1462,6 +1511,10 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
         when (id) {
             "cursor", "clipboard", "quick", "mic", "ai" -> showPanel(target!!)
             "emoji" -> showPanel(Panel.EMOJI)
+            "symbols" -> showPanel(if (panel == Panel.SYMBOLS) Panel.LETTERS else Panel.SYMBOLS)
+            "math" -> { commitComposingFirst(); showPanel(if (panel == Panel.MATH) Panel.LETTERS else Panel.MATH) }
+            "undo" -> undo()
+            "settings" -> openSettings()
             "translate" -> if (translateMode) stopTranslate() else startTranslate()
         }
     }
@@ -1502,7 +1555,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
     }
 
     override fun onFeedback(kind: String) {
-        haptics.play(when (kind) { "popup" -> HapticEvent.POPUP; "press" -> HapticEvent.LETTER; else -> HapticEvent.GESTURE })
+        haptics.play(when (kind) { "popup" -> HapticEvent.POPUP; "press" -> HapticEvent.LETTER; "cancel" -> HapticEvent.OPTION; else -> HapticEvent.GESTURE })
     }
 
     override fun onNumMode(mode: String) = onFunction(Key(fn = if (mode == "sci") "sci" else "simple"))
@@ -1618,7 +1671,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
             onFeedback = { haptics.play(HapticEvent.FUNCTION) }
         }
         emojiCells = GridPanel(this, prefs).apply {
-            theme = this@KkImeService.theme; columns = 7; rowHeightDp = 46f; textSp = 25f; cellStyle = GridPanel.CellStyle.PLAIN
+            theme = this@KkImeService.theme; columns = 8; rowHeightDp = 40f; textSp = 22f; cellStyle = GridPanel.CellStyle.PLAIN
             emptyText = "发过的表情会出现在这里"
             onItem = { i -> emojiShown.getOrNull(i)?.let { onEmoji(it) } }
             onFeedback = { k -> haptics.play(if (k == "popup") HapticEvent.POPUP else HapticEvent.LETTER) }
@@ -1647,12 +1700,14 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
         emojiShown = when {
             emojiGroup == 0 -> recentEmoji.toList()
             kao -> (recentKao + kaomoji).distinct()
-            else -> emojiGroups.getOrNull(emojiGroup - 1)?.second.orEmpty().map { toneChoice[it] ?: it }
+            else -> emojiGroups.getOrNull(emojiGroup - 1)?.second.orEmpty()
         }
         // kaomoji are wide: three to a row, in text size
-        emojiCells.columns = if (kao) 3 else 7
-        emojiCells.textSp = if (kao) 14f else 25f
-        emojiCells.rowHeightDp = if (kao) 44f else 46f
+        emojiCells.columns = if (kao) 3 else 8
+        emojiCells.textSp = if (kao) 14f else 22f
+        emojiCells.rowHeightDp = if (kao) 44f else 40f
+        // cells with skin tones or man/woman forms get a corner mark
+        emojiCells.marks = if (kao) emptySet() else emojiShown.indices.filter { emojiData.variants.containsKey(emojiBase(emojiShown[it])) }.toSet()
         emojiCells.setItems(emojiShown)
     }
 
@@ -1683,10 +1738,8 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
         return (listOf(base) + forms).chunked(6).map { row -> row.map { Output.of(it) } }
     }
 
-    private fun chooseVariant(shown: String, v: String) {
-        val base = emojiBase(shown)
-        if (v == base) toneChoice.remove(base) else toneChoice[base] = v
-        prefs.sp.edit().putString("emoji_tone", toneChoice.entries.joinToString("\u0002") { it.key + "\u0001" + it.value }).apply()
+    /** The chosen form is sent once; the grid keeps showing the default yellow. */
+    private fun chooseVariant(@Suppress("UNUSED_PARAMETER") shown: String, v: String) {
         onEmoji(v)
         refreshEmojiKeepScroll()
     }
@@ -1694,7 +1747,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
     /** Re-reads the current tab without moving the grid (after a tone was chosen). */
     private fun refreshEmojiKeepScroll() {
         if (emojiGroup in 1..emojiGroups.size) {
-            emojiShown = emojiGroups[emojiGroup - 1].second.map { toneChoice[it] ?: it }
+            emojiShown = emojiGroups[emojiGroup - 1].second
             emojiCells.setItems(emojiShown, resetScroll = false)
         } else if (emojiGroup == 0) {
             emojiShown = recentEmoji.toList()
@@ -1943,6 +1996,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
             }
             onMode = { voiceTranslate = !voiceTranslate; syncVoiceChips() }
             onUndo = { undoVoice() }
+            onDelete = { repeat -> if (!repeat) haptics.play(HapticEvent.BACKSPACE) else haptics.play(HapticEvent.REPEAT); deleteBackward() }
         }
         voicePanel = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         voicePanel.addView(voiceView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
@@ -1983,6 +2037,9 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
                 if (state == com.kk.shurufa.voice.VoiceEngine.State.IDLE || state == com.kk.shurufa.voice.VoiceEngine.State.ERROR) {
                     voiceView.partial = ""
                     currentInputConnection?.finishComposingText()
+                    // 说完回到键盘 (when something was said and the setting is on)
+                    if (state == com.kk.shurufa.voice.VoiceEngine.State.IDLE && prefs.voiceReturn && voiceSessionText && panel == Panel.VOICE)
+                        handler.postDelayed({ if (panel == Panel.VOICE && voice?.state == com.kk.shurufa.voice.VoiceEngine.State.IDLE) showPanel(Panel.LETTERS) }, 350)
                 }
                 if (state == com.kk.shurufa.voice.VoiceEngine.State.LISTENING) haptics.play(HapticEvent.GESTURE)
             }
@@ -2025,7 +2082,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
 
     /** What a growing sentence would look like once committed (shown as composing text). */
     private fun previewVoice(text: String): String = com.kk.shurufa.voice.VoiceText.format(
-        text, textBefore(4), 0, voiceSessionText, prefs.voicePunct, false, prefs.voicePangu).insert
+        text, textBefore(4), voiceSessionText, prefs.voicePunct, prefs.voicePangu, prefs.voiceFillers).insert
 
     private fun commitVoice(text: String, pauseMs: Long) {
         val ic = currentInputConnection ?: return
@@ -2044,8 +2101,8 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
         val ic = currentInputConnection ?: return
         // the composing preview is replaced by the final text
         ic.setComposingText("", 1)
-        val edit = com.kk.shurufa.voice.VoiceText.format(text, textBefore(4), pauseMs, voiceSessionText,
-            prefs.voicePunct, prefs.voiceJoinComma, prefs.voicePangu)
+        val edit = com.kk.shurufa.voice.VoiceText.format(text, textBefore(4), voiceSessionText,
+            prefs.voicePunct, prefs.voicePangu, prefs.voiceFillers)
         ic.beginBatchEdit()
         if (edit.deleteBefore > 0) ic.deleteSurroundingText(edit.deleteBefore, 0)
         ic.commitText(edit.insert, 1)

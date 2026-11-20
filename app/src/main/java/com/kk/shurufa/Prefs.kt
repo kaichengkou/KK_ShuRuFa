@@ -83,7 +83,7 @@ class Prefs(context: Context) {
     val symbolMemorySec get() = i(SYMBOL_MEMORY, 7)
     val topRowScripts get() = b(TOP_ROW_SCRIPTS, false)
     val clipMaxChars get() = i(CLIP_MAX_CHARS, 80)
-    val clipFriction get() = f(CLIP_FRICTION, 1f)
+    val clipFriction get() = f(CLIP_FRICTION, 0.8f)
     val clipColumns get() = i(CLIP_COLUMNS, 2)
     val emojiAutoUpdate get() = b(EMOJI_AUTO_UPDATE, true)
     val voiceEngine get() = s(VOICE_ENGINE, "whisper")
@@ -104,6 +104,15 @@ class Prefs(context: Context) {
     val voicePangu get() = b(VOICE_PANGU, false)
     val voicePauseMs get() = i(VOICE_PAUSE_MS, 700)
     val voiceAutoStopSec get() = i(VOICE_AUTO_STOP, 3)
+    /** 误触: a key dragged far away does nothing; a tap held longer than this does nothing (0 = off). */
+    val dragCancel get() = b(DRAG_CANCEL, true)
+    /** 工具栏: the buttons in order (快捷面板 is always added last). */
+    val toolbar: List<String> get() = s(TOOLBAR_ITEMS, "ai,emoji,mic,translate,cursor,clipboard").split(',').filter { it.isNotBlank() }.take(6)
+    val holdCancelMs get() = i(HOLD_CANCEL_MS, 1000)
+    val voiceReturn get() = b(VOICE_RETURN, false)
+    val voiceEnModel get() = s(VOICE_EN_MODEL, "sensevoice")
+    val voiceFillers get() = b(VOICE_FILLERS, true)
+    val voiceCommitPauseMs get() = i(VOICE_COMMIT_PAUSE, 2000)
 
     // Symbols
     val autoPair get() = b(AUTO_PAIR, true)
@@ -209,6 +218,13 @@ class Prefs(context: Context) {
         const val VOICE_PANGU = "voice_pangu"
         const val VOICE_PAUSE_MS = "voice_pause_ms"
         const val VOICE_AUTO_STOP = "voice_auto_stop"
+        const val DRAG_CANCEL = "drag_cancel"
+        const val TOOLBAR_ITEMS = "toolbar_items"
+        const val HOLD_CANCEL_MS = "hold_cancel_ms"
+        const val VOICE_RETURN = "voice_return"
+        const val VOICE_EN_MODEL = "voice_en_model"
+        const val VOICE_FILLERS = "voice_fillers"
+        const val VOICE_COMMIT_PAUSE = "voice_commit_pause"
         /** Last emoji update check (ms); a state, not a setting. */
         const val EMOJI_CHECKED = "seen_emoji_checked"
         const val ACCENT = "accent"

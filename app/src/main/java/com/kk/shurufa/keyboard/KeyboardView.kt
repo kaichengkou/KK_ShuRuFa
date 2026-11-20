@@ -342,7 +342,9 @@ class KeyboardView(context: Context, private val prefs: Prefs) : View(context) {
 
     // ---- touch --------------------------------------------------------------------------
 
-    private enum class Mode { NONE, PRESS, POPUP, CURSOR, SPACE_SWIPE, BS_GESTURE, BS_REPEAT }
+    private enum class Mode { NONE, PRESS, POPUP, CURSOR, SPACE_SWIPE, BS_GESTURE, BS_REPEAT, CANCELLED }
+
+    private var downTime = 0L
 
     private var mode = Mode.NONE
     private var active: Key? = null
@@ -360,8 +362,11 @@ class KeyboardView(context: Context, private val prefs: Prefs) : View(context) {
     private val longPressRunnable = Runnable { onLongPress() }
     private val repeatRunnable = object : Runnable {
         override fun run() {
+            // only while the key is still held on an attached view: deleting can rebuild the panel,
+            // and a view that is taken off and put back never hears the finger lift
+            if (mode != Mode.BS_REPEAT || active == null || !isAttachedToWindow) return
             listener?.onBackspaceRepeat()
-            handler.postDelayed(this, prefs.backspaceRepeatMs.toLong())
+            if (mode == Mode.BS_REPEAT && isAttachedToWindow) handler.postDelayed(this, prefs.backspaceRepeatMs.toLong())
         }
     }
 
@@ -380,8 +385,8 @@ class KeyboardView(context: Context, private val prefs: Prefs) : View(context) {
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> start(e, 0)
             MotionEvent.ACTION_POINTER_DOWN -> {
-                // fast typing: a second finger finishes the first key as a tap
-                if (mode == Mode.PRESS) finish(commit = true)
+                // fast typing: a second finger finishes the first key as a tap (and ends a repeat)
+                if (mode == Mode.PRESS) finish(commit = true) else if (mode != Mode.NONE) finish(commit = false)
                 start(e, e.actionIndex)
             }
             MotionEvent.ACTION_MOVE -> {
@@ -403,6 +408,7 @@ class KeyboardView(context: Context, private val prefs: Prefs) : View(context) {
         active = hit.first
         activeRect = hit.second
         downX = x; downY = y; lastX = x; lastY = y
+        downTime = android.os.SystemClock.uptimeMillis()
         flick = null
         mode = Mode.PRESS
         val k = hit.first
@@ -473,8 +479,19 @@ class KeyboardView(context: Context, private val prefs: Prefs) : View(context) {
                     invalidate()
                 }
             }
-            Mode.BS_REPEAT -> {}
+            Mode.BS_REPEAT, Mode.CANCELLED -> {}
             Mode.PRESS -> {
+                // 误触: dragged far beyond any flick means "never mind"
+                val w = activeRect?.width() ?: threshold
+                if (prefs.dragCancel && k.fn != "space" && k.fn != "backspace" && hypot(dx, dy) > max(threshold * 3.2f, w * 1.6f)) {
+                    mode = Mode.CANCELLED
+                    flick = null
+                    overlay?.hidePreview()
+                    pressAnim[k]?.animateTo(0f, dur(150))
+                    listener?.onFeedback("cancel")
+                    invalidate()
+                    return
+                }
                 if (hypot(dx, dy) < threshold) {
                     if (flick != null) {
                         flick = null
@@ -544,8 +561,10 @@ class KeyboardView(context: Context, private val prefs: Prefs) : View(context) {
         val r = activeRect
         if (k != null) pressAnim[k]?.animateTo(0f, dur(180))
         overlay?.hidePreview()
+        // held much longer than a tap without anything to pick: treated as a change of mind
+        val heldTooLong = prefs.holdCancelMs > 0 && android.os.SystemClock.uptimeMillis() - downTime > prefs.holdCancelMs
         if (k != null && commit) when (mode) {
-            Mode.PRESS -> {
+            Mode.PRESS -> if (!heldTooLong || flick != null) {
                 val fl = flick
                 when {
                     k.main != null -> listener?.onOutput(k, if (fl != null) k.flicks[fl] ?: k.main else k.main)
@@ -587,6 +606,7 @@ class KeyboardView(context: Context, private val prefs: Prefs) : View(context) {
 
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
+        if (mode != Mode.NONE) finish(commit = false)
         handler.removeCallbacksAndMessages(null)
     }
 }

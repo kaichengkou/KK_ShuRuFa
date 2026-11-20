@@ -54,6 +54,11 @@ class GridPanel(context: Context, private val prefs: Prefs) : View(context) {
     var header = ""
     /** Small notes drawn above FLAT cells (typo marks, readings). */
     var notes: List<String> = emptyList()
+    /**
+     * When set, a vertical drag that starts between cells (or on the header) is handed over,
+     * e.g. to resize the clipboard (phase 0 start, 1 move, 2 end).
+     */
+    var onGapDrag: ((phase: Int, rawY: Float, velocityY: Float) -> Unit)? = null
     /** Fling friction multiplier (higher stops sooner). */
     var friction = 1f
         set(v) { field = v; scroller.setFriction(android.view.ViewConfiguration.getScrollFriction() * v) }
@@ -76,6 +81,7 @@ class GridPanel(context: Context, private val prefs: Prefs) : View(context) {
     private val bg = Paint(Paint.ANTI_ALIAS_FLAG)
     private val tp = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER }
     private val cardText = TextPaint(Paint.ANTI_ALIAS_FLAG)
+    private val tri = android.graphics.Path()
     private val layouts = HashMap<Int, StaticLayout>()
 
     fun setItems(list: List<String>, resetScroll: Boolean = true) {
@@ -165,6 +171,13 @@ class GridPanel(context: Context, private val prefs: Prefs) : View(context) {
                 CellStyle.PLAIN -> {
                     if (i == pressed) { bg.color = theme.soft; c.drawRoundRect(r, dp(prefs.keyRadiusDp), dp(prefs.keyRadiusDp), bg) }
                     label(c, s, r, sp(textSp), theme.ink, a)
+                    if (i in marks) {
+                        // more forms on long-press (skin tones): a small corner triangle
+                        val m = dp(5f); val x = r.right - dp(4f); val y = r.bottom - dp(4f)
+                        bg.color = theme.hint; bg.alpha = (170 * a).toInt()
+                        tri.reset(); tri.moveTo(x, y - m); tri.lineTo(x, y); tri.lineTo(x - m, y); tri.close()
+                        c.drawPath(tri, bg)
+                    }
                 }
             }
         }
@@ -273,6 +286,8 @@ class GridPanel(context: Context, private val prefs: Prefs) : View(context) {
     private var dragging = false
     private var pressed = -1
     private var menuFor = -1
+    private var gapDrag = false
+    private var downAt = 0L
 
     private fun overlayOffset(): Pair<Float, Float> {
         val o = overlay ?: return 0f to 0f
@@ -306,7 +321,8 @@ class GridPanel(context: Context, private val prefs: Prefs) : View(context) {
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 scroller.forceFinished(true)
-                downX = e.x; downY = e.y; lastY = e.y; dragging = false; menuFor = -1
+                downX = e.x; downY = e.y; lastY = e.y; dragging = false; menuFor = -1; gapDrag = false
+                downAt = android.os.SystemClock.uptimeMillis()
                 pressed = hit(e.x, e.y)
                 if (pressed >= 0) onFeedback?.invoke("press")
                 if (pressed >= 0 && (longOptions != null || longOptionRows != null)) handler.postDelayed(longRunnable, 420)
@@ -318,6 +334,12 @@ class GridPanel(context: Context, private val prefs: Prefs) : View(context) {
                     overlay?.moveSelection(e.x + ox, e.y + oy)
                     return true
                 }
+                if (gapDrag) { onGapDrag?.invoke(1, e.rawY, 0f); return true }
+                if (!dragging && pressed < 0 && onGapDrag != null && abs(e.y - downY) > slop && abs(e.y - downY) > abs(e.x - downX)) {
+                    gapDrag = true; onGapDrag?.invoke(0, e.rawY - (e.y - downY), 0f); onGapDrag?.invoke(1, e.rawY, 0f); return true
+                }
+                // any real movement means it was not a tap
+                if (!dragging && pressed >= 0 && abs(e.x - downX) > slop) { pressed = -1; handler.removeCallbacks(longRunnable); invalidate() }
                 if (!dragging && abs(e.y - downY) > slop) { dragging = true; pressed = -1; handler.removeCallbacks(longRunnable); invalidate() }
                 if (dragging) {
                     scrollPos = (scrollPos - (e.y - lastY)).coerceIn(0f, maxScroll)
@@ -327,6 +349,13 @@ class GridPanel(context: Context, private val prefs: Prefs) : View(context) {
             }
             MotionEvent.ACTION_UP -> {
                 handler.removeCallbacks(longRunnable)
+                if (gapDrag) {
+                    vt?.computeCurrentVelocity(1000)
+                    onGapDrag?.invoke(2, e.rawY, vt?.yVelocity ?: 0f)
+                    gapDrag = false; vt?.recycle(); vt = null
+                    return true
+                }
+                val held = android.os.SystemClock.uptimeMillis() - downAt
                 when {
                     menuFor >= 0 -> {
                         overlay?.selected()?.let { onLongOption?.invoke(menuFor, it) }
@@ -338,7 +367,8 @@ class GridPanel(context: Context, private val prefs: Prefs) : View(context) {
                         scroller.fling(0, scrollPos.toInt(), 0, -(vt?.yVelocity ?: 0f).toInt(), 0, 0, 0, maxScroll.toInt())
                         postInvalidateOnAnimation()
                     }
-                    pressed >= 0 -> onItem?.invoke(pressed)
+                    // held far longer than a tap (with no menu to open): a change of mind
+                    pressed >= 0 && (prefs.holdCancelMs <= 0 || held < prefs.holdCancelMs) -> onItem?.invoke(pressed)
                 }
                 pressed = -1
                 vt?.recycle(); vt = null
@@ -346,6 +376,7 @@ class GridPanel(context: Context, private val prefs: Prefs) : View(context) {
             }
             MotionEvent.ACTION_CANCEL -> {
                 handler.removeCallbacks(longRunnable)
+                if (gapDrag) { onGapDrag?.invoke(2, e.rawY, 0f); gapDrag = false }
                 if (menuFor >= 0) { overlay?.hideOptions(); menuFor = -1 }
                 pressed = -1; vt?.recycle(); vt = null; invalidate()
             }

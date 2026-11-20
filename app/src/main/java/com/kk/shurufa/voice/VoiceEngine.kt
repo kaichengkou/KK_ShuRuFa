@@ -62,7 +62,7 @@ class VoiceEngine(private val context: Context, private val prefs: Prefs) {
     private fun post(s: State, detail: String = "", id: Int = session) { main.post { if (id == session) { state = s; listener?.onState(s, detail) } } }
 
     /** Which recognizer [lang] uses with the local engine. */
-    fun usesWhisper(lang: String) = lang == "en" || lang == "ru"
+    fun usesWhisper(lang: String) = lang == "ru" || (lang == "en" && prefs.voiceEnModel == "whisper")
 
     fun modelReady(lang: String): Boolean = when {
         prefs.voiceEngine == "system" -> true
@@ -151,7 +151,7 @@ class VoiceEngine(private val context: Context, private val prefs: Prefs) {
         val chunk = FloatArray(SileroVad.CHUNK)
         val whisperMode = usesWhisper(lang)
         // Whisper is too slow to re-run every half second: it shows each sentence when done
-        val seg = Segmenter({ v.probability(it) }, prefs.voicePauseMs, prefs.voiceAutoStopSec * 1000L,
+        val seg = Segmenter({ v.probability(it) }, prefs.voicePauseMs, prefs.voiceCommitPauseMs, prefs.voiceAutoStopSec * 1000L,
             partialEveryChunks = if (whisperMode) Int.MAX_VALUE else 16)
         rec.startRecording()
         try {
@@ -164,7 +164,7 @@ class VoiceEngine(private val context: Context, private val prefs: Prefs) {
                 val rms = sqrt(sum / chunk.size)
                 main.post { listener?.onLevel((rms * 12f).coerceIn(0f, 1f)) }
                 for (e in seg.feed(chunk)) when (e) {
-                    is Segmenter.Event.Partial -> if (!partialBusy) partialSegment(id, lang, e.pcm)
+                    is Segmenter.Event.Partial -> if (!whisperMode && !partialBusy) partialSegment(id, lang, e.pcm)
                     is Segmenter.Event.Final -> finalSegment(id, lang, e.pcm, e.pauseMs)
                     Segmenter.Event.Stop -> break@loop
                 }
@@ -184,7 +184,7 @@ class VoiceEngine(private val context: Context, private val prefs: Prefs) {
             val threads = Runtime.getRuntime().availableProcessors().coerceIn(2, 6)
             return WhisperBridge.transcribe(whisper, pcm, lang, threads, prompt).trim()
         }
-        val t = sense?.recognize(pcm, lang = if (lang == "zh") "zh" else "auto").orEmpty()
+        val t = sense?.recognize(pcm, lang = when (lang) { "zh", "en" -> lang; else -> "auto" }).orEmpty()
         return simplified(t)
     }
 
