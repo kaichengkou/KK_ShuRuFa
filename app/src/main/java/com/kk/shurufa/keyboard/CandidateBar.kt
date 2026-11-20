@@ -120,13 +120,14 @@ class CandidateBar(context: Context, private val prefs: Prefs) : View(context) {
         tools.forEachIndexed { i, id ->
             val cx = slot * i + slot / 2
             val cy = height / 2f
-            if (id != "settings") {
-                bg.color = if (pressedTool == id) theme.keyPressed else theme.tool
-                bg.alpha = (255 * a).toInt()
+            // icons sit directly on the bar; a soft disc appears only while pressed
+            if (pressedTool == id) {
+                bg.color = theme.tool
                 c.drawCircle(cx, cy, r, bg)
             }
-            ip.color = theme.ink; ip.alpha = (255 * a).toInt()
-            Icons.draw(c, id, cx, cy, dp(21f), ip, filled = id == "ai")
+            ip.color = if (id == "ai") theme.accent else theme.ink
+            ip.alpha = (235 * a).toInt()
+            Icons.draw(c, id, cx, cy, dp(22f), ip, filled = id == "ai")
             hits += RectF(cx - slot / 2, 0f, cx + slot / 2, height.toFloat()) to { listener?.onTool(id) }
         }
     }

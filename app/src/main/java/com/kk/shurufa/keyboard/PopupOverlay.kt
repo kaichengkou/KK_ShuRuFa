@@ -34,6 +34,13 @@ class PopupOverlay(context: Context, private val prefs: Prefs) : View(context) {
         isFocusable = false
     }
 
+    // Never ask for height of our own: the input view must be as tall as the keys, not the screen.
+    // The parent FrameLayout then stretches this layer to its final size in a second pass.
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        val h = if (MeasureSpec.getMode(heightMeasureSpec) == MeasureSpec.EXACTLY) MeasureSpec.getSize(heightMeasureSpec) else 0
+        setMeasuredDimension(MeasureSpec.getSize(widthMeasureSpec), h)
+    }
+
     // ---- preview bubble ----
     private var pvRect = RectF()
     private var pvLabel = ""

@@ -25,6 +25,7 @@ class Prefs(context: Context) {
     val showHints get() = b(SHOW_HINTS, true)
     val showAllHints get() = b(SHOW_ALL_HINTS, false)
     val keyBorders get() = b(KEY_BORDERS, true)
+    val accentEnter get() = b(ACCENT_ENTER, true)
     val numberRow get() = b(NUMBER_ROW, false)
     val toolbarVisible get() = b(TOOLBAR, true)
     val candidateScale get() = f(CAND_SCALE, 1f)
@@ -104,6 +105,7 @@ class Prefs(context: Context) {
         const val SHOW_HINTS = "show_hints"
         const val SHOW_ALL_HINTS = "show_all_hints"
         const val KEY_BORDERS = "key_borders"
+        const val ACCENT_ENTER = "accent_enter"
         const val NUMBER_ROW = "number_row"
         const val TOOLBAR = "toolbar"
         const val CAND_SCALE = "cand_scale"

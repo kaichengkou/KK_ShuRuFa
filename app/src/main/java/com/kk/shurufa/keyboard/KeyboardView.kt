@@ -138,13 +138,14 @@ class KeyboardView(context: Context, private val prefs: Prefs) : View(context) {
                 keyPaint.color = theme.border
                 c.drawRoundRect(rect.left, rect.top + dp(1f), rect.right, rect.bottom + dp(1f), r, r, keyPaint)
             }
+            val accentKey = deleting || (k.fn == "enter" && prefs.accentEnter)
             keyPaint.color = when {
-                deleting -> theme.accent
-                else -> blend(if (isFn) theme.keyFn else theme.key, theme.keyPressed, pv)
+                accentKey -> blend(theme.accent, theme.accentPressed, pv)
+                else -> blend(if (isFn) theme.keyFn else theme.key, if (isFn) theme.keyFnPressed else theme.keyPressed, pv)
             }
             val shrink = dp(1.2f) * pv
             c.drawRoundRect(rect.left + shrink, rect.top + shrink, rect.right - shrink, rect.bottom - shrink, r, r, keyPaint)
-            drawKeyContent(c, k, rect, la, if (deleting) theme.onAccent else theme.ink)
+            drawKeyContent(c, k, rect, la, if (accentKey) theme.onAccent else theme.ink)
         }
         if (animating) postInvalidateOnAnimation()
     }
@@ -204,12 +205,13 @@ class KeyboardView(context: Context, private val prefs: Prefs) : View(context) {
         val maxW = rect.width() - dp(6f)
         val tw = textPaint.measureText(label)
         if (tw > maxW) textPaint.textSize *= maxW / tw
-        drawCentered(c, label, cx, cy + if (mathMode) 0f else dp(1f), textPaint)
+        if (!mathMode && single && !label[0].isLetterOrDigit()) drawByBounds(c, label, cx, cy, textPaint)
+        else drawCentered(c, label, cx, cy + if (mathMode) 0f else dp(2.5f), textPaint)
 
         if (!prefs.showHints) return
         hintPaint.color = theme.hint
         hintPaint.alpha = (255 * labelAlpha).toInt()
-        hintPaint.textSize = sp((if (mathMode) 9.5f else 11f) * prefs.hintScale)
+        hintPaint.textSize = sp((if (mathMode) 9.5f else 10.5f) * prefs.hintScale)
         hintPaint.typeface = if (mathMode) Typeface.SERIF else Typeface.DEFAULT
         val fl = k.flicks
         if (mathMode || prefs.showAllHints) {
@@ -219,14 +221,26 @@ class KeyboardView(context: Context, private val prefs: Prefs) : View(context) {
             fl[Dir.RIGHT]?.let { drawCentered(c, it.label, rect.right - hintPaint.measureText(it.label) / 2 - dp(3f), cy, hintPaint) }
         } else {
             fl[Dir.UP]?.let {
-                val w = hintPaint.measureText(it.label)
-                drawCentered(c, it.label, rect.right - w / 2 - dp(5f), rect.top + hintPaint.textSize * 0.95f, hintPaint)
+                val h = hintLabel(it.label)
+                val w = hintPaint.measureText(h)
+                drawCentered(c, h, rect.right - w / 2 - dp(6f), rect.top + dp(4f) + hintPaint.textSize * 0.5f, hintPaint)
             }
         }
     }
 
+    /** Short form of a hint so it stays in the key's corner (—— is shown as one dash). */
+    private fun hintLabel(s: String) = if (s == "——") "—" else s
+
+    private val bounds = android.graphics.Rect()
+    private fun drawByBounds(c: Canvas, s: String, x: Float, y: Float, p: Paint) {
+        p.getTextBounds(s, 0, s.length, bounds)
+        // paint is center-aligned, bounds are relative to a left-aligned origin
+        c.drawText(s, x + p.measureText(s) / 2 - bounds.exactCenterX(), y - bounds.exactCenterY(), p)
+    }
+
     private fun drawSpace(c: Canvas, rect: RectF) {
-        textPaint.textSize = sp(15f * prefs.labelScale)
+        textPaint.textSize = sp(13.5f * prefs.labelScale)
+        textPaint.color = theme.hint
         textPaint.typeface = Typeface.DEFAULT
         c.save()
         c.clipRect(rect)

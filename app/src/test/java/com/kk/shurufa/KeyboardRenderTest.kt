@@ -73,10 +73,12 @@ class KeyboardRenderTest {
 
     private fun layoutRoot() {
         val w = ctx.resources.displayMetrics.widthPixels
-        root.measure(View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
+        // the input method window offers the whole screen height as AT_MOST, like on the phone
+        val screenH = ctx.resources.displayMetrics.heightPixels
+        root.measure(View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(screenH, View.MeasureSpec.AT_MOST))
+        assertTrue("input view must not fill the screen: ${root.measuredHeight} of $screenH", root.measuredHeight < screenH / 2)
+        assertEquals(root.measuredHeight, overlay.measuredHeight)
         root.layout(0, 0, root.measuredWidth, root.measuredHeight)
-        // the overlay must cover the bar and the keys
-        overlay.layout(0, 0, root.measuredWidth, root.measuredHeight)
     }
 
     private fun shot(name: String) {

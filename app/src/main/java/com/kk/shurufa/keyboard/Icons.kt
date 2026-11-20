@@ -50,14 +50,11 @@ object Icons {
         moveTo(6f, 9f); lineTo(3f, 12f); lineTo(6f, 15f); moveTo(18f, 9f); lineTo(21f, 12f); lineTo(18f, 15f)
     }
     private val clip = p { addRoundRect(RectF(5f, 4.5f, 19f, 20.5f), 2.5f, 2.5f, Path.Direction.CW); addRect(RectF(9f, 3f, 15f, 6.5f), Path.Direction.CW) }
+    // "tune" sliders: reads as settings without a fiddly gear outline
     private val gear = p {
-        addCircle(12f, 12f, 3f, Path.Direction.CW)
-        for (k in 0 until 8) {
-            val a = Math.toRadians(k * 45.0)
-            moveTo(12f + 6f * Math.cos(a).toFloat(), 12f + 6f * Math.sin(a).toFloat())
-            lineTo(12f + 8.5f * Math.cos(a).toFloat(), 12f + 8.5f * Math.sin(a).toFloat())
-        }
-        addCircle(12f, 12f, 6f, Path.Direction.CW)
+        moveTo(4f, 7f); lineTo(13f, 7f); moveTo(17f, 7f); lineTo(20f, 7f); addCircle(15f, 7f, 2f, Path.Direction.CW)
+        moveTo(4f, 12f); lineTo(6f, 12f); moveTo(10f, 12f); lineTo(20f, 12f); addCircle(8f, 12f, 2f, Path.Direction.CW)
+        moveTo(4f, 17f); lineTo(11f, 17f); moveTo(15f, 17f); lineTo(20f, 17f); addCircle(13f, 17f, 2f, Path.Direction.CW)
     }
     private val chevDown = p { moveTo(6f, 9f); lineTo(12f, 15f); lineTo(18f, 9f) }
     private val chevUp = p { moveTo(6f, 15f); lineTo(12f, 9f); lineTo(18f, 15f) }

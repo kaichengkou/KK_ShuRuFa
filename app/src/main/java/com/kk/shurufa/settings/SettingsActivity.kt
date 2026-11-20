@@ -120,6 +120,7 @@ private fun SettingsScreen(prefs: Prefs) {
                 Toggle(prefs, Prefs.SHOW_HINTS, "显示角标", "按键右上角的滑动字符", true)
                 Toggle(prefs, Prefs.SHOW_ALL_HINTS, "显示四个方向的角标", "下滑、左滑、右滑的字符也画出来", false)
                 Toggle(prefs, Prefs.KEY_BORDERS, "按键底边阴影", null, true)
+                Toggle(prefs, Prefs.ACCENT_ENTER, "回车键用强调色", null, true)
                 Toggle(prefs, Prefs.NUMBER_ROW, "常驻数字行", "字母键盘最上面加一排数字", false)
             }
         }
