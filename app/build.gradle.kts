@@ -18,8 +18,8 @@ android {
         applicationId = "com.kk.shurufa"
         minSdk = 26
         targetSdk = 35
-        versionCode = 3
-        versionName = "0.3.0"
+        versionCode = 4
+        versionName = "0.4.0"
         ndk { abiFilters += abis }
         externalNativeBuild {
             cmake { arguments += listOf("-DANDROID_STL=c++_static", "-DCMAKE_BUILD_TYPE=Release") }
@@ -76,6 +76,7 @@ val prepareRimeData by tasks.registering(Sync::class) {
         into("rime")
     }
     from(rootProject.file("rime-data/overlay")) { into("rime") }
+    from(rootProject.file("rime-data/packs")) { into("rime") }
     from(file("src/main/jni/librime/deps/opencc/data/dictionary")) {
         include("STCharacters.txt", "STPhrases.txt", "TSCharacters.txt", "TSPhrases.txt")
         into("rime/opencc")

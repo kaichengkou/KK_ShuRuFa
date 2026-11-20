@@ -1,0 +1,16 @@
+# KK输入法 古诗文扩展包。只作为雾凇拼音的依赖编译词典，拼写规则与雾凇拼音相同（含首字母简拼）。
+schema:
+  schema_id: kk_poetry
+  name: KK古诗文
+  version: "1"
+engine:
+  processors:
+    - speller
+  segmentors:
+    - abc_segmentor
+  translators:
+    - table_translator
+speller:
+  __include: rime_ice.schema:/speller
+translator:
+  dictionary: kk_poetry

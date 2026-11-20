@@ -32,6 +32,17 @@ class DataTest {
         assertTrue(p.suggest("hello").isEmpty())
     }
 
+    @Test fun poetry() {
+        val p = Predictor(ctx)
+        p.loadPoetry()
+        var tries = 0
+        while (p.nextLine("床前明月光") == null && tries++ < 200) Thread.sleep(25)
+        assertEquals("疑是地上霜", p.nextLine("床前明月光"))
+        assertEquals("黄河入海流", p.nextLine("我想起白日依山尽，"))
+        assertEquals("在河之洲", p.nextLine("关关雎鸠"))
+        assertTrue(p.suggest("白日依山尽").first() == "黄河入海流")
+    }
+
     @Test fun tones() {
         val t = PinyinTones(ctx)
         assertEquals("nǐ hǎo", t.convert("你好", listOf("ni", "hao")))

@@ -58,6 +58,8 @@ class KeyboardView(context: Context, private val prefs: Prefs) : View(context) {
     var lockOn = false
     /** Height of one key, as a fraction of the configured height (smaller grids use less). */
     var heightScale = 1f
+    /** How labeled function keys show: "text", "icon" (when an icon exists) or "both". */
+    var iconLabels = "text"
 
     private var rows: List<List<Key>> = emptyList()
     private val rects = mutableListOf<Pair<Key, RectF>>()
@@ -206,6 +208,14 @@ class KeyboardView(context: Context, private val prefs: Prefs) : View(context) {
                     if (st == 2) c.drawRoundRect(cx - dp(6f), cy + dp(12f), cx + dp(6f), cy + dp(13.6f), dp(1f), dp(1f), iconPaint)
                 }
                 k.fn == "lock" -> Icons.draw(c, if (lockOn) "lock" else "unlock", cx, cy, dp(21f), iconPaint)
+                k.label != null && iconLabels != "text" && Icons.all.containsKey(k.fn) -> {
+                    if (iconLabels == "both") {
+                        Icons.draw(c, k.fn, cx, cy - dp(7f), dp(20f), iconPaint)
+                        textPaint.textSize = sp(10.5f)
+                        textPaint.typeface = Typeface.DEFAULT
+                        drawCentered(c, k.label, cx, cy + dp(13f), textPaint)
+                    } else Icons.draw(c, k.fn, cx, cy, dp(22f), iconPaint)
+                }
                 k.label != null || !Icons.all.containsKey(k.fn) -> {
                     textPaint.textSize = sp(14.5f * prefs.labelScale)
                     textPaint.typeface = Typeface.DEFAULT

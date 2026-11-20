@@ -47,7 +47,7 @@ class GridPanel(context: Context, private val prefs: Prefs) : View(context) {
     /** Touch feedback: "press" when a cell is touched, "popup" when its menu opens. */
     var onFeedback: ((String) -> Unit)? = null
 
-    enum class CellStyle { SOLID, SOFT, RAIL, FLAT, CARD }
+    enum class CellStyle { SOLID, SOFT, RAIL, FLAT, CARD, PLAIN }
 
     private var items: List<String> = emptyList()
     private val cells = mutableListOf<RectF>()
@@ -146,6 +146,10 @@ class GridPanel(context: Context, private val prefs: Prefs) : View(context) {
                 CellStyle.RAIL -> drawRailCell(c, i, s, r, a)
                 CellStyle.FLAT -> drawFlatCell(c, i, s, r, a)
                 CellStyle.CARD -> drawCard(c, i, s, r, a)
+                CellStyle.PLAIN -> {
+                    if (i == pressed) { bg.color = theme.soft; c.drawRoundRect(r, dp(10f), dp(10f), bg) }
+                    label(c, s, r, sp(textSp), theme.ink, a)
+                }
             }
         }
         c.restore()

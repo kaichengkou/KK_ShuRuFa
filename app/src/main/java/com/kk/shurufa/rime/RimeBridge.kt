@@ -20,6 +20,10 @@ object RimeBridge {
     external fun candidates(limit: Int): Array<String>
     external fun deleteCandidate(index: Int): Boolean
     external fun setInput(input: String): Boolean
+    external fun candidateComments(limit: Int): Array<String>
+    external fun caretPos(): Int
+    external fun setCaretPos(pos: Int)
+    external fun query(input: String, limit: Int): Array<String>
     external fun commitText(): String
     external fun preedit(): String
     external fun input(): String

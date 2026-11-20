@@ -13,6 +13,7 @@ enum class HapticEvent(val id: String, val title: String, val defType: String, v
     FUNCTION("function", "功能键", "custom", 70, 16),
     SPACE("space", "空格", "custom", 70, 16),
     BACKSPACE("backspace", "删除", "custom", 80, 18),
+    REPEAT("repeat", "长按连续删除（每删一个字）", "custom", 45, 7),
     ENTER("enter", "回车", "click", 90, 20),
     POPUP("popup", "长按弹出选项", "heavy", 120, 24),
     OPTION("option", "在选项间滑动", "tick", 40, 8),

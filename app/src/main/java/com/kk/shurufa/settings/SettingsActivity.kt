@@ -132,6 +132,7 @@ private val PAGES = listOf(
     PageInfo("languages", "语言", "启用的语言、顺序、自动大写、俄语重音"),
     PageInfo("chinese", "中文", "简繁、emoji、联想、纠错、拼音模式"),
     PageInfo("dict", "自定义词库", "添加、修改、删除自己的词"),
+    PageInfo("packs", "扩展词库", "古诗文等，可整句输入并自动接下句"),
     PageInfo("symbols", "符号与数学", "括号配对、数字后标点、数学键盘"),
     PageInfo("clipboard", "剪贴板", "保留条数、复制后的粘贴提示"),
     PageInfo("files", "布局文件", "导出和重新加载 YAML 布局"),
@@ -161,6 +162,7 @@ private fun SettingsApp(prefs: Prefs) {
                     "languages" -> LanguagesPage(prefs)
                     "chinese" -> ChinesePage(prefs) { page = "dict" }
                     "dict" -> DictPage()
+                    "packs" -> PacksPage(prefs)
                     "symbols" -> SymbolsPage(prefs)
                     "clipboard" -> ClipboardPage(prefs)
                     "files" -> FilesPage()
@@ -360,6 +362,9 @@ private fun LookPage(prefs: Prefs) {
         Toggle(prefs, Prefs.KEY_BORDERS, "实心键的投影", "字母、数字键下方的一道浅影", true)
         Toggle(prefs, Prefs.NUMBER_ROW, "常驻数字行", "字母键盘最上面加一排数字", false)
     }
+    Group("光标面板") {
+        Choice(prefs, Prefs.CURSOR_LABELS, "右侧按键显示", listOf("icon" to "图标", "both" to "图标加文字", "text" to "文字"), def = "icon")
+    }
     Group("文字") {
         FloatSlider(prefs, Prefs.LABEL_SCALE, "按键字号", 1f, 0.8f..1.3f, "×")
         FloatSlider(prefs, Prefs.HINT_SCALE, "角标字号", 1f, 0.7f..1.4f, "×")
@@ -433,7 +438,7 @@ private fun GesturesPage(prefs: Prefs) {
     }
     Group("删除键") {
         Toggle(prefs, Prefs.BACKSPACE_SWIPE, "上滑清空、下滑撤销", "正在打拼音时上滑只清掉拼音", true)
-        Toggle(prefs, Prefs.BACKSPACE_RESELECT, "退格回退重选", "选错词后 5 秒内按删除，整个词退回成拼音，可以重新挑；删除后还会按前文给出联想", true)
+        Toggle(prefs, Prefs.BACKSPACE_RESELECT, "删除后按原拼音推荐", "删掉刚上屏的字后，候选栏按当初打的拼音重新给出候选，不会把字母放回去；直接打字就忽略它。没有拼音记录时按前文联想", true)
         IntSlider(prefs, Prefs.BACKSPACE_REPEAT, "长按连删的间隔", 55, 25..150, "ms", "匀速连删，数值越小越快")
     }
 }
@@ -478,7 +483,9 @@ private fun ChinesePage(prefs: Prefs, openDict: () -> Unit) {
         Toggle(prefs, Prefs.ZH_EMOJI, "候选里带 emoji", "黄脸表情排在原位，其他 emoji 排在前五个词之后", true)
         Toggle(prefs, Prefs.ZH_PREDICT, "联想", "上屏后在候选栏推荐常接的词", true)
         Toggle(prefs, Prefs.ZH_CORRECTION, "按键纠错", "按错相邻键也能出正确的词；可能多出几个不相干的候选。切换后会重新部署", true)
-        Note("长按候选词可以删除它的学习记录，下次同样的拼音就不会再把它排到前面。")
+        Toggle(prefs, Prefs.TYPO_MARK, "纠错批注", "纠错得到的候选后面用小字标出改了哪里，比如 p→o、no⇄on", true)
+        Toggle(prefs, Prefs.RARE_ANNOTATE, "生僻字注音", "常用 3500 字以外的字，在候选后面标出读音", true)
+        Note("长按候选词可以删除它的学习记录，下次同样的拼音就不会再把它排到前面。点候选栏上方的拼音，可以把光标放到那里直接改。")
     }
     Group("拼音") {
         Toggle(prefs, Prefs.PINYIN_MODE, "拼音模式", "选中候选后上屏带声调的拼音，比如 nǐ hǎo；多音字按你打的拼音判断", false)
@@ -504,7 +511,8 @@ private fun SymbolsPage(prefs: Prefs) {
         Choice(prefs, Prefs.MATH_FORMAT, "默认输出格式", listOf("uni" to "符号", "tex" to "LaTeX"))
         Toggle(prefs, Prefs.MATH_CALC, "按 = 后给出计算结果", null, true)
         Toggle(prefs, Prefs.NUMBER_FIELD_MATH, "数字输入框弹出数字键盘", "按上次用的模式（简易或科学）打开", true)
-        Choice(prefs, Prefs.NUM_MODE, "!#1 打开的数字键盘", listOf("simple" to "简易", "sci" to "科学"))
+        Choice(prefs, Prefs.NUM_MODE, "数字键盘默认模式", listOf("simple" to "标准", "sci" to "学术"))
+        IntSlider(prefs, Prefs.SYMBOL_MEMORY, "记住符号面板的时间", 7, 0..30, "秒", "用过符号面板后这么久之内，再点 !#1 直接回到符号面板；0 为总是先开数字键盘")
     }
 }
 
@@ -528,6 +536,14 @@ private fun FilesPage() {
             FilledTonalButton(onClick = { Prefs(ctx).put("layout_reload", System.currentTimeMillis().toString()) }) { Text("重新加载") }
         }
         path?.let { Note("已导出到：$it") }
+    }
+}
+
+@Composable
+private fun PacksPage(prefs: Prefs) {
+    Group("古诗文") {
+        Toggle(prefs, Prefs.PACK_POETRY, "启用古诗文词库", "唐诗三百首、宋词三百首、千家诗、诗经、论语、楚辞、古文观止，约 3.8 万句。整句拼音或首字母都能打出（比如 brysj → 白日依山尽），上屏一句后联想栏接出下一句。切换后会重新部署", true)
+        Note("数据来自 chinese-poetry 项目（MIT 许可）。")
     }
 }
 

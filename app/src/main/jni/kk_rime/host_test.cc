@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <cstdlib>
 
 extern void rime_require_module_lua();
 extern void rime_require_module_octagram();
@@ -50,6 +51,24 @@ int main(int argc, char** argv) {
     if (strcmp(seq, "-emoji") == 0) { api->set_option(s, "emoji", False); continue; }
     if (strcmp(seq, "+trad") == 0) { api->set_option(s, "traditionalization", True); continue; }
     if (strcmp(seq, "-trad") == 0) { api->set_option(s, "traditionalization", False); continue; }
+    if (strncmp(seq, "@caret=", 7) == 0) {  // move the caret inside the current input, then show
+      api->set_caret_pos(s, atoi(seq + 7));
+      printf("  caret -> %zu\n", api->get_caret_pos(s));
+      continue;
+    }
+    if (strncmp(seq, "+keep:", 6) == 0) {  // type without clearing afterwards
+      for (const char* p = seq + 6; *p; p++) api->process_key(s, *p, 0);
+      show(api, s, seq);
+      continue;
+    }
+    if (strncmp(seq, "?", 1) == 0) {  // query in a scratch session while the main one keeps its input
+      RimeSessionId q = api->create_session();
+      api->set_input(q, seq + 1);
+      show(api, q, seq);
+      api->destroy_session(q);
+      show(api, s, "  main still");
+      continue;
+    }
     if (strcmp(seq, "SPACE") == 0) { api->process_key(s, 0x20, 0); show(api, s, "[space]"); continue; }
     for (const char* p = seq; *p; p++) api->process_key(s, *p, 0);
     show(api, s, seq);

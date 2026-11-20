@@ -250,6 +250,48 @@ FN(jobjectArray, candidates)(JNIEnv* env, jobject, jint limit) {
   return jarr(env, v);
 }
 
+// Comments for the first `limit` candidates (same order as candidates()).
+FN(jobjectArray, candidateComments)(JNIEnv* env, jobject, jint limit) {
+  std::lock_guard<std::mutex> lock(g_mutex);
+  std::vector<std::string> v;
+  RimeCandidateListIterator it = {0};
+  if (api()->candidate_list_begin(session(), &it)) {
+    while (static_cast<int>(v.size()) < limit && api()->candidate_list_next(&it)) {
+      v.emplace_back(it.candidate.comment ? it.candidate.comment : "");
+    }
+    api()->candidate_list_end(&it);
+  }
+  return jarr(env, v);
+}
+
+// Caret inside the raw input (in letters), for editing the pinyin in place.
+FN(jint, caretPos)(JNIEnv*, jobject) { return static_cast<jint>(api()->get_caret_pos(session())); }
+FN(void, setCaretPos)(JNIEnv*, jobject, jint pos) {
+  std::lock_guard<std::mutex> lock(g_mutex);
+  api()->set_caret_pos(session(), pos);
+  refreshLocked();
+}
+
+// Candidates for some input in a separate session, without touching what the user is typing.
+static RimeSessionId g_scratch = 0;
+FN(jobjectArray, query)(JNIEnv* env, jobject, jstring input, jint limit) {
+  std::lock_guard<std::mutex> lock(g_mutex);
+  if (g_scratch == 0 || !api()->find_session(g_scratch)) g_scratch = api()->create_session();
+  std::vector<std::string> v;
+  api()->clear_composition(g_scratch);
+  if (api()->set_input(g_scratch, str(env, input).c_str())) {
+    RimeCandidateListIterator it = {0};
+    if (api()->candidate_list_begin(g_scratch, &it)) {
+      while (static_cast<int>(v.size()) < limit && api()->candidate_list_next(&it)) {
+        v.emplace_back(it.candidate.text ? it.candidate.text : "");
+      }
+      api()->candidate_list_end(&it);
+    }
+  }
+  api()->clear_composition(g_scratch);
+  return jarr(env, v);
+}
+
 FN(jboolean, selectCandidateGlobal)(JNIEnv*, jobject, jint index) {
   std::lock_guard<std::mutex> lock(g_mutex);
   bool r = api()->select_candidate(session(), index);

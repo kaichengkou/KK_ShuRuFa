@@ -90,8 +90,14 @@ class CardStackView(context: Context, private val prefs: Prefs) : View(context) 
             val w = cardW * scale; val h = cardH * scale
             var top = (height - h) / 2f
             var alpha = (1f - 0.28f * abs(d)).coerceIn(0f, 1f)
-            if (i == front && !dragging) { top -= lift.value * height; alpha *= (1f - lift.value * 1.4f).coerceAtLeast(0f) }
-            drawCard(c, i, RectF(cx - w / 2, top, cx + w / 2, top + h), alpha, abs(d) < 0.5f)
+            var rect = RectF(cx - w / 2, top, cx + w / 2, top + h)
+            if (i == front && !dragging && lift.value > 0f) {
+                val l = lift.value
+                val shrink = 1f - 0.12f * min(1f, l * 2f)
+                rect = RectF(cx - w * shrink / 2, top - l * height, cx + w * shrink / 2, top - l * height + h * shrink)
+                alpha *= (1f - l * 1.3f).coerceAtLeast(0f)
+            }
+            drawCard(c, i, rect, alpha, abs(d) < 0.5f)
         }
         // position indicator
         tp.textAlign = Paint.Align.CENTER; tp.color = theme.hint; tp.textSize = sp(10.5f)
@@ -148,6 +154,7 @@ class CardStackView(context: Context, private val prefs: Prefs) : View(context) 
     private var vt: VelocityTracker? = null
     private val slop = ViewConfiguration.get(context).scaledTouchSlop
     private var longFired = false
+    private var tickIndex = 0
     private val longRunnable = Runnable {
         if (!dragging && !lifting && cards.isNotEmpty()) {
             longFired = true
@@ -165,6 +172,7 @@ class CardStackView(context: Context, private val prefs: Prefs) : View(context) 
             MotionEvent.ACTION_DOWN -> {
                 downX = e.x; downY = e.y; dragging = false; lifting = false; longFired = false
                 dragPos = pos.value
+                tickIndex = pos.value.roundToInt()
                 onFeedback?.invoke("press")
                 handler.postDelayed(longRunnable, 450)
             }
@@ -175,10 +183,20 @@ class CardStackView(context: Context, private val prefs: Prefs) : View(context) 
                     if (abs(dx) >= abs(dy)) dragging = true else if (dy < 0) lifting = true
                 }
                 if (dragging) {
-                    dragPos = (pos.value - dx / spacing).coerceIn(-0.4f, cards.size - 0.6f)
+                    var p = pos.value - dx / spacing
+                    // rubber band past the first and last card
+                    if (p < 0f) p = -0.35f * (1f - 1f / (-p * 1.5f + 1f))
+                    if (p > cards.size - 1f) { val o = p - (cards.size - 1f); p = cards.size - 1f + 0.35f * (1f - 1f / (o * 1.5f + 1f)) }
+                    dragPos = p
+                    val idx = p.roundToInt()
+                    if (idx != tickIndex) { tickIndex = idx; onFeedback?.invoke("tick") }
                     invalidate()
                 }
-                if (lifting) { lift.set((-dy / height).coerceIn(0f, 1f)); invalidate() }
+                if (lifting) {
+                    val raw = (-dy / height).coerceAtLeast(0f)
+                    lift.set(if (raw < 0.35f) raw else 0.35f + (raw - 0.35f) * 0.6f)
+                    invalidate()
+                }
             }
             MotionEvent.ACTION_UP -> {
                 handler.removeCallbacks(longRunnable)
@@ -186,13 +204,16 @@ class CardStackView(context: Context, private val prefs: Prefs) : View(context) 
                 when {
                     dragging -> {
                         val v = vt?.xVelocity ?: 0f
-                        var target = dragPos.roundToInt()
-                        if (abs(v) > dp(400f)) target = if (v < 0) dragPos.toInt() + 1 else dragPos.toInt()
+                        // project where the fling would coast to; fast flings skip several cards
+                        val projected = dragPos - v / spacing * 0.2f
+                        var target = projected.roundToInt()
+                        if (abs(v) > dp(350f) && target == dragPos.roundToInt()) target += if (v < 0) 1 else -1
                         target = target.coerceIn(0, cards.size - 1)
                         pos.set(dragPos)
-                        pos.animateTo(target.toFloat(), dur(260), Tween.EASE_OUT)
+                        val far = abs(target - dragPos)
+                        pos.animateTo(target.toFloat(), dur((240 + 60 * min(far, 4f)).toLong()), android.view.animation.OvershootInterpolator(0.7f))
                         dragging = false
-                        if (target != dragPos.roundToInt()) onFeedback?.invoke("press")
+                        tickIndex = target
                     }
                     lifting -> {
                         val vy = vt?.yVelocity ?: 0f

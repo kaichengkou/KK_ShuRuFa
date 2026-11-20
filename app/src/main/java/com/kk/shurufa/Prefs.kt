@@ -76,6 +76,11 @@ class Prefs(context: Context) {
     val clipSuggest get() = b(CLIP_SUGGEST, true)
     val backspaceReselect get() = b(BACKSPACE_RESELECT, true)
     val numMode get() = s(NUM_MODE, "simple")            // simple | sci
+    val cursorLabels get() = s(CURSOR_LABELS, "icon")    // icon | both | text
+    val typoMark get() = b(TYPO_MARK, true)
+    val rareAnnotate get() = b(RARE_ANNOTATE, true)
+    val packPoetry get() = b(PACK_POETRY, true)
+    val symbolMemorySec get() = i(SYMBOL_MEMORY, 7)
 
     // Symbols
     val autoPair get() = b(AUTO_PAIR, true)
@@ -154,6 +159,11 @@ class Prefs(context: Context) {
         const val CLIP_SUGGEST = "clip_suggest"
         const val BACKSPACE_RESELECT = "backspace_reselect"
         const val NUM_MODE = "num_mode"
+        const val CURSOR_LABELS = "cursor_labels"
+        const val TYPO_MARK = "typo_mark"
+        const val RARE_ANNOTATE = "rare_annotate"
+        const val PACK_POETRY = "pack_poetry"
+        const val SYMBOL_MEMORY = "symbol_memory"
         const val ACCENT = "accent"
         const val AUTO_PAIR = "auto_pair"
         const val SYMBOL_RETURN = "symbol_return"

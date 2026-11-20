@@ -193,7 +193,7 @@ tabs:
         - {k: ["∥", "∥", "\\parallel "]}
 bottom:
   - {fn: abc, label: ABC, w: 1.2}
-  - {fn: simple, label: 简易, w: 1.2}
+  - {fn: more_symbols, label: 符号, w: 1.2}
   - {fn: left}
   - {fn: space, label: 空格, w: 1.8}
   - {fn: right}

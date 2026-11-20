@@ -164,7 +164,7 @@ class KeyboardRenderTest {
         assertTrue("bs:clear" in events)
         assertTrue("bs:undo" in events)
 
-        bar.showCandidates("ni hao", listOf("你好", "你是", "拟好", "你", "尼", "👋", "泥"))
+        bar.showCandidates("ni hap", listOf("你好", "你受", "你搞", "拟好", "龘", "👋", "泥"), listOf("p→o", "", "h→g", "p→o", "dá", "", ""))
         kb.setRows(repo.keyboard("ru").rows); layoutRoot(); shot("ru")
         bar.showToolbar()
         kb.setRows(repo.keyboard("en").rows); layoutRoot(); shot("en")
@@ -180,13 +180,15 @@ class KeyboardRenderTest {
         layoutRoot(); shot("zh_clip_chip")
     }
 
-    private fun panelShot(name: String, v: View) {
+    private fun panelShot(name: String, v: View, setup: ((CandidateBar) -> Unit)? = null) {
         val w = ctx.resources.displayMetrics.widthPixels
         val h = (ctx.resources.displayMetrics.density * 220).toInt()
         val frame = FrameLayout(ctx)
         val col = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
         val b = CandidateBar(ctx, prefs)
-        b.activeTool = when (name) { "quick" -> "quick"; "cursor" -> "cursor"; "clipboard" -> "clipboard"; else -> null }
+        b.activeTool = when (name) { "quick" -> "quick"; "cursor" -> "cursor"; "clipboard" -> "clipboard"; "emoji" -> "emoji"; else -> null }
+        if (name == "num") b.showMath(emptyList(), "", "uni", simple = true)
+        setup?.invoke(b)
         col.addView(b)
         (v.parent as? android.view.ViewGroup)?.removeView(v)
         col.addView(v, LinearLayout.LayoutParams(-1, h))
@@ -206,13 +208,12 @@ class KeyboardRenderTest {
         val keys = KeyboardView(ctx, prefs).apply { listener = this@KeyboardRenderTest.listener; setRows(repo.keyboard("num").rows) }
         num.addView(strip, LinearLayout.LayoutParams((ctx.resources.displayMetrics.density * 66).toInt(), -1))
         num.addView(keys, LinearLayout.LayoutParams(0, -1, 1f))
-        panelShot("num", num)
-        strip.setItems("， 。 ？ ！ 、 ： ； @ %".split(" "))
+        strip.setItems("+ − × ÷ = ( ) % ， 。 ？".split(" "))
         panelShot("num", num)
         // cursor panel
         val cur = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
         cur.addView(com.kk.shurufa.keyboard.DpadView(ctx, prefs), LinearLayout.LayoutParams(0, -1, 1f))
-        cur.addView(KeyboardView(ctx, prefs).apply { listener = this@KeyboardRenderTest.listener; setRows(repo.keyboard("cursor").rows) }, LinearLayout.LayoutParams(0, -1, 1.25f))
+        cur.addView(KeyboardView(ctx, prefs).apply { iconLabels = "icon"; listener = this@KeyboardRenderTest.listener; setRows(repo.keyboard("cursor").rows) }, LinearLayout.LayoutParams(0, -1, 1.1f))
         panelShot("cursor", cur)
         // quick panel
         val q = com.kk.shurufa.keyboard.QuickPanel(ctx, prefs)
@@ -261,6 +262,21 @@ class KeyboardRenderTest {
             com.kk.shurufa.keyboard.CardStackView.Card("482913", "验证码", false),
         ), keepPosition = false)
         panelShot("clipboard", clip)
+        // emoji
+        val emo = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
+        val erail = com.kk.shurufa.keyboard.GridPanel(ctx, prefs).apply { columns = 1; rowHeightDp = 36f; textSp = 13.5f; cellStyle = com.kk.shurufa.keyboard.GridPanel.CellStyle.RAIL; selectedIndex = 1 }
+        val ecells = com.kk.shurufa.keyboard.GridPanel(ctx, prefs).apply { columns = 7; rowHeightDp = 46f; textSp = 25f; cellStyle = com.kk.shurufa.keyboard.GridPanel.CellStyle.PLAIN }
+        emo.addView(erail, LinearLayout.LayoutParams((ctx.resources.displayMetrics.density * 64).toInt(), -1))
+        emo.addView(ecells, LinearLayout.LayoutParams(0, -1, 1f))
+        panelShot("emoji", emo)
+        val groups = ctx.assets.open("data/emoji.txt").bufferedReader().readLines().map { it.substringBefore('\t') to it.substringAfter('\t').split(' ') }
+        erail.setItems(listOf("最近") + groups.map { it.first })
+        ecells.setItems(groups[0].second)
+        panelShot("emoji", emo)
+        // scientific number keyboard bar
+        val m = repo.math()
+        val sci = KeyboardView(ctx, prefs).apply { listener = this@KeyboardRenderTest.listener; setRows(m.tabs[2].rows + listOf(m.bottom), math = true) }
+        panelShot("sci", sci) { it.showMath(m.tabs.map { t -> t.id to t.name }, "calc", "uni", simple = false) }
         // symbols
         val sym = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
         val rail = com.kk.shurufa.keyboard.GridPanel(ctx, prefs).apply { columns = 1; rowHeightDp = 38f; textSp = 14f; cellStyle = com.kk.shurufa.keyboard.GridPanel.CellStyle.RAIL; selectedIndex = 1 }

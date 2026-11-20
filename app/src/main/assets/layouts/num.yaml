@@ -1,5 +1,5 @@
 # 数字键盘 · 简易模式（!#1）。左边一列是可滚动的运算符和标点（由程序按语言填充）。
-# 点“科学”切到完整的数学键盘，数学键盘里点“简易”切回来。
+# 标准 / 学术 两种模式在候选栏左侧切换；“符号”打开分类符号面板。
 id: num
 label: 数字
 engine: direct
@@ -7,4 +7,4 @@ rows:
   - ["1", "2", "3", {fn: backspace}]
   - ["4", "5", "6", {fn: space, label: 空格}]
   - ["7", "8", "9", {fn: enter}]
-  - [{fn: abc, label: ABC}, "0|%", {key: ".", style: soft, up: ",", down: ":", left: "-", right: "/"}, {fn: sci, label: 科学, long: [全部符号]}]
+  - [{fn: abc, label: ABC}, "0|%", {key: ".", style: soft, up: ",", down: ":", left: "-", right: "/"}, {fn: more_symbols, label: 符号}]

@@ -81,9 +81,21 @@ object RimeEngine {
             |patch:
             |  menu/page_size: 10
             |  translator/enable_correction: ${prefs.zhCorrection}
+            |  engine/filters/@before 0: lua_filter@*kk_typo_mark
             |  engine/filters/+:
             |    - lua_filter@*kk_emoji_order
-            |""".trimMargin()
+            |""".trimMargin() + if (prefs.packPoetry) """
+            |  # 扩展词库：古诗文
+            |  schema/dependencies/+:
+            |    - kk_poetry
+            |  engine/translators/+:
+            |    - table_translator@kk_poetry
+            |  kk_poetry:
+            |    dictionary: kk_poetry
+            |    enable_sentence: false
+            |    enable_completion: true
+            |    initial_quality: 1.1
+            |""".trimMargin() + "\n" else ""
         )
         val phrases = File(user, "custom_phrase.txt")
         if (!phrases.exists()) runCatching {

@@ -72,7 +72,43 @@ object Icons {
     private val down = p { moveTo(12f, 5f); lineTo(12f, 19f); moveTo(6.5f, 13.5f); lineTo(12f, 19f); lineTo(17.5f, 13.5f) }
     private val pin = p { moveTo(9f, 4f); lineTo(15f, 4f); moveTo(10f, 4f); lineTo(10f, 10f); lineTo(7f, 14f); lineTo(17f, 14f); lineTo(14f, 10f); lineTo(14f, 4f); moveTo(12f, 14f); lineTo(12f, 20f) }
 
+    // cursor panel actions
+    private val selectAll = p {
+        // dashed frame with a cursor inside
+        val segs = listOf(4f to 4f, 9f to 4f, 15f to 4f, 4f to 20f, 9f to 20f, 15f to 20f)
+        segs.forEach { (x, y) -> moveTo(x, y); lineTo(x + 3.5f, y) }
+        listOf(4f, 9.5f, 15f).forEach { y -> moveTo(4f, y); lineTo(4f, y + 3f); moveTo(20f, y); lineTo(20f, y + 3f) }
+        moveTo(12f, 8f); lineTo(12f, 16f)
+    }
+    private val copy = p {
+        addRoundRect(RectF(8.5f, 8.5f, 19.5f, 19.5f), 2f, 2f, Path.Direction.CW)
+        moveTo(15.5f, 8.5f); lineTo(15.5f, 6.5f); quadTo(15.5f, 4.5f, 13.5f, 4.5f); lineTo(6.5f, 4.5f); quadTo(4.5f, 4.5f, 4.5f, 6.5f)
+        lineTo(4.5f, 13.5f); quadTo(4.5f, 15.5f, 6.5f, 15.5f); lineTo(8.5f, 15.5f)
+    }
+    private val paste = p {
+        addRoundRect(RectF(5f, 5f, 19f, 20.5f), 2.5f, 2.5f, Path.Direction.CW)
+        addRoundRect(RectF(9f, 3f, 15f, 6.5f), 1.2f, 1.2f, Path.Direction.CW)
+        moveTo(8.5f, 11f); lineTo(15.5f, 11f); moveTo(8.5f, 15f); lineTo(13f, 15f)
+    }
+    private val cut = p {
+        addCircle(7f, 17f, 2.8f, Path.Direction.CW); addCircle(17f, 17f, 2.8f, Path.Direction.CW)
+        moveTo(9f, 15f); lineTo(17.5f, 4f); moveTo(15f, 15f); lineTo(6.5f, 4f)
+    }
+    private val undo = p {
+        moveTo(9f, 6f); lineTo(5f, 10f); lineTo(9f, 14f)
+        moveTo(5f, 10f); lineTo(14f, 10f); quadTo(19.5f, 10f, 19.5f, 15f); quadTo(19.5f, 19.5f, 14f, 19.5f); lineTo(10f, 19.5f)
+    }
+    private val lineStart = p { moveTo(5f, 5f); lineTo(5f, 19f); moveTo(19f, 12f); lineTo(8.5f, 12f); moveTo(12.5f, 8f); lineTo(8.5f, 12f); lineTo(12.5f, 16f) }
+    private val lineEnd = p { moveTo(19f, 5f); lineTo(19f, 19f); moveTo(5f, 12f); lineTo(15.5f, 12f); moveTo(11.5f, 8f); lineTo(15.5f, 12f); lineTo(11.5f, 16f) }
+    private val keyboardIcon = p {
+        addRoundRect(RectF(3f, 6f, 21f, 18f), 2.5f, 2.5f, Path.Direction.CW)
+        listOf(7f, 10.5f, 14f, 17.5f).forEach { x -> moveTo(x, 10f); lineTo(x + 0.01f, 10f) }
+        moveTo(8f, 14.5f); lineTo(16f, 14.5f)
+    }
+
     val all = mapOf(
+        "select_all" to selectAll, "copy" to copy, "paste" to paste, "cut" to cut, "undo" to undo,
+        "home" to lineStart, "end" to lineEnd, "abc" to keyboardIcon,
         "quick" to quick, "close" to close, "up" to up, "down" to down, "pin" to pin,
         "backspace" to backspace, "enter" to enter, "shift" to shift, "language" to globe,
         "left" to left, "right" to right, "next_slot" to next, "mic" to mic, "ai" to spark,
