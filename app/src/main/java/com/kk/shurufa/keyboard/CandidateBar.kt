@@ -555,8 +555,12 @@ class CandidateBar(context: Context, private val prefs: Prefs) : View(context) {
                 }
                 when {
                     menuOpen -> {
-                        overlay?.selected()?.let { listener?.onCandidateOption(pressedCand, it) }
-                        overlay?.hideOptions()
+                        val o = overlay
+                        val idx = pressedCand
+                        if (o == null || o.pickedByDrag()) {
+                            o?.selected()?.let { listener?.onCandidateOption(idx, it) }
+                            o?.hideOptions()
+                        } else o.stick { pick -> pick?.let { listener?.onCandidateOption(idx, it) } }
                         menuOpen = false
                     }
                     dragging -> {

@@ -369,8 +369,12 @@ class GridPanel(context: Context, private val prefs: Prefs) : View(context) {
                 val held = android.os.SystemClock.uptimeMillis() - downAt
                 when {
                     menuFor >= 0 -> {
-                        overlay?.selected()?.let { onLongOption?.invoke(menuFor, it) }
-                        overlay?.hideOptions()
+                        val o = overlay
+                        val idx = menuFor
+                        if (o == null || o.pickedByDrag()) {
+                            o?.selected()?.let { onLongOption?.invoke(idx, it) }
+                            o?.hideOptions()
+                        } else o.stick { pick -> pick?.let { onLongOption?.invoke(idx, it) } }   // stays open for a tap
                         menuFor = -1
                     }
                     dragging -> {

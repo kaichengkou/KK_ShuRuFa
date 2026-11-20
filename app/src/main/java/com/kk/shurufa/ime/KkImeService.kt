@@ -285,7 +285,10 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
             }
         }
         column = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(theme.background) }
-        overlay = PopupOverlay(this, prefs).also { it.theme = theme; it.onTick = { haptics.play(HapticEvent.OPTION) } }
+        overlay = PopupOverlay(this, prefs).also {
+            it.theme = theme; it.onTick = { haptics.play(HapticEvent.OPTION) }
+            it.onStickyChanged = { root.requestLayout() }
+        }
         bar = CandidateBar(this, prefs).also { it.theme = theme; it.listener = this; it.overlay = overlay }
         // 按住工具栏拖动: with a resizable panel open, the toolbar works as its grab bar too
         bar.onVerticalDrag = { phase, rawY, v ->
@@ -344,7 +347,9 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
         outInsets.contentTopInsets = top
         outInsets.visibleTopInsets = top
         outInsets.touchableInsets = Insets.TOUCHABLE_INSETS_REGION
-        outInsets.touchableRegion.set(0, minOf(top, bottom - shown), root.width, bottom)
+        // an open menu takes taps anywhere (a tap outside it closes it)
+        if (overlay.sticky) outInsets.touchableRegion.set(0, loc[1], root.width, bottom)
+        else outInsets.touchableRegion.set(0, minOf(top, bottom - shown), root.width, bottom)
     }
 
     /** The system draws its IME buttons below the keys; give that strip the keyboard's color. */
@@ -496,6 +501,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
     private fun inFamily(p: Panel) = p == Panel.NUM || p == Panel.MATH || p == Panel.SYMBOLS
 
     private fun showPanel(p: Panel) {
+        if (::overlay.isInitialized && overlay.sticky) overlay.dismissSticky()
         if (p != Panel.LETTERS && sinkOn) {
             emojiSearch = false; translateMode = false; aiCustomMode = false; searchQuery.setLength(0)
             if (::translateStrip.isInitialized) translateStrip.visibility = View.GONE
@@ -1273,6 +1279,8 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
                 keyboard.invalidate()
             }
             "language" -> switchLanguage(1)
+            // 语音键 (bottom left, where the language key was): tap for voice; long-press for languages
+            "voice" -> onTool("mic")
             "symbols" -> {
                 commitComposingFirst()
                 // back to the symbols if they were used a moment ago, otherwise the number keyboard
@@ -1346,7 +1354,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
     }
 
     private fun fnOptions(fn: String, key: Key): List<Output> = when (fn) {
-        "language" -> prefs.languages.map { Output(layout(it).label, "§lang:$it") } +
+        "language", "voice" -> prefs.languages.map { Output(layout(it).label, "§lang:$it") } +
             listOf(Output("系统切换", "§picker"), Output("设置", "§settings"))
         "symbols" -> listOf(Output("数字·标准", "§num"), Output("符号", "§sym"), Output("数字·学术", "§科学"), Output("文字编辑", "§cursor"), Output("剪贴板", "§clip"))
         "more_symbols" -> listOf(Output("全部符号", "§sym"), Output("数学", "§math"))
@@ -1925,12 +1933,11 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
         aiPanel.currentTarget = t.orEmpty()
         aiPanel.provider = if (t == null) "" else com.kk.shurufa.online.Llm.provider(com.kk.shurufa.online.Llm.targetId(t)).title + " · " +
             com.kk.shurufa.online.Llm.targetModel(prefs, t).removePrefix("claude-").removePrefix("models/")
-        aiPanel.actions = com.kk.shurufa.online.AiWriter.ACTIONS.map { com.kk.shurufa.keyboard.AiPanel.Act(it.id, it.title, it.group) } +
-            aiCustomRecent().mapIndexed { i, txt -> com.kk.shurufa.keyboard.AiPanel.Act("custom:$i", if (txt.length > 8) txt.take(8) + "…" else txt, "自定义") }
+        aiPanel.actions = com.kk.shurufa.online.AiWriter.ACTIONS.map { com.kk.shurufa.keyboard.AiPanel.Act(it.id, it.title, it.group) }
         aiPanel.invalidate()
     }
 
-    private fun aiCustomRecent(): List<String> = prefs.sp.getString("ai_custom_recent", "")!!.split('\n').filter { it.isNotBlank() }
+
 
     /** The text the AI works on: the selection, or else everything in the field. */
     private fun aiSource(): String {
@@ -1953,12 +1960,11 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
     }
 
     private fun runAi(id: String) {
-        val action = if (id.startsWith("custom:")) aiCustomRecent().getOrNull(id.removePrefix("custom:").toIntOrNull() ?: -1)?.let { com.kk.shurufa.online.AiWriter.custom(it) }
-            else com.kk.shurufa.online.AiWriter.ACTIONS.firstOrNull { it.id == id }
+        val action = com.kk.shurufa.online.AiWriter.ACTIONS.firstOrNull { it.id == id }
         runAiAction(action ?: return)
     }
 
-    // ---- 自定义: the keyboard types the instruction, the bar shows it, ▶ or ↵ runs it ----
+    // ---- 输入指令: the keyboard types the instruction, the bar shows it, ▶ or ↵ runs it ----
     private var aiCustomMode = false
 
     private fun startAiCustom() {
@@ -1975,8 +1981,6 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
         aiCustomMode = false
         searchQuery.setLength(0)
         if (instr.isEmpty()) { showPanel(Panel.AI); return }
-        val recent = (listOf(instr) + aiCustomRecent().filter { it != instr }).take(5)
-        prefs.sp.edit().putString("ai_custom_recent", recent.joinToString("\n")).apply()
         showPanel(Panel.AI)
         runAiAction(com.kk.shurufa.online.AiWriter.custom(instr))
     }
@@ -2047,6 +2051,12 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
             }
             onMode = { voiceTranslate = !voiceTranslate; syncVoiceChips() }
             onUndo = { undoVoice() }
+            onEngine = { e ->
+                prefs.put(Prefs.VOICE_ENGINE, e)
+                voice?.cancel()
+                syncVoiceChips()
+                onVoiceOpened()
+            }
             onDelete = { repeat -> if (!repeat) haptics.play(HapticEvent.BACKSPACE) else haptics.play(HapticEvent.REPEAT); deleteBackward() }
         }
         voicePanel = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -2057,6 +2067,15 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
     private fun voiceLangName(l: String) = when (l) { "zh" -> "中文"; "en" -> "English"; "ru" -> "Русский"; else -> "自动" }
 
     private fun syncVoiceChips() {
+        val engines = listOf("whisper" to "本地模型", "system" to "系统识别") + com.kk.shurufa.online.Llm.speechTargets(prefs)
+        val cur = prefs.voiceEngine.let { if (it.contains('|')) com.kk.shurufa.online.Llm.resolve(prefs, it) ?: "whisper" else it }
+        voiceView.engines = engines
+        voiceView.engine = cur
+        voiceView.engineName = when {
+            cur == "system" -> "系统识别"
+            cur.contains('|') -> com.kk.shurufa.online.Llm.provider(com.kk.shurufa.online.Llm.targetId(cur)).title
+            else -> if (voiceEngine().usesWhisper(voiceLang())) "Whisper" else "SenseVoice"
+        }
         voiceView.language = voiceLangName(voiceLang())
         voiceView.translating = voiceTranslate
         voiceView.mode = if (voiceTranslate) "译成" + com.kk.shurufa.online.TranslateService.name(prefs.translateTarget) else "转文字"

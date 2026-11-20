@@ -123,7 +123,7 @@ object Icons {
     }
 
     val all = mapOf(
-        "check" to check, "moon" to moon, "vibrate" to vibrate, "speaker" to speaker, "grid" to grid,
+        "voice" to mic, "check" to check, "moon" to moon, "vibrate" to vibrate, "speaker" to speaker, "grid" to grid,
         "select_all" to selectAll, "copy" to copy, "paste" to paste, "cut" to cut, "undo" to undo,
         "home" to lineStart, "end" to lineEnd, "abc" to keyboardIcon,
         "quick" to quick, "close" to close, "up" to up, "down" to down, "pin" to pin,

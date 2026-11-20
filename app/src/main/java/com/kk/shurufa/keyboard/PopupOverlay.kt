@@ -167,6 +167,63 @@ class PopupOverlay(context: Context, private val prefs: Prefs) : View(context) {
 
     fun selected(): Output? = if (selRow < 0) null else rows.getOrNull(selRow)?.getOrNull(selCol)
 
+    // ---- sticky menus: after a long-press on the clipboard, candidates or emoji the menu stays
+    // open once the finger lifts, and is used with ordinary taps (a tap elsewhere closes it) ----
+    var sticky = false
+        private set
+    private var onChoose: ((Output?) -> Unit)? = null
+    /** Told when a sticky menu opens or closes (the window must then accept taps anywhere). */
+    var onStickyChanged: ((Boolean) -> Unit)? = null
+
+    /** True when the finger slid onto an option before lifting (classic drag-to-pick). */
+    fun pickedByDrag() = moved && selRow >= 0
+
+    fun stick(choose: (Output?) -> Unit) {
+        sticky = true; onChoose = choose
+        selRow = -1
+        onStickyChanged?.invoke(true)
+        invalidate()
+    }
+
+    private fun optionAt(x: Float, y: Float): Pair<Int, Int>? {
+        if (!opRect.contains(x, y)) return null
+        val row = floor((opRect.bottom - pad - y) / cellH).toInt()
+        if (row !in rows.indices) return null
+        val col = floor((x - opRect.left - pad) / cellW).toInt().coerceIn(0, perRow - 1)
+        val i = if (mirror) perRow - 1 - col else col
+        return if (i in rows[row].indices) row to i else null
+    }
+
+    /** Closes an open menu without a choice (the panel changed under it). */
+    fun dismissSticky() { if (sticky) closeSticky(null) }
+
+    private fun closeSticky(pick: Output?) {
+        val cb = onChoose
+        sticky = false; onChoose = null
+        hideOptions()
+        onStickyChanged?.invoke(false)
+        cb?.invoke(pick)
+    }
+
+    @android.annotation.SuppressLint("ClickableViewAccessibility")
+    override fun onTouchEvent(e: android.view.MotionEvent): Boolean {
+        if (!sticky) return false
+        val hit = optionAt(e.x, e.y)
+        when (e.actionMasked) {
+            android.view.MotionEvent.ACTION_DOWN, android.view.MotionEvent.ACTION_MOVE -> {
+                val (r, c) = hit ?: (-1 to -1)
+                if (r != selRow || c != selCol) {
+                    selRow = r; selCol = c
+                    if (r >= 0) { selX.set(cellLeft(r, c)); selY.set(cellTop(r)); onTick?.invoke() }
+                    invalidate()
+                }
+            }
+            android.view.MotionEvent.ACTION_UP -> closeSticky(hit?.let { (r, c) -> rows[r][c] })
+            android.view.MotionEvent.ACTION_CANCEL -> closeSticky(null)
+        }
+        return true
+    }
+
     fun hideOptions() {
         opShow.animateTo(0f, dur(90))
         invalidate()

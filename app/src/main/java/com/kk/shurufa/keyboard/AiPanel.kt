@@ -154,10 +154,10 @@ class AiPanel(context: Context, private val prefs: Prefs) : View(context) {
             hits += r to "act:${a.id}"
             x += w + gap
         }
-        // ＋ 自定义: type your own instruction
+        // 输入指令: type your own instruction
         run {
             tp.textSize = sp(Ui.BODY)
-            val label = "＋ 自定义"
+            val label = "输入指令"
             val w = tp.measureText(label) + dp(24f)
             if (x + w > width - pad) { x = pad; y += ch + gap }
             val r = RectF(x, y, x + w, y + ch)

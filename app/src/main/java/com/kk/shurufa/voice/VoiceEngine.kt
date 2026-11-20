@@ -62,10 +62,15 @@ class VoiceEngine(private val context: Context, private val prefs: Prefs) {
     private fun post(s: State, detail: String = "", id: Int = session) { main.post { if (id == session) { state = s; listener?.onState(s, detail) } } }
 
     /** Which recognizer [lang] uses with the local engine. */
-    fun usesWhisper(lang: String) = lang == "ru" || (lang == "en" && prefs.voiceEnModel == "whisper")
+    fun usesWhisper(lang: String) = remote() == null && (lang == "ru" || (lang == "en" && prefs.voiceEnModel == "whisper"))
+
+    /** An AI service chosen for recognition ("id|model"), or null for the phone's own models. */
+    fun remote(): String? = prefs.voiceEngine.takeIf { it.contains('|') }?.let { com.kk.shurufa.online.Llm.resolve(prefs, it) }
+    @Volatile private var remoteTarget: String? = null
 
     fun modelReady(lang: String): Boolean = when {
         prefs.voiceEngine == "system" -> true
+        prefs.voiceEngine.contains('|') -> remote() != null
         usesWhisper(lang) -> VoiceModels.installed(context, VoiceModels.byId(prefs.voiceModel))
         else -> VoiceModels.SenseVoiceModel.installed(context)
     }
@@ -105,6 +110,7 @@ class VoiceEngine(private val context: Context, private val prefs: Prefs) {
 
     private fun loadModels(lang: String) {
         if (vad == null) vad = SileroVad(context.assets.open("data/silero_vad_v5.onnx").use { it.readBytes() })
+        if (remoteTarget != null) return
         val threads = Runtime.getRuntime().availableProcessors().coerceIn(2, 4)
         if (usesWhisper(lang)) {
             val m = VoiceModels.byId(prefs.voiceModel)
@@ -123,7 +129,8 @@ class VoiceEngine(private val context: Context, private val prefs: Prefs) {
 
     @SuppressLint("MissingPermission")
     private fun startLocal(lang: String) {
-        if (!modelReady(lang)) { post(State.ERROR, if (usesWhisper(lang)) "还没有下载外文模型" else "还没有下载中文模型"); return }
+        if (!modelReady(lang)) { post(State.ERROR, if (prefs.voiceEngine.contains('|')) "这个 AI 服务还没设置好" else if (usesWhisper(lang)) "还没有下载外文模型" else "还没有下载中文模型"); return }
+        remoteTarget = remote()
         val id = session
         running = true
         post(State.LOADING)
@@ -149,7 +156,8 @@ class VoiceEngine(private val context: Context, private val prefs: Prefs) {
         v.reset()
         post(State.LISTENING, id = id)
         val chunk = FloatArray(SileroVad.CHUNK)
-        val whisperMode = usesWhisper(lang)
+        // Whisper and AI services are too slow to re-run every half second: each utterance shows when done
+        val whisperMode = usesWhisper(lang) || remoteTarget != null
         // Whisper is too slow to re-run every half second: it shows each sentence when done
         val seg = Segmenter({ v.probability(it) }, prefs.voicePauseMs, prefs.voiceCommitPauseMs, prefs.voiceAutoStopSec * 1000L,
             partialEveryChunks = if (whisperMode) Int.MAX_VALUE else 16)
@@ -179,6 +187,7 @@ class VoiceEngine(private val context: Context, private val prefs: Prefs) {
     }
 
     private fun recognize(lang: String, pcm: FloatArray): String {
+        remoteTarget?.let { t -> return simplified(com.kk.shurufa.online.Llm.transcribe(prefs, t, pcm, lang)) }
         if (usesWhisper(lang)) {
             val prompt = if (lang == "ru") "Это предложение на русском языке." else "This is a sentence in English."
             val threads = Runtime.getRuntime().availableProcessors().coerceIn(2, 6)

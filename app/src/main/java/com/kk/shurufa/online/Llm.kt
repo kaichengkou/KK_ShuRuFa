@@ -183,6 +183,87 @@ object Llm {
         } finally { c.disconnect() }
     }
 
+    // ---- speech to text ----
+
+    /** Targets that can transcribe audio (OpenAI-format audio endpoint, or Gemini listening to it). */
+    fun speechTargets(prefs: Prefs): List<Pair<String, String>> = targets(prefs).filter { (t, _) -> protocol(prefs, targetId(t)) != "claude" }
+
+    /**
+     * Transcribes 16 kHz mono [pcm] with an AI service. [lang] is "zh", "en", "ru" or "auto".
+     * Busy services are retried like [complete]. Blocking.
+     */
+    fun transcribe(prefs: Prefs, target: String, pcm: FloatArray, lang: String): String {
+        val id = targetId(target); val model = targetModel(prefs, target)
+        if (!configured(prefs, id)) error("还没有设置 ${provider(id).title} 的 API Key")
+        val wav = wav16(pcm)
+        var last: HttpError? = null
+        for (attempt in 0..2) {
+            try {
+                return when (protocol(prefs, id)) {
+                    "gemini" -> geminiListen(base(prefs, id), key(prefs, id), model, wav, lang)
+                    "claude" -> error("${provider(id).title} 不支持语音识别")
+                    else -> openAiTranscribe(base(prefs, id), key(prefs, id), model, wav, lang)
+                }.trim()
+            } catch (e: HttpError) {
+                last = e
+                if (!e.retryable) error(e.userMessage())
+                if (attempt < 2) Thread.sleep(if (attempt == 0) 1000L else 2500L)
+            }
+        }
+        error(last?.userMessage() ?: "识别失败")
+    }
+
+    private fun wav16(pcm: FloatArray): ByteArray {
+        val n = pcm.size
+        val b = java.nio.ByteBuffer.allocate(44 + n * 2).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+        b.put("RIFF".toByteArray()); b.putInt(36 + n * 2); b.put("WAVE".toByteArray())
+        b.put("fmt ".toByteArray()); b.putInt(16); b.putShort(1); b.putShort(1); b.putInt(16000); b.putInt(32000); b.putShort(2); b.putShort(16)
+        b.put("data".toByteArray()); b.putInt(n * 2)
+        for (v in pcm) b.putShort((v.coerceIn(-1f, 1f) * 32767f).toInt().toShort())
+        return b.array()
+    }
+
+    private fun openAiTranscribe(base: String, key: String, model: String, wav: ByteArray, lang: String): String {
+        val boundary = "kk" + System.nanoTime()
+        val c = URL("$base/audio/transcriptions").openConnection() as HttpURLConnection
+        c.requestMethod = "POST"; c.doOutput = true
+        c.connectTimeout = 15000; c.readTimeout = 90000
+        c.setRequestProperty("Authorization", "Bearer $key")
+        c.setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
+        fun field(name: String, value: String) = "--$boundary\r\nContent-Disposition: form-data; name=\"$name\"\r\n\r\n$value\r\n".toByteArray()
+        try {
+            c.outputStream.use { o ->
+                o.write(field("model", model))
+                if (lang != "auto") o.write(field("language", lang))
+                o.write(field("response_format", "json"))
+                o.write("--$boundary\r\nContent-Disposition: form-data; name=\"file\"; filename=\"speech.wav\"\r\nContent-Type: audio/wav\r\n\r\n".toByteArray())
+                o.write(wav)
+                o.write("\r\n--$boundary--\r\n".toByteArray())
+            }
+            val code = c.responseCode
+            if (code !in 200..299) {
+                val msg = runCatching { c.errorStream?.bufferedReader()?.readText().orEmpty() }.getOrDefault("")
+                val detail = runCatching { JSONObject(msg).optJSONObject("error")?.optString("message") }.getOrNull()?.takeIf { it.isNotBlank() } ?: msg.take(120)
+                throw HttpError(code, detail.take(160))
+            }
+            val body = c.inputStream.bufferedReader().readText()
+            return runCatching { JSONObject(body).optString("text") }.getOrNull() ?: body
+        } catch (e: java.io.IOException) { error("连不上服务器，检查一下网络或地址")
+        } finally { c.disconnect() }
+    }
+
+    private fun geminiListen(base: String, key: String, model: String, wav: ByteArray, lang: String): String {
+        val langName = when (lang) { "zh" -> "Chinese (write it in Simplified Chinese)"; "en" -> "English"; "ru" -> "Russian"; else -> "the language spoken" }
+        val body = JSONObject().put("contents", JSONArray().put(JSONObject().put("role", "user").put("parts", JSONArray()
+            .put(JSONObject().put("inline_data", JSONObject().put("mime_type", "audio/wav").put("data", android.util.Base64.encodeToString(wav, android.util.Base64.NO_WRAP))))
+            .put(JSONObject().put("text", "Transcribe this recording exactly as spoken, in $langName, with natural punctuation. " +
+                "Leave out hesitation sounds. Output only the transcript, nothing else.")))))
+        val c = post("$base/models/$model:generateContent", mapOf("x-goog-api-key" to key), body)
+        val text = try { c.inputStream.bufferedReader().readText() } catch (e: java.io.IOException) { error("连接中断了，再试一次") } finally { c.disconnect() }
+        val parts = runCatching { JSONObject(text).getJSONArray("candidates").getJSONObject(0).getJSONObject("content").getJSONArray("parts") }.getOrNull() ?: return ""
+        return (0 until parts.length()).map { parts.getJSONObject(it) }.filter { !it.optBoolean("thought") }.joinToString("") { it.optString("text") }
+    }
+
     // ---- Claude (official SDK) ----
 
     private fun claude(key: String, model: String, system: String, user: String, onText: (String) -> Unit, cancelled: () -> Boolean, baseUrl: String? = null): String {

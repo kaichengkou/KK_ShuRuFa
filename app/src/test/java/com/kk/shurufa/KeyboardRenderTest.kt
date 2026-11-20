@@ -325,7 +325,7 @@ class KeyboardRenderTest {
         panelShot("emoji_kaomoji", emo)
         // 语音输入 (no bottom row), AI 改写, 翻译栏
         val vp = com.kk.shurufa.keyboard.VoicePanel(ctx, prefs).apply {
-            look = com.kk.shurufa.keyboard.VoicePanel.Look.LISTENING; status = "正在听…停顿 3 秒自动结束"; language = "中文"
+            look = com.kk.shurufa.keyboard.VoicePanel.Look.LISTENING; status = "正在听…停顿 3 秒自动结束"; language = "中文"; engineName = "SenseVoice"
             partial = "明天下午三点在学校门口"; mode = "转文字"; canUndo = true
         }
         vp.setLevel(0.6f); idle(200)

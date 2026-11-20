@@ -28,8 +28,8 @@ object AiWriter {
         Action("to_zh", "中文", "翻译", "Translate the text into natural, idiomatic Simplified Chinese.", false),
     )
 
-    /** The 自定义 action: what the user typed becomes the instruction. */
-    fun custom(instruction: String) = Action("custom", "自定义", "自定义", instruction, true)
+    /** 输入指令: what the user typed becomes the instruction. */
+    fun custom(instruction: String) = Action("custom", "指令", "指令", instruction, true)
 
     private const val WRITER =
         "The text is the user's own writing. The user is a man and writes in the first person; when a language marks the " +

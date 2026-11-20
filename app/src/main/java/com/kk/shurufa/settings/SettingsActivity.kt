@@ -879,7 +879,14 @@ private fun VoicePage(prefs: Prefs) {
     }
     val granted = remember(tick) { com.kk.shurufa.voice.PermissionActivity.granted(ctx) }
     Group("识别方式") {
-        Choice(prefs, Prefs.VOICE_ENGINE, "引擎", listOf("whisper" to "本地模型", "system" to "系统语音识别"))
+        run {
+            var pick by remember { mutableStateOf(false) }
+            var cur by remember { mutableStateOf(prefs.voiceEngine) }
+            val engines = listOf("whisper" to "本地模型（离线）", "system" to "系统语音识别") + com.kk.shurufa.online.Llm.speechTargets(prefs)
+            PickRow("识别用", engines.firstOrNull { it.first == cur }?.second ?: com.kk.shurufa.online.Llm.targetLabel(prefs, cur)) { pick = true }
+            if (pick) PickerDialog("识别用", engines, cur, onPick = { cur = it; prefs.put(Prefs.VOICE_ENGINE, it) }, onClose = { pick = false })
+            Note("也可以用 AI 服务识别：OpenAI 格式的服务（OpenAI、硅基流动、Groq 等）需要先在 联网功能 里启用一个语音模型，如 whisper-1、gpt-4o-mini-transcribe、FunAudioLLM/SenseVoiceSmall、whisper-large-v3-turbo；Gemini 直接用它的对话模型听写。AI 识别要联网，每段说完才出字。语音面板上也能随时切换。")
+        }
         Note("本地模型在手机上离线识别，边说边出字。中文和英文都用 SenseVoice（专为中文训练，英文也很好，带标点）；俄语它不支持，用 Whisper。系统识别用手机自带的服务，准确度取决于手机。")
         Choice(prefs, Prefs.VOICE_EN_MODEL, "英文用", listOf("sensevoice" to "SenseVoice（流式）", "whisper" to "Whisper"))
         Toggle(prefs, Prefs.VOICE_RETURN, "说完自动回到键盘", "自动结束收音后回到字母键盘", false)
