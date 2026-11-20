@@ -1,2 +1,17 @@
 -keep class com.kk.shurufa.rime.RimeBridge { *; }
 -dontwarn org.snakeyaml.**
+# Claude SDK: JSON models are (de)serialized by Jackson through reflection
+-keep class com.anthropic.** { *; }
+-keep class com.fasterxml.jackson.** { *; }
+-keepattributes Signature,*Annotation*,InnerClasses,EnclosingMethod
+-dontwarn com.fasterxml.jackson.**
+-dontwarn com.anthropic.**
+-dontwarn org.conscrypt.**
+-dontwarn org.bouncycastle.**
+-dontwarn org.openjsse.**
+-dontwarn java.beans.**
+-dontwarn javax.annotation.**
+-dontwarn kotlin.reflect.jvm.internal.**
+-dontwarn java.lang.reflect.AnnotatedParameterizedType
+-dontwarn java.lang.reflect.AnnotatedType
+-dontwarn com.github.victools.**

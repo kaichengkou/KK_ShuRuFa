@@ -61,6 +61,8 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
@@ -115,7 +117,7 @@ class SettingsActivity : ComponentActivity() {
             else lightColorScheme(primary = accent, onPrimary = Color(kb.onAccent), background = Color(0xFFF3F4F7), surface = Color(0xFFF3F4F7),
                 surfaceContainer = Color.White, surfaceContainerHigh = Color(0xFFE9ECF0))
             MaterialTheme(colorScheme = scheme) {
-                Surface(color = MaterialTheme.colorScheme.background) { SettingsApp(prefs) }
+                Surface(color = MaterialTheme.colorScheme.background) { SettingsApp(prefs, intent.getStringExtra("page") ?: "home") }
             }
         }
     }
@@ -135,12 +137,14 @@ private val PAGES = listOf(
     PageInfo("packs", "扩展词库", "古诗文等，可整句输入并自动接下句"),
     PageInfo("symbols", "符号与数学", "括号配对、数字后标点、数学键盘"),
     PageInfo("clipboard", "剪贴板", "保留条数、复制后的粘贴提示"),
+    PageInfo("voice", "语音输入", "本地识别模型、识别语言、系统识别"),
+    PageInfo("online", "联网功能", "翻译、词库更新、AI 改写"),
     PageInfo("files", "布局文件", "导出和重新加载 YAML 布局"),
 )
 
 @Composable
-private fun SettingsApp(prefs: Prefs) {
-    var page by remember { mutableStateOf("home") }
+private fun SettingsApp(prefs: Prefs, start: String) {
+    var page by remember { mutableStateOf(start) }
     BackHandler(enabled = page != "home") { page = if (page == "dict_edit") "dict" else "home" }
     AnimatedContent(
         targetState = page,
@@ -165,6 +169,8 @@ private fun SettingsApp(prefs: Prefs) {
                     "packs" -> PacksPage(prefs)
                     "symbols" -> SymbolsPage(prefs)
                     "clipboard" -> ClipboardPage(prefs)
+                    "voice" -> VoicePage(prefs)
+                    "online" -> OnlinePage(prefs)
                     "files" -> FilesPage()
                 }
             }
@@ -762,5 +768,138 @@ private fun DictPage() {
                 }
             },
         )
+    }
+}
+
+// ---- voice ---------------------------------------------------------------------------------
+
+@Composable
+private fun VoicePage(prefs: Prefs) {
+    val ctx = LocalContext.current
+    var tick by remember { mutableIntStateOf(0) }
+    val owner = LocalLifecycleOwner.current
+    DisposableEffect(owner) {
+        val obs = LifecycleEventObserver { _, e -> if (e == Lifecycle.Event.ON_RESUME) tick++ }
+        owner.lifecycle.addObserver(obs)
+        onDispose { owner.lifecycle.removeObserver(obs) }
+    }
+    val granted = remember(tick) { com.kk.shurufa.voice.PermissionActivity.granted(ctx) }
+    Group("识别方式") {
+        Choice(prefs, Prefs.VOICE_ENGINE, "引擎", listOf("whisper" to "本地 Whisper", "system" to "系统语音识别"))
+        Note("本地 Whisper 在手机上离线识别，带标点，中文、英文、俄语都准，说完后要等一两秒；系统识别用手机自带的服务，边说边出字，准确度取决于手机。")
+        Choice(prefs, Prefs.VOICE_LANG, "识别语言", listOf("follow" to "跟随键盘", "auto" to "自动", "zh" to "中文", "en" to "英文", "ru" to "俄语"))
+        IntSlider(prefs, Prefs.VOICE_MAX_SEC, "一次最长", 60, 15..180, "秒", "到时间自动结束并识别")
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 4.dp)) {
+            Text(if (granted) "已允许使用麦克风" else "还没有麦克风权限", Modifier.weight(1f))
+            if (!granted) Button(onClick = { com.kk.shurufa.voice.PermissionActivity.request(ctx) }) { Text("允许") }
+        }
+    }
+    Group("本地模型") {
+        Choice(prefs, Prefs.VOICE_SOURCE, "下载来源", listOf("hf" to "Hugging Face", "mirror" to "国内镜像"))
+        var selected by remember { mutableStateOf(prefs.voiceModel) }
+        var progress by remember { mutableStateOf(-1f) }
+        var downloading by remember { mutableStateOf<String?>(null) }
+        var message by remember { mutableStateOf("") }
+        var cancel by remember { mutableStateOf(false) }
+        for (m in com.kk.shurufa.voice.VoiceModels.all) {
+            val have = remember(tick, downloading, message) { com.kk.shurufa.voice.VoiceModels.installed(ctx, m) }
+            Row(Modifier.fillMaxWidth().clickable { selected = m.id; prefs.put(Prefs.VOICE_MODEL, m.id) }.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                RadioButton(selected = selected == m.id, onClick = { selected = m.id; prefs.put(Prefs.VOICE_MODEL, m.id) })
+                Column(Modifier.weight(1f)) {
+                    Text("${m.title} · ${m.sizeMb} MB", fontWeight = FontWeight.Medium)
+                    Text(if (downloading == m.id) "正在下载 ${(progress * 100).toInt().coerceAtLeast(0)}%" else if (have) "已下载 · ${m.note}" else m.note,
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                when {
+                    downloading == m.id -> TextButton(onClick = { cancel = true }) { Text("停止") }
+                    have -> TextButton(onClick = { com.kk.shurufa.voice.VoiceModels.file(ctx, m).delete(); message = "已删除 ${m.title}" }) { Text("删除") }
+                    else -> TextButton(enabled = downloading == null, onClick = {
+                        downloading = m.id; progress = 0f; cancel = false; message = ""
+                        val main = android.os.Handler(android.os.Looper.getMainLooper())
+                        Thread {
+                            val r = runCatching {
+                                com.kk.shurufa.voice.VoiceModels.download(ctx, m, prefs.voiceSource, { p -> main.post { progress = p } }, { cancel })
+                            }
+                            main.post {
+                                downloading = null
+                                message = r.fold({ if (cancel) "已停止，下次会接着下载" else "${m.title} 下载完成" }, { "下载失败：${it.message ?: "网络错误"}，可以换个下载来源再试" })
+                            }
+                        }.start()
+                    }) { Text("下载") }
+                }
+            }
+        }
+        if (downloading != null) LinearProgressIndicator(progress = { progress.coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp))
+        if (message.isNotEmpty()) Note(message)
+        Note("模型只存在手机里，录音不会上传。下载建议连 Wi-Fi。")
+    }
+}
+
+// ---- online --------------------------------------------------------------------------------
+
+@Composable
+private fun OnlinePage(prefs: Prefs) {
+    val ctx = LocalContext.current
+    val main = remember { android.os.Handler(android.os.Looper.getMainLooper()) }
+    Group("翻译") {
+        Choice(prefs, Prefs.TRANSLATE_TARGET, "默认翻译成", com.kk.shurufa.online.Translator.LANGS)
+        Toggle(prefs, Prefs.TRANSLATE_WIFI, "翻译模型只在 Wi-Fi 下载", "每种语言约 30 MB，下载一次后离线翻译", false)
+        Note("点工具栏的翻译按钮：选中文字时直接翻译选中的部分；没选时输入要翻译的话（拼音照常）。中文会翻成默认语言，其他语言翻成中文。候选栏里可以临时换目标语言。")
+    }
+    Group("词库更新") {
+        var status by remember { mutableStateOf("词库来自雾凇拼音（rime-ice），可以随时更新到最新版") }
+        var plan by remember { mutableStateOf<com.kk.shurufa.online.DictUpdater.Plan?>(null) }
+        var busy by remember { mutableStateOf(false) }
+        var progress by remember { mutableStateOf(-1f) }
+        Text(status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(vertical = 4.dp))
+        if (progress >= 0f) LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp))
+        Row(Modifier.padding(vertical = 4.dp)) {
+            Button(enabled = !busy, onClick = {
+                busy = true; status = "正在检查…"
+                Thread {
+                    val r = runCatching { com.kk.shurufa.online.DictUpdater.check(ctx) }
+                    main.post {
+                        busy = false
+                        r.onSuccess { p -> plan = p; status = if (p.changed.isEmpty()) "已是最新" else "有 ${p.changed.size} 个词库文件更新，共 ${"%.1f".format(p.bytes / 1e6)} MB" }
+                         .onFailure { status = "检查失败：${it.message ?: "网络错误"}" }
+                    }
+                }.start()
+            }) { Text("检查更新") }
+            Spacer(Modifier.width(8.dp))
+            val p = plan
+            if (p != null && p.changed.isNotEmpty()) Button(enabled = !busy, onClick = {
+                busy = true; progress = 0f; status = "正在下载…"
+                Thread {
+                    val r = runCatching { com.kk.shurufa.online.DictUpdater.apply(ctx, p) { f -> main.post { progress = f } } }
+                    main.post {
+                        busy = false; progress = -1f; plan = null
+                        status = r.fold({ "已下载，正在重新部署词库（约一分钟，期间中文暂不可用）" }, { "下载失败：${it.message ?: "网络错误"}" })
+                    }
+                }.start()
+            }) { Text("下载并部署") }
+        }
+        Note("更新后的词库放在应用自己的文件夹里，优先于安装包自带的版本；你自己造的词和学习记录不受影响。")
+    }
+    Group("AI 改写") {
+        var key by remember { mutableStateOf(prefs.aiKey) }
+        var shown by remember { mutableStateOf(false) }
+        OutlinedTextField(key, { key = it.trim(); prefs.put(Prefs.AI_KEY, key) }, Modifier.fillMaxWidth().padding(vertical = 6.dp),
+            label = { Text("Claude API Key") }, singleLine = true, placeholder = { Text("sk-ant-…") },
+            visualTransformation = if (shown) androidx.compose.ui.text.input.VisualTransformation.None else androidx.compose.ui.text.input.PasswordVisualTransformation(),
+            trailingIcon = { TextButton(onClick = { shown = !shown }) { Text(if (shown) "隐藏" else "显示") } })
+        Choice(prefs, Prefs.AI_MODEL, "模型", com.kk.shurufa.online.AiWriter.MODELS, com.kk.shurufa.online.AiWriter.DEFAULT_MODEL)
+        var test by remember { mutableStateOf("") }
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 4.dp)) {
+            Text(test, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Button(enabled = key.isNotBlank(), onClick = {
+                test = "正在测试…"
+                val model = prefs.aiModel
+                Thread {
+                    val r = runCatching { com.kk.shurufa.online.AiWriter(key, model).run(com.kk.shurufa.online.AiWriter.ACTIONS.first { it.id == "fix" }, "今天天气真好，我门去公园吧") }
+                    main.post { test = r.fold({ "可以用：$it" }, { it.message ?: "失败" }) }
+                }.start()
+            }) { Text("测试") }
+        }
+        Note("在 console.anthropic.com 创建 API Key，按用量付费。点工具栏的 ✦ 打开：选中文字时只处理选中的部分，否则处理整个输入框；只有你点了操作，文字才会发给 Claude。Key 只保存在这台手机上。")
     }
 }

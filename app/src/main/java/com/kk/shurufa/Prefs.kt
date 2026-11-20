@@ -86,6 +86,15 @@ class Prefs(context: Context) {
     val clipFriction get() = f(CLIP_FRICTION, 1f)
     val clipColumns get() = i(CLIP_COLUMNS, 2)
     val emojiAutoUpdate get() = b(EMOJI_AUTO_UPDATE, true)
+    val voiceEngine get() = s(VOICE_ENGINE, "whisper")
+    val voiceModel get() = s(VOICE_MODEL, "small")
+    val voiceSource get() = s(VOICE_SOURCE, "hf")
+    val voiceLang get() = s(VOICE_LANG, "follow")
+    val voiceMaxSec get() = i(VOICE_MAX_SEC, 60)
+    val aiKey get() = s(AI_KEY, "")
+    val aiModel get() = s(AI_MODEL, "claude-opus-5-5")
+    val translateTarget get() = s(TRANSLATE_TARGET, "en")
+    val translateWifiOnly get() = b(TRANSLATE_WIFI, false)
 
     // Symbols
     val autoPair get() = b(AUTO_PAIR, true)
@@ -174,6 +183,15 @@ class Prefs(context: Context) {
         const val CLIP_FRICTION = "clip_friction"
         const val CLIP_COLUMNS = "clip_columns"
         const val EMOJI_AUTO_UPDATE = "emoji_auto_update"
+        const val VOICE_ENGINE = "voice_engine"
+        const val VOICE_MODEL = "voice_model"
+        const val VOICE_SOURCE = "voice_source"
+        const val VOICE_LANG = "voice_lang"
+        const val VOICE_MAX_SEC = "voice_max_sec"
+        const val AI_KEY = "ai_key"
+        const val AI_MODEL = "ai_model"
+        const val TRANSLATE_TARGET = "translate_target"
+        const val TRANSLATE_WIFI = "translate_wifi"
         /** Last emoji update check (ms); a state, not a setting. */
         const val EMOJI_CHECKED = "seen_emoji_checked"
         const val ACCENT = "accent"

@@ -24,6 +24,8 @@ object RimeBridge {
     external fun caretPos(): Int
     external fun setCaretPos(pos: Int)
     external fun query(input: String, limit: Int): Array<String>
+    /** Traditional to Simplified Chinese with OpenCC ([config] is a t2s.json path). */
+    external fun t2s(text: String, config: String): String
     external fun commitText(): String
     external fun preedit(): String
     external fun input(): String

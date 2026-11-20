@@ -67,3 +67,22 @@ add_subdirectory(librime)
 target_compile_options(rime-static PRIVATE "-Wno-error=deprecated-declarations")
 
 add_subdirectory(kk_rime)
+
+# Voice input: whisper.cpp (ggml on the CPU) in its own library, loaded only when used.
+if(ANDROID)
+  set(WHISPER_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+  set(WHISPER_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+  set(WHISPER_BUILD_SERVER OFF CACHE BOOL "" FORCE)
+  set(WHISPER_ALL_WARNINGS OFF CACHE BOOL "" FORCE)
+  set(GGML_NATIVE OFF CACHE BOOL "" FORCE)
+  set(GGML_OPENMP OFF CACHE BOOL "" FORCE)
+  set(GGML_BACKEND_DL OFF CACHE BOOL "" FORCE)
+  if(ANDROID_ABI STREQUAL "arm64-v8a")
+    # dot product and fp16 arithmetic: every arm64 phone from about 2018 on has them
+    set(GGML_CPU_ARM_ARCH "armv8.2-a+dotprod+fp16" CACHE STRING "" FORCE)
+  endif()
+  add_subdirectory(whisper.cpp EXCLUDE_FROM_ALL)
+  add_library(kk_whisper SHARED kk_whisper/kk_whisper.cc)
+  target_link_libraries(kk_whisper whisper log)
+  target_compile_options(kk_whisper PRIVATE -O3)
+endif()

@@ -2,8 +2,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.VIBRATE" />
-    <!-- only for downloading newer emoji data (unicode.org, CLDR); nothing typed is sent -->
+    <!-- downloads: emoji data, voice and translation models, dictionary updates; and the AI
+         and translation features you call yourself. Nothing you type is sent on its own. -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
     <application
         android:allowBackup="true"
@@ -21,6 +23,14 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- asks for the microphone on behalf of the keyboard, which cannot show the dialog itself -->
+        <activity
+            android:name=".voice.PermissionActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
 
         <service
             android:name=".ime.KkImeService"

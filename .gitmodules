@@ -22,3 +22,6 @@
 [submodule "rime-data/pinyin-data"]
 	path = rime-data/pinyin-data
 	url = https://github.com/mozillazg/pinyin-data.git
+[submodule "app/src/main/jni/whisper.cpp"]
+	path = app/src/main/jni/whisper.cpp
+	url = https://github.com/ggml-org/whisper.cpp

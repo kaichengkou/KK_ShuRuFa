@@ -82,7 +82,7 @@ class CandidateBar(context: Context, private val prefs: Prefs) : View(context) {
     private var message = ""
     var expanded = false
 
-    private val tools = listOf("ai", "emoji", "translate", "cursor", "clipboard", "quick")
+    private val tools = listOf("ai", "emoji", "mic", "translate", "cursor", "clipboard", "quick")
 
     private fun dp(v: Float) = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, resources.displayMetrics)
     private fun sp(v: Float) = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, v, resources.displayMetrics)

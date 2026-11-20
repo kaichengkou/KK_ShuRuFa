@@ -85,7 +85,26 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
     private lateinit var clipFavs: GridPanel
     private lateinit var quickPanel: QuickPanel
 
-    enum class Panel { LETTERS, NUM, SYMBOLS, MATH, PHONE, CURSOR, CLIPBOARD, CANDIDATES, QUICK, EMOJI }
+    enum class Panel { LETTERS, NUM, SYMBOLS, MATH, PHONE, CURSOR, CLIPBOARD, CANDIDATES, QUICK, EMOJI, VOICE, AI }
+
+    private lateinit var aiPanel: com.kk.shurufa.keyboard.AiPanel
+    private var aiResult = ""
+    private var aiFromSelection = false
+    // 翻译: like 表情查找, the keyboard types into [searchQuery]; the bar shows the translation
+    private var translateMode = false
+    private var translateTo = "en"
+    private var translateResult = ""
+    private var translatedFor = ""
+    private var translateItems: List<String> = emptyList()
+    private val translator by lazy { com.kk.shurufa.online.Translator() }
+    private val translateRun = Runnable { runTranslate() }
+    private val sinkOn get() = emojiSearch || translateMode
+
+    private lateinit var voicePanel: LinearLayout
+    private lateinit var voiceView: com.kk.shurufa.keyboard.VoicePanel
+    private var voice: com.kk.shurufa.voice.VoiceEngine? = null
+    /** Recognition language picked on the panel for this session; null follows the setting. */
+    private var voiceLangPick: String? = null
 
     private var panel = Panel.LETTERS
     private var lang = "zh"
@@ -192,6 +211,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
     }
 
     override fun onDestroy() {
+        voice?.release()
         prefs.sp.unregisterOnSharedPreferenceChangeListener(this)
         (getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).removePrimaryClipChangedListener(clipListener)
         RimeEngine.removeListener(rimeListener)
@@ -213,7 +233,8 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
 
     /** Settings that only change behavior; everything else rebuilds the keyboard. */
     private val liveKeys = setOf(
-        "sym_recent", "emoji_recent", "kao_recent", "emoji_tone", Prefs.EMOJI_AUTO_UPDATE, Prefs.ZH_TRAD, Prefs.ZH_EMOJI, Prefs.ZH_PREDICT, Prefs.PINYIN_MODE, Prefs.MATH_FORMAT,
+        "sym_recent", "emoji_recent", "kao_recent", "emoji_tone", Prefs.EMOJI_AUTO_UPDATE, Prefs.AI_KEY, Prefs.AI_MODEL, Prefs.TRANSLATE_TARGET, Prefs.TRANSLATE_WIFI,
+        Prefs.VOICE_ENGINE, Prefs.VOICE_MODEL, Prefs.VOICE_SOURCE, Prefs.VOICE_LANG, Prefs.VOICE_MAX_SEC, Prefs.ZH_TRAD, Prefs.ZH_EMOJI, Prefs.ZH_PREDICT, Prefs.PINYIN_MODE, Prefs.MATH_FORMAT,
         Prefs.VIBRATE, Prefs.SOUND, Prefs.CLIP_KEEP, Prefs.CLIP_SUGGEST, Prefs.ZH_CORRECTION, Prefs.STRESS_MODE,
         Prefs.BACKSPACE_RESELECT, Prefs.NUM_MODE, Prefs.TYPO_MARK, Prefs.RARE_ANNOTATE, Prefs.PACK_POETRY, Prefs.SYMBOL_MEMORY,
         Prefs.CLIP_MAX_CHARS, Prefs.CLIP_FRICTION, Prefs.CLIP_COLUMNS,
@@ -271,6 +292,8 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
         buildSymbolPanel()
         buildEditPanel()
         buildMathPanel()
+        buildVoicePanel()
+        buildAiPanel()
         buildClipPanel()
         buildEmojiPanel()
         quickPanel = QuickPanel(this, prefs).also { it.theme = theme; it.onTile = { id -> onQuickTile(id) }; it.onPress = { haptics.play(HapticEvent.LETTER) } }
@@ -378,7 +401,8 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
 
     override fun onFinishInputView(finishingInput: Boolean) {
         super.onFinishInputView(finishingInput)
-        emojiSearch = false; searchQuery.setLength(0)
+        emojiSearch = false; translateMode = false; searchQuery.setLength(0)
+        voice?.cancel()
         if (RimeEngine.ready) RimeBridge.clearComposition()
         resetSyllables()
         predictions = emptyList()
@@ -443,6 +467,8 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
         Panel.CLIPBOARD -> "clipboard"
         Panel.QUICK -> "quick"
         Panel.EMOJI -> "emoji"
+        Panel.VOICE -> "mic"
+        Panel.AI -> "ai"
         else -> null
     }
 
@@ -458,7 +484,8 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
     private fun inFamily(p: Panel) = p == Panel.NUM || p == Panel.MATH || p == Panel.SYMBOLS
 
     private fun showPanel(p: Panel) {
-        if (p != Panel.LETTERS && emojiSearch) { emojiSearch = false; searchQuery.setLength(0) }
+        if (p != Panel.LETTERS && sinkOn) { emojiSearch = false; translateMode = false; searchQuery.setLength(0) }
+        if (p != Panel.VOICE && panel == Panel.VOICE) voice?.cancel()
         val from = panel
         panel = p
         if (p != Panel.LETTERS && p != Panel.CANDIDATES) pinyinEdit = false
@@ -498,6 +525,8 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
             Panel.CLIPBOARD -> { refreshClips(); content.addView(clipPanel, fixed); if (from != p) animateIn(clipPanel) }
             Panel.QUICK -> { refreshQuick(); content.addView(quickPanel, fixed); quickPanel.animateIn() }
             Panel.EMOJI -> { refreshEmoji(); content.addView(emojiPanel, fixed); if (from != p) animateIn(emojiPanel) }
+            Panel.AI -> { content.addView(aiPanel, fixed); if (from != p) { animateIn(aiPanel); onAiOpened() } }
+            Panel.VOICE -> { content.addView(voicePanel, fixed); if (from != p) { animateIn(voicePanel); onVoiceOpened() } }
             Panel.CANDIDATES -> {
                 val cands = RimeBridge.candidates(300).toList()
                 candGrid.notes = annotations(cands)
@@ -507,7 +536,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
             }
         }
         bar.expanded = p == Panel.CANDIDATES
-        bar.activeTool = if (emojiSearch) "emoji" else toolFor(p)
+        bar.activeTool = if (emojiSearch) "emoji" else if (translateMode) "translate" else toolFor(p)
         syncBar()
         animateHeight(oldTotal, if (noBar) 0 else barH)
     }
@@ -551,6 +580,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
             isZh && RimeEngine.state == RimeEngine.State.DEPLOYING && panel == Panel.LETTERS -> bar.showMessage("正在部署雾凇拼音词库，首次约需一分钟…")
             isZh && RimeEngine.state == RimeEngine.State.PREPARING && panel == Panel.LETTERS -> bar.showMessage("正在准备中文词库…")
             isZh && RimeEngine.state == RimeEngine.State.FAILED -> bar.showMessage("中文引擎启动失败：${RimeEngine.error ?: "未知错误"}")
+            translateMode && !composing && panel == Panel.LETTERS -> showTranslateBar()
             emojiSearch && !composing && panel == Panel.LETTERS -> {
                 val q = searchQuery.toString().trim()
                 val drawable = emojiGroups.flatMapTo(HashSet()) { it.second }
@@ -857,7 +887,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
 
     private fun flushRime() {
         val commit = RimeBridge.commitText()
-        if (commit.isNotEmpty() && emojiSearch) {
+        if (commit.isNotEmpty() && sinkOn) {
             // 表情查找: the chosen word goes into the query, not the app
             resetSyllables(); inputBeforeKey = ""
             searchQuery.append(commit)
@@ -1117,7 +1147,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
 
     override fun onOutput(key: Key, output: Output) {
         if (panel == Panel.MATH) { mathOut(output); return }
-        if (emojiSearch && panel == Panel.LETTERS) {
+        if (sinkOn && panel == Panel.LETTERS) {
             val tt = output.text
             if (isZh && output === key.main && tt.length == 1 && tt[0] in 'a'..'z' && rimeKey(tt[0].code)) return
             commitComposingFirst()
@@ -1169,7 +1199,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
                 predictions = emptyList()
                 when {
                     composing -> rimeKey(RimeBridge.XK_BackSpace)
-                    emojiSearch -> { if (searchQuery.isNotEmpty()) searchQuery.setLength(searchQuery.offsetByCodePoints(searchQuery.length, -1)); syncBar() }
+                    sinkOn -> { if (searchQuery.isNotEmpty()) searchQuery.setLength(searchQuery.offsetByCodePoints(searchQuery.length, -1)); syncBar() }
                     else -> {
                         deleteBackward()
                         updateAutoCap()
@@ -1180,7 +1210,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
             }
             "space" -> {
                 if (composing) { rimeKey(RimeBridge.XK_space); return }
-                if (emojiSearch) { searchType(" "); return }
+                if (sinkOn) { searchType(" "); return }
                 predictions = emptyList()
                 val now = SystemClock.uptimeMillis()
                 val before = ic?.getTextBeforeCursor(2, 0)?.toString().orEmpty()
@@ -1193,6 +1223,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
                 syncBar()
             }
             "enter" -> if (composing) rimeKey(RimeBridge.XK_Return)
+            else if (translateMode) { if (translateResult.isNotEmpty() && translatedFor == searchQuery.toString()) commitTranslation() }
             else if (emojiSearch) { searchResults.firstOrNull()?.let { onEmoji(it) } }
             else { predictions = emptyList(); performEnter(); updateAutoCap(); syncBar() }
             "shift" -> {
@@ -1331,6 +1362,9 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
     }
 
     override fun onSwitchLanguage(direction: Int): String? {
+        // 数字和符号之间左右滑空格切换, not the language
+        if (panel == Panel.NUM) { showPanel(Panel.SYMBOLS); return null }
+        if (panel == Panel.SYMBOLS) { showPanel(numPanel()); return null }
         switchLanguage(direction)
         return layout(curLang).label
     }
@@ -1407,6 +1441,8 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
     // ---- candidate bar listener ---------------------------------------------------------
 
     private fun panelForTool(id: String) = when (id) {
+        "mic" -> Panel.VOICE
+        "ai" -> Panel.AI
         "cursor" -> Panel.CURSOR
         "clipboard" -> Panel.CLIPBOARD
         "quick" -> Panel.QUICK
@@ -1419,13 +1455,20 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
         if (target != null && panel == target) { showPanel(Panel.LETTERS); return }
         if (id == "emoji" && panel == Panel.EMOJI) { showPanel(Panel.LETTERS); return }
         when (id) {
-            "cursor", "clipboard", "quick" -> showPanel(target!!)
+            "cursor", "clipboard", "quick", "mic", "ai" -> showPanel(target!!)
             "emoji" -> showPanel(Panel.EMOJI)
-            "ai", "translate" -> Toast.makeText(this, "AI 和翻译在阶段 2 接入", Toast.LENGTH_SHORT).show()
+            "translate" -> if (translateMode) stopTranslate() else startTranslate()
         }
     }
 
     override fun onCandidate(index: Int) {
+        if (index < 0 && translateMode && !composing) {
+            val item = translateItems.getOrNull(-1 - index) ?: return
+            val lang = com.kk.shurufa.online.Translator.LANGS.firstOrNull { item == "→ " + it.second }
+            if (lang != null) { translateTo = lang.first; prefs.put(Prefs.TRANSLATE_TARGET, lang.first); translatedFor = ""; syncBar() }
+            else commitTranslation()
+            return
+        }
         if (index < 0 && emojiSearch && !composing) {
             searchResults.getOrNull(-1 - index)?.let { onEmoji(it) }
             return
@@ -1661,6 +1704,234 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
         }
     }
 
+    // ---- 翻译 ----------------------------------------------------------------------------
+
+    /** Starts from the selection when there is one (the translation then replaces it). */
+    private fun startTranslate() {
+        commitComposingFirst()
+        emojiSearch = false
+        translateMode = true
+        translateTo = prefs.translateTarget
+        searchQuery.setLength(0)
+        currentInputConnection?.getSelectedText(0)?.toString()?.takeIf { it.isNotBlank() }?.let { searchQuery.append(it) }
+        translateResult = ""; translatedFor = ""
+        haptics.play(HapticEvent.FUNCTION)
+        showPanel(Panel.LETTERS)
+    }
+
+    private fun stopTranslate() {
+        if (!translateMode) return
+        translateMode = false
+        if (composing) RimeBridge.clearComposition()
+        searchQuery.setLength(0)
+        handler.removeCallbacks(translateRun)
+        showPanel(Panel.LETTERS)
+    }
+
+    private fun langName(id: String) = com.kk.shurufa.online.Translator.LANGS.firstOrNull { it.first == id }?.second ?: id
+
+    /** The source language by its letters; the target is the chosen one unless that is the same. */
+    private fun translatePair(q: String): Pair<String, String> {
+        val from = com.kk.shurufa.online.Translator.guess(q)
+        val to = if (from == translateTo) (if (from == "zh") "en" else "zh") else translateTo
+        return from to to
+    }
+
+    private fun showTranslateBar() {
+        val q = searchQuery.toString()
+        val (from, to) = translatePair(q)
+        val fresh = translatedFor == q && q.isNotBlank()
+        if (!fresh && q.isNotBlank()) { handler.removeCallbacks(translateRun); handler.postDelayed(translateRun, 350) }
+        val items = mutableListOf<String>()
+        if (fresh && translateResult.isNotEmpty()) items += translateResult
+        items += com.kk.shurufa.online.Translator.LANGS.filter { it.first != to }.map { "→ " + it.second }
+        translateItems = items
+        bar.showPredictions(items, when {
+            q.isBlank() -> "翻译成${langName(to)}：输入要翻译的文字"
+            !fresh -> "翻译中… ${q.takeLast(16)}"
+            else -> "${langName(from)} → ${langName(to)} · 点译文上屏"
+        })
+    }
+
+    private val handler = android.os.Handler(android.os.Looper.getMainLooper())
+
+    private fun runTranslate() {
+        val q = searchQuery.toString()
+        if (!translateMode || q.isBlank()) return
+        val (from, to) = translatePair(q)
+        translator.translate(q, from, to, prefs.translateWifiOnly) { r ->
+            if (!translateMode || searchQuery.toString() != q) return@translate
+            r.onSuccess { translateResult = it; translatedFor = q }
+             .onFailure { translateResult = ""; translatedFor = q; Toast.makeText(this, it.message ?: "翻译失败", Toast.LENGTH_SHORT).show() }
+            syncBar()
+        }
+    }
+
+    private fun commitTranslation() {
+        val t = translateResult
+        if (t.isEmpty()) return
+        stopTranslate()
+        commit(t, pairable = false)
+        history.push(EditHistory.Op.Insert(t))
+    }
+
+    // ---- AI 改写 --------------------------------------------------------------------------
+
+    private fun buildAiPanel() {
+        aiPanel = com.kk.shurufa.keyboard.AiPanel(this, prefs).apply {
+            theme = this@KkImeService.theme
+            actions = com.kk.shurufa.online.AiWriter.ACTIONS.map { it.id to it.title }
+            onFeedback = { haptics.play(HapticEvent.FUNCTION) }
+            onSetup = { openSettings("online") }
+            onAction = { id -> runAi(id) }
+            onApply = { replace -> applyAi(replace) }
+        }
+    }
+
+    /** The text the AI works on: the selection, or else everything in the field. */
+    private fun aiSource(): String {
+        val ic = currentInputConnection ?: return ""
+        ic.getSelectedText(0)?.toString()?.takeIf { it.isNotBlank() }?.let { aiFromSelection = true; return it }
+        aiFromSelection = false
+        val et = ic.getExtractedText(ExtractedTextRequest(), 0)
+        return et?.text?.toString() ?: (ic.getTextBeforeCursor(4000, 0)?.toString().orEmpty() + ic.getTextAfterCursor(4000, 0)?.toString().orEmpty())
+    }
+
+    private fun onAiOpened() {
+        commitComposingFirst()
+        val src = aiSource()
+        aiPanel.needsSetup = prefs.aiKey.isBlank()
+        aiPanel.source = src.ifBlank { "（输入框是空的）" }
+        aiPanel.sourceLabel = if (aiFromSelection) "选中文字" else "整段文字"
+        aiPanel.result = ""; aiPanel.status = ""; aiPanel.busy = null
+        aiResult = ""
+    }
+
+    private fun runAi(id: String) {
+        val action = com.kk.shurufa.online.AiWriter.ACTIONS.firstOrNull { it.id == id } ?: return
+        val src = aiSource()
+        if (src.isBlank()) { aiPanel.status = "输入框里还没有文字"; aiPanel.result = ""; return }
+        aiPanel.busy = id; aiPanel.result = ""; aiPanel.status = "正在${action.title}…"
+        val key = prefs.aiKey; val model = prefs.aiModel
+        Thread {
+            val r = runCatching { com.kk.shurufa.online.AiWriter(key, model).run(action, src) }
+            handler.post {
+                aiPanel.busy = null
+                r.onSuccess { aiResult = it; aiPanel.result = it }
+                 .onFailure { aiResult = ""; aiPanel.result = ""; aiPanel.status = it.message ?: "出错了" }
+                haptics.play(HapticEvent.GESTURE)
+            }
+        }.apply { isDaemon = true }.start()
+    }
+
+    private fun applyAi(replace: Boolean) {
+        val t = aiResult
+        val ic = currentInputConnection ?: return
+        if (t.isEmpty()) return
+        ic.beginBatchEdit()
+        if (replace && !aiFromSelection) {
+            // the whole field is replaced (undoable with 下滑撤销 on backspace)
+            val et = ic.getExtractedText(ExtractedTextRequest(), 0)
+            val all = et?.text?.toString().orEmpty()
+            history.push(EditHistory.Op.Clear(all, (et?.startOffset ?: 0) + (et?.selectionEnd ?: 0)))
+            ic.setSelection(0, all.length)
+        } else if (!replace) {
+            selection()?.let { ic.setSelection(it.second, it.second) }
+        }
+        ic.commitText(t, 1)
+        ic.endBatchEdit()
+        showPanel(Panel.LETTERS)
+    }
+
+    // ---- 语音输入 ------------------------------------------------------------------------
+
+    private fun buildVoicePanel() {
+        voicePanel = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        voiceView = com.kk.shurufa.keyboard.VoicePanel(this, prefs).apply {
+            theme = this@KkImeService.theme
+            onFeedback = { haptics.play(HapticEvent.FUNCTION) }
+            onMic = { onMicButton() }
+            onCancel = { voice?.cancel() }
+            onLanguage = {
+                val order = listOf("auto", "zh", "en", "ru")
+                voiceLangPick = order[(order.indexOf(voiceLang()) + 1) % order.size]
+                voiceView.language = voiceLangName(voiceLang())
+            }
+        }
+        val bottom = newKeyboard()
+        bottom.setRows(listOf(listOf(
+            Key(fn = "abc", label = "ABC", width = 1.5f), Key(fn = "space", width = 4f),
+            Key(fn = "backspace", width = 1.5f), Key(fn = "enter", width = 1.5f),
+        )))
+        voicePanel.addView(voiceView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        voicePanel.addView(bottom, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+    }
+
+    private fun voiceLang(): String = voiceLangPick ?: prefs.voiceLang.let { if (it == "follow") (if (isZh) "zh" else curLang.takeIf { l -> l == "ru" || l == "en" } ?: "auto") else it }
+    private fun voiceLangName(l: String) = when (l) { "zh" -> "中文"; "en" -> "English"; "ru" -> "Русский"; else -> "自动" }
+
+    private fun voiceEngine(): com.kk.shurufa.voice.VoiceEngine = voice ?: com.kk.shurufa.voice.VoiceEngine(this, prefs).also { e ->
+        voice = e
+        e.listener = object : com.kk.shurufa.voice.VoiceEngine.Listener {
+            override fun onLevel(level: Float) = voiceView.setLevel(level)
+            override fun onPartial(text: String) { voiceView.partial = text }
+            override fun onState(state: com.kk.shurufa.voice.VoiceEngine.State, detail: String) {
+                voiceView.look = when (state) {
+                    com.kk.shurufa.voice.VoiceEngine.State.LISTENING -> com.kk.shurufa.keyboard.VoicePanel.Look.LISTENING
+                    com.kk.shurufa.voice.VoiceEngine.State.RECOGNIZING -> com.kk.shurufa.keyboard.VoicePanel.Look.WORKING
+                    else -> com.kk.shurufa.keyboard.VoicePanel.Look.READY
+                }
+                voiceView.status = when (state) {
+                    com.kk.shurufa.voice.VoiceEngine.State.LISTENING -> "正在听…说完点一下"
+                    com.kk.shurufa.voice.VoiceEngine.State.RECOGNIZING -> "识别中…"
+                    else -> detail.ifEmpty { "点按开始说话" }
+                }
+                if (state != com.kk.shurufa.voice.VoiceEngine.State.LISTENING) voiceView.partial = ""
+                if (state == com.kk.shurufa.voice.VoiceEngine.State.LISTENING) haptics.play(HapticEvent.GESTURE)
+            }
+            override fun onResult(text: String) = commitVoice(text)
+        }
+    }
+
+    /** Opening the panel starts listening right away, when it can. */
+    private fun onVoiceOpened() {
+        voiceView.language = voiceLangName(voiceLang())
+        voiceView.partial = ""
+        when {
+            !com.kk.shurufa.voice.PermissionActivity.granted(this) -> {
+                voiceView.look = com.kk.shurufa.keyboard.VoicePanel.Look.READY
+                voiceView.status = "需要麦克风权限，点麦克风去允许"
+            }
+            prefs.voiceEngine == "whisper" && !voiceEngine().modelReady() -> {
+                voiceView.look = com.kk.shurufa.keyboard.VoicePanel.Look.NEED_MODEL
+                voiceView.status = "先下载语音模型，点麦克风去设置"
+            }
+            else -> { commitComposingFirst(); voiceEngine().start(voiceLang()) }
+        }
+    }
+
+    private fun onMicButton() {
+        val e = voiceEngine()
+        when {
+            !com.kk.shurufa.voice.PermissionActivity.granted(this) -> com.kk.shurufa.voice.PermissionActivity.request(this)
+            prefs.voiceEngine == "whisper" && !e.modelReady() -> openSettings("voice")
+            e.state == com.kk.shurufa.voice.VoiceEngine.State.LISTENING -> e.stop()
+            e.state == com.kk.shurufa.voice.VoiceEngine.State.RECOGNIZING -> {}
+            else -> { commitComposingFirst(); e.start(voiceLang()) }
+        }
+    }
+
+    /** Puts recognized text in the field; Latin text gets a space from the word before it. */
+    private fun commitVoice(text: String) {
+        var t = text.trim()
+        if (t.isEmpty()) return
+        val before = currentInputConnection?.getTextBeforeCursor(1, 0)?.toString().orEmpty()
+        if (before.isNotEmpty() && !before[0].isWhitespace() && t[0].isLetterOrDigit() && !isCjk(t[0]) && !isCjk(before[0])) t = " $t"
+        commit(t, pairable = false)
+        history.push(EditHistory.Op.Insert(t))
+        voiceView.status = "点按继续说"
+    }
+
     // ---- 表情查找 ------------------------------------------------------------------------
 
     /**
@@ -1711,6 +1982,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
 
     override fun onDismissSuggestions() {
         if (emojiSearch) { stopEmojiSearch(); return }
+        if (translateMode) { stopTranslate(); return }
         predictions = emptyList()
         pendingClip = null
         syncBar()
@@ -1740,8 +2012,8 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
     override fun onMathFormat(format: String) { prefs.put(Prefs.MATH_FORMAT, format) }
     override fun onResultChip(text: String) { commit(text, pairable = false); bar.showResult(null) }
 
-    private fun openSettings() {
-        startActivity(Intent(this, SettingsActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    private fun openSettings(page: String? = null) {
+        startActivity(Intent(this, SettingsActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).apply { if (page != null) putExtra("page", page) })
     }
 }
 

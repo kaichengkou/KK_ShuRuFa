@@ -6,6 +6,8 @@
 #include <rime_api.h>
 
 #include <mutex>
+#include <memory>
+#include <opencc/SimpleConverter.hpp>
 #include <string>
 #include <vector>
 
@@ -318,3 +320,19 @@ FN(jboolean, isLastPage)(JNIEnv*, jobject) { return g.lastPage; }
 FN(jint, pageNo)(JNIEnv*, jobject) { return g.page; }
 FN(jstring, schemaId)(JNIEnv* env, jobject) { return jstr(env, g.schemaId); }
 FN(jstring, schemaName)(JNIEnv* env, jobject) { return jstr(env, g.schemaName); }
+
+// Traditional → Simplified with the OpenCC data Rime already ships (used for voice input,
+// whose model sometimes answers in traditional characters).
+FN(jstring, t2s)(JNIEnv* env, jclass, jstring text, jstring config) {
+  static std::mutex m;
+  static std::unique_ptr<opencc::SimpleConverter> conv;
+  static std::string loaded;
+  std::string t = str(env, text), c = str(env, config);
+  std::lock_guard<std::mutex> g(m);
+  try {
+    if (!conv || loaded != c) { conv = std::make_unique<opencc::SimpleConverter>(c); loaded = c; }
+    return env->NewStringUTF(conv->Convert(t).c_str());
+  } catch (...) {
+    return text;
+  }
+}

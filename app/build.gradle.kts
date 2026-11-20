@@ -18,8 +18,8 @@ android {
         applicationId = "com.kk.shurufa"
         minSdk = 26
         targetSdk = 35
-        versionCode = 10
-        versionName = "0.6.4"
+        versionCode = 11
+        versionName = "0.7.0"
         ndk { abiFilters += abis }
         externalNativeBuild {
             cmake { arguments += listOf("-DANDROID_STL=c++_static", "-DCMAKE_BUILD_TYPE=Release") }
@@ -62,9 +62,14 @@ android {
     }
     buildFeatures { compose = true; buildConfig = true }
     sourceSets["main"].assets.srcDir(layout.buildDirectory.dir("generated/rimeAssets"))
-    packaging { jniLibs { useLegacyPackaging = false } }
+    packaging {
+        jniLibs { useLegacyPackaging = false }
+        // GraalVM native-image metadata from the Claude SDK: unused on Android
+        resources { excludes += listOf("META-INF/native-image/**") }
+    }
     testOptions { unitTests.isIncludeAndroidResources = true }
-    androidResources { noCompress += listOf("yaml", "json", "gram", "lua") }
+    // dictionaries are copied out of the APK once, so they can stay compressed (about 3:1)
+    androidResources { noCompress += listOf("gram") }
 }
 
 // Copy the Rime schema and dictionaries (rime-ice) into the APK assets.
@@ -108,6 +113,10 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.compose.ui:ui")
+    // 翻译: on-device ML Kit models (downloaded once per language)
+    implementation("com.google.mlkit:translate:17.0.3")
+    // AI 改写: the official Claude SDK, with the user's own API key
+    implementation("com.anthropic:anthropic-java:3.3.0")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.robolectric:robolectric:4.16")
     testImplementation("androidx.test:core:1.6.1")
