@@ -7,6 +7,7 @@
 
 extern void rime_require_module_lua();
 extern void rime_require_module_octagram();
+extern void kk_install_corrector();
 
 static void show(RimeApi* api, RimeSessionId s, const char* label) {
   RIME_STRUCT(RimeCommit, commit);
@@ -33,6 +34,7 @@ int main(int argc, char** argv) {
   t.log_dir = "";
   api->setup(&t);
   api->initialize(&t);
+  kk_install_corrector();
   auto t0 = std::chrono::steady_clock::now();
   api->start_maintenance(True);
   api->join_maintenance_thread();

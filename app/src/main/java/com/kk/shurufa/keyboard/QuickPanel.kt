@@ -21,6 +21,7 @@ class QuickPanel(context: Context, private val prefs: Prefs) : View(context) {
 
     var theme: KbTheme = KbTheme.resolve(context, prefs)
     var onTile: ((String) -> Unit)? = null
+    var onPress: (() -> Unit)? = null
     var tiles: List<Tile> = emptyList()
         set(v) { field = v; invalidate() }
 
@@ -84,11 +85,10 @@ class QuickPanel(context: Context, private val prefs: Prefs) : View(context) {
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(e: MotionEvent): Boolean {
         when (e.actionMasked) {
-            MotionEvent.ACTION_DOWN -> { pressed = rects.indexOfFirst { it.contains(e.x, e.y) }; invalidate() }
+            MotionEvent.ACTION_DOWN -> { pressed = rects.indexOfFirst { it.contains(e.x, e.y) }; if (pressed >= 0) onPress?.invoke(); invalidate() }
             MotionEvent.ACTION_UP -> {
                 val i = rects.indexOfFirst { it.contains(e.x, e.y) }
                 if (i >= 0 && i == pressed) {
-                    performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
                     onTile?.invoke(tiles[i].id)
                 }
                 pressed = -1; invalidate()

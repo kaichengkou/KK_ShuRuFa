@@ -106,7 +106,11 @@ class PopupOverlay(context: Context, private val prefs: Prefs) : View(context) {
         val top = max(dp(2f), key.top - h - dp(6f))
         opRect = RectF(left, top, left + w, top + h)
         keyBottom = key.bottom
-        sel = colAt(fingerX)
+        // the first option (the up-flick character) is selected until the finger really moves
+        sel = 0
+        startX = fingerX
+        startY = key.centerY()
+        moved = false
         selX.set(cellLeft(sel)); selY.set(cellTop(sel))
         opShow.set(0f)
         opShow.animateTo(1f, dur(150), Tween.EASE_OUT)
@@ -117,8 +121,16 @@ class PopupOverlay(context: Context, private val prefs: Prefs) : View(context) {
     private fun cellLeft(i: Int) = opRect.left + dp(5f) + (i % perRow) * cellW
     private fun cellTop(i: Int) = opRect.bottom - dp(5f) - (i / perRow + 1) * cellH
 
+    private var startX = 0f
+    private var startY = 0f
+    private var moved = false
+
     fun moveSelection(x: Float, y: Float) {
         if (opts.isEmpty()) return
+        if (!moved) {
+            if (kotlin.math.abs(x - startX) < cellW * 0.6f && kotlin.math.abs(y - startY) < cellH * 0.6f) return
+            moved = true
+        }
         val newSel = if (y > keyBottom + cellH * 1.2f) -1 else {
             val row = floor((opRect.bottom - dp(5f) - y) / cellH).toInt().coerceIn(0, nRows - 1)
             (row * perRow + colAt(x)).coerceAtMost(opts.size - 1)

@@ -433,6 +433,7 @@ private fun GesturesPage(prefs: Prefs) {
     }
     Group("删除键") {
         Toggle(prefs, Prefs.BACKSPACE_SWIPE, "上滑清空、下滑撤销", "正在打拼音时上滑只清掉拼音", true)
+        Toggle(prefs, Prefs.BACKSPACE_RESELECT, "退格回退重选", "选错词后 5 秒内按删除，整个词退回成拼音，可以重新挑；删除后还会按前文给出联想", true)
         IntSlider(prefs, Prefs.BACKSPACE_REPEAT, "长按连删的间隔", 55, 25..150, "ms", "匀速连删，数值越小越快")
     }
 }
@@ -502,7 +503,8 @@ private fun SymbolsPage(prefs: Prefs) {
     Group("数学键盘") {
         Choice(prefs, Prefs.MATH_FORMAT, "默认输出格式", listOf("uni" to "符号", "tex" to "LaTeX"))
         Toggle(prefs, Prefs.MATH_CALC, "按 = 后给出计算结果", null, true)
-        Toggle(prefs, Prefs.NUMBER_FIELD_MATH, "数字输入框弹出数学键盘", null, true)
+        Toggle(prefs, Prefs.NUMBER_FIELD_MATH, "数字输入框弹出数字键盘", "按上次用的模式（简易或科学）打开", true)
+        Choice(prefs, Prefs.NUM_MODE, "!#1 打开的数字键盘", listOf("simple" to "简易", "sci" to "科学"))
     }
 }
 

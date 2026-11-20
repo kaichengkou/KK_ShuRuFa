@@ -3,7 +3,7 @@ id: cursor
 label: 光标
 engine: direct
 rows:
-  - [{fn: select_all, label: 全选}, {fn: copy, label: 复制}, {fn: cut, label: 剪切}]
-  - [{fn: word_left, label: 上一词}, {fn: paste, label: 粘贴, style: action}, {fn: word_right, label: 下一词}]
-  - [{fn: home, label: 行首}, {fn: end, label: 行尾}, {fn: backspace}]
-  - [{fn: abc, label: 返回}, {fn: undo, label: 撤销}, {fn: enter, style: soft}]
+  - [{fn: select_all, label: 全选}, {fn: copy, label: 复制}, {fn: paste, label: 粘贴}]
+  - [{fn: cut, label: 剪切}, {fn: undo, label: 撤销}, {fn: backspace}]
+  - [{fn: home, label: 行首}, {fn: end, label: 行尾}, {fn: enter, style: func}]
+  - [{fn: abc, label: 返回, w: 3}]

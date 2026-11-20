@@ -192,10 +192,11 @@ tabs:
         - {k: ["⊥", "⊥", "\\perp "]}
         - {k: ["∥", "∥", "\\parallel "]}
 bottom:
-  - {fn: abc, label: ABC, w: 1.3}
+  - {fn: abc, label: ABC, w: 1.2}
+  - {fn: simple, label: 简易, w: 1.2}
   - {fn: left}
-  - {fn: space, label: 空格, w: 2}
+  - {fn: space, label: 空格, w: 1.8}
   - {fn: right}
   - {fn: next_slot}
-  - {fn: backspace, w: 1.3}
-  - {fn: enter, w: 1.3}
+  - {fn: backspace, w: 1.2}
+  - {fn: enter, w: 1.2}

@@ -128,6 +128,12 @@ class KeyboardRenderTest {
         touch(MotionEvent.ACTION_MOVE, ax + 120, ay - 140)
         touch(MotionEvent.ACTION_UP, ax + 120, ay - 140)
 
+        // long-press and release without moving picks the first option (the up-flick)
+        touch(MotionEvent.ACTION_DOWN, ax, ay)
+        idle(400)
+        touch(MotionEvent.ACTION_MOVE, ax + 6, ay - 4)
+        touch(MotionEvent.ACTION_UP, ax + 6, ay - 4)
+
         // swipe space left → next language
         val (sx, sy) = keyCenter { it.fn == "space" }
         touch(MotionEvent.ACTION_DOWN, sx, sy); touch(MotionEvent.ACTION_MOVE, sx - 60, sy); touch(MotionEvent.ACTION_MOVE, sx - 200, sy); touch(MotionEvent.ACTION_UP, sx - 200, sy)
@@ -151,6 +157,7 @@ class KeyboardRenderTest {
         assertEquals("out:1", events[1])
         assertEquals("out:（", events[2])
         assertTrue(events.any { it.startsWith("opt:") && it != "opt:～" })
+        assertTrue("opt:～" in events)
         assertTrue("lang:1" in events)
         assertTrue("curmode:true" in events)
         assertTrue(events.any { it.startsWith("cur:") && it.split(":")[1].split(",")[0].toInt() > 0 })
@@ -230,20 +237,29 @@ class KeyboardRenderTest {
         panelShot("quick", q)
         // expanded candidates
         val cand = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
-        val grid = com.kk.shurufa.keyboard.GridPanel(ctx, prefs).apply { cellStyle = com.kk.shurufa.keyboard.GridPanel.CellStyle.FLAT; columns = 4; rowHeightDp = 50f; highlightFirst = true }
+        val grid = com.kk.shurufa.keyboard.GridPanel(ctx, prefs).apply { cellStyle = com.kk.shurufa.keyboard.GridPanel.CellStyle.FLAT; columns = 6; rowHeightDp = 50f; highlightFirst = true }
         cand.addView(grid, LinearLayout.LayoutParams(0, -1, 1f))
         cand.addView(KeyboardView(ctx, prefs).apply { heightScale = 0.9f; listener = this@KeyboardRenderTest.listener
-            setRows(listOf(listOf(Key(fn = "collapse", label = "收起")), listOf(Key(fn = "backspace")), listOf(Key(fn = "reinput", label = "重输")))) },
+            setRows(listOf(listOf(Key(fn = "collapse", label = "收起")), listOf(Key(fn = "tall", label = "拉高")), listOf(Key(fn = "backspace")), listOf(Key(fn = "reinput", label = "重输")))) },
             LinearLayout.LayoutParams((ctx.resources.displayMetrics.density * 68).toInt(), -1))
         panelShot("candidates", cand)
-        grid.setItems(listOf("你好", "你是", "不好", "拟好", "你还", "👋", "你好啊朋友", "你", "尼", "泥", "逆", "拟", "倪", "妮", "腻", "你好吗", "匿", "霓"))
+        grid.setItems(listOf("你好", "拟好", "你好啊朋友", "你好吗", "👋", "你还", "你", "尼", "泥", "逆", "拟", "倪", "妮", "腻", "匿", "霓", "昵", "旎", "睨", "伲"))
         panelShot("candidates", cand)
-        // clipboard cards
-        val clip = com.kk.shurufa.keyboard.GridPanel(ctx, prefs).apply { columns = 2; rowHeightDp = 78f; textSp = 14f; cellStyle = com.kk.shurufa.keyboard.GridPanel.CellStyle.CARD }
+        // clipboard card stack
+        val clip = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
+        val header = KeyboardView(ctx, prefs).apply { heightScale = 0.78f; listener = this@KeyboardRenderTest.listener
+            setRows(listOf(listOf(Key(fn = "clip_recent", label = "最近 6", width = 1.6f, style = com.kk.shurufa.keyboard.KeyStyle.ACTION),
+                Key(fn = "clip_fav", label = "收藏 2", width = 1.6f), Key(fn = "tall", label = "拉高", width = 1.3f), Key(fn = "clear_clips", label = "清空最近", width = 1.3f)))) }
+        val stack = com.kk.shurufa.keyboard.CardStackView(ctx, prefs)
+        clip.addView(header, LinearLayout.LayoutParams(-1, -2))
+        clip.addView(stack, LinearLayout.LayoutParams(-1, 0, 1f))
         panelShot("clipboard", clip)
-        clip.marks = setOf(0)
-        clip.tags = listOf("", "链接", "验证码", "", "号码", "")
-        clip.setItems(listOf("莫斯科市特维尔大街 7 号", "https://github.com/kaichengkou/KK_ShuRuFa", "482913", "明天下午三点在学校门口见，别忘了带材料", "+7 912 345-67-89", "Спасибо большое!"))
+        stack.setCards(listOf(
+            com.kk.shurufa.keyboard.CardStackView.Card("明天下午三点在学校门口见，别忘了带材料。路上小心，到了给我发消息。", "", false),
+            com.kk.shurufa.keyboard.CardStackView.Card("莫斯科市特维尔大街 7 号", "", true),
+            com.kk.shurufa.keyboard.CardStackView.Card("https://github.com/kaichengkou/KK_ShuRuFa", "链接", false),
+            com.kk.shurufa.keyboard.CardStackView.Card("482913", "验证码", false),
+        ), keepPosition = false)
         panelShot("clipboard", clip)
         // symbols
         val sym = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }

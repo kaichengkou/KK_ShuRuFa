@@ -33,9 +33,12 @@ class CandidateBar(context: Context, private val prefs: Prefs) : View(context) {
         fun onMathFormat(format: String)
         fun onResultChip(text: String)
         fun onClipChip(text: String) {}
+        fun onNumMode(mode: String) {}
         fun onDismissSuggestions() {}
         fun candidateOptions(index: Int): List<Output> = emptyList()
         fun onCandidateOption(index: Int, option: Output) {}
+        /** "press" when a candidate, chip or button is touched, "popup" when a menu opens. */
+        fun onFeedback(kind: String) {}
     }
 
     var listener: Listener? = null
@@ -106,8 +109,13 @@ class CandidateBar(context: Context, private val prefs: Prefs) : View(context) {
 
     fun showClip(text: String, kind: String) { clipText = text; clipKind = kind; switchTo(Mode.CLIP) }
 
-    fun showMath(tabs: List<Pair<String, String>>, current: String, format: String) {
-        mathTabs = tabs; mathTab = current; mathFormat = format; resultChip = null
+    private var simpleNum = false
+
+    /** The number keyboard's bar: math tabs in scientific mode, the calculator line in simple mode. */
+    fun showMath(tabs: List<Pair<String, String>>, current: String, format: String, simple: Boolean = false) {
+        val keepResult = simple && simpleNum && mode == Mode.MATH
+        mathTabs = tabs; mathTab = current; mathFormat = format; simpleNum = simple
+        if (!keepResult) resultChip = null
         switchTo(Mode.MATH)
     }
 
@@ -235,6 +243,33 @@ class CandidateBar(context: Context, private val prefs: Prefs) : View(context) {
     private fun drawMath(c: Canvas, a: Float) {
         tp.textAlign = Paint.Align.CENTER
         val chip = resultChip
+        if (simpleNum) {
+            // calculator line on the left, a way into the scientific keyboard on the right
+            tp.textSize = sp(13f)
+            val sciW = tp.measureText("科学  ›") + dp(28f)
+            val sr = RectF(width - sciW - dp(8f), dp(8f), width - dp(8f), height - dp(8f))
+            bg.color = theme.soft; c.drawRoundRect(sr, sr.height() / 2, sr.height() / 2, bg)
+            tp.color = theme.inkSoft
+            text(c, "科学  ›", sr.centerX(), sr.centerY())
+            hits += sr to { listener?.onNumMode("sci") }
+            if (chip != null) {
+                tp.textSize = sp(16f)
+                val label = "= $chip"
+                val w = tp.measureText(label) + dp(28f)
+                val r = RectF(dp(8f), dp(7f), dp(8f) + w, height - dp(7f))
+                bg.color = theme.accent; c.drawRoundRect(r, r.height() / 2, r.height() / 2, bg)
+                tp.color = theme.onAccent
+                text(c, label, r.centerX(), r.centerY())
+                tp.color = theme.hint; tp.textSize = sp(12f); tp.textAlign = Paint.Align.LEFT
+                text(c, "点一下上屏", r.right + dp(8f), height / 2f)
+                hits += r to { listener?.onResultChip(chip) }
+            } else {
+                tp.textAlign = Paint.Align.LEFT
+                tp.color = theme.hint; tp.textSize = sp(12.5f)
+                text(c, "简易模式 · 输入算式后点 = 出结果", dp(14f), height / 2f)
+            }
+            return
+        }
         val fmtW = dp(98f)
         val fx = width - fmtW - dp(6f)
         val fr = RectF(fx, dp(8f), fx + fmtW, height - dp(8f))
@@ -307,7 +342,7 @@ class CandidateBar(context: Context, private val prefs: Prefs) : View(context) {
         // the popup opens below the bar would cover the keys; open it over the bar instead
         overlay?.showOptions(RectF(r.left, r.bottom + r.height(), r.right, r.bottom + r.height() * 2), r.height(), opts, downX + ox, false)
         menuOpen = true
-        performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+        listener?.onFeedback("popup")
     }
 
     @SuppressLint("ClickableViewAccessibility")
@@ -323,6 +358,7 @@ class CandidateBar(context: Context, private val prefs: Prefs) : View(context) {
                 pressedCand = if (inList) candRects.indexOfFirst { it.contains(e.x + scrollX0, e.y) } else -1
                 if (pressedCand >= 0 && mode == Mode.CANDIDATES) handler.postDelayed(longRunnable, 450)
                 if (mode == Mode.TOOLBAR) pressedTool = tools.getOrNull((e.x / (width / tools.size.toFloat())).toInt())
+                if (pressedCand >= 0 || hits.any { it.first.contains(e.x, e.y) }) listener?.onFeedback("press")
                 invalidate()
             }
             MotionEvent.ACTION_MOVE -> {

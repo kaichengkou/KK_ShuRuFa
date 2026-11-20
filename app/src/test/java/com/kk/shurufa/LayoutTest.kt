@@ -55,7 +55,7 @@ class LayoutTest {
         assertEquals("\\frac{‸}{}", frac.main!!.tex)
         val integral = m.tabs[2].rows[0][4]
         assertEquals("\\int_{‸}^{} \\,dx", integral.flicks[Dir.UP]!!.tex)
-        assertEquals(7, m.bottom.size)
+        assertEquals(8, m.bottom.size)
     }
 
     @Test fun symbols() {

@@ -11,6 +11,7 @@
 
 extern void rime_require_module_lua();
 extern void rime_require_module_octagram();
+extern void kk_install_corrector();
 
 namespace {
 
@@ -161,6 +162,7 @@ FN(void, startup)(JNIEnv* env, jobject, jstring shared, jstring user, jboolean f
     setup = true;
   }
   api()->initialize(&traits);
+  kk_install_corrector();
   api()->start_maintenance(fullCheck);
 }
 
@@ -217,6 +219,14 @@ FN(void, setOption)(JNIEnv* env, jobject, jstring name, jboolean value) {
 FN(jboolean, getOption)(JNIEnv* env, jobject, jstring name) {
   std::lock_guard<std::mutex> lock(g_mutex);
   return api()->get_option(session(), str(env, name).c_str());
+}
+
+// Replaces the raw input of the composition (used to bring back the pinyin of a committed word).
+FN(jboolean, setInput)(JNIEnv* env, jobject, jstring input) {
+  std::lock_guard<std::mutex> lock(g_mutex);
+  bool r = api()->set_input(session(), str(env, input).c_str());
+  refreshLocked();
+  return r;
 }
 
 FN(jboolean, selectSchema)(JNIEnv* env, jobject, jstring id) {

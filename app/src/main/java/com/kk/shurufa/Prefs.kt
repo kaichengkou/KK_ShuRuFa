@@ -74,6 +74,8 @@ class Prefs(context: Context) {
     val stressMode get() = b(STRESS_MODE, false)
     val clipKeep get() = i(CLIP_KEEP, 40)
     val clipSuggest get() = b(CLIP_SUGGEST, true)
+    val backspaceReselect get() = b(BACKSPACE_RESELECT, true)
+    val numMode get() = s(NUM_MODE, "simple")            // simple | sci
 
     // Symbols
     val autoPair get() = b(AUTO_PAIR, true)
@@ -150,6 +152,8 @@ class Prefs(context: Context) {
         const val STRESS_MODE = "stress_mode"
         const val CLIP_KEEP = "clip_keep"
         const val CLIP_SUGGEST = "clip_suggest"
+        const val BACKSPACE_RESELECT = "backspace_reselect"
+        const val NUM_MODE = "num_mode"
         const val ACCENT = "accent"
         const val AUTO_PAIR = "auto_pair"
         const val SYMBOL_RETURN = "symbol_return"

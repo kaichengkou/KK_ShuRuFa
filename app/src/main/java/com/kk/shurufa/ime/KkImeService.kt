@@ -24,6 +24,7 @@ import android.widget.LinearLayout
 import android.widget.Toast
 import com.kk.shurufa.Prefs
 import com.kk.shurufa.keyboard.CandidateBar
+import com.kk.shurufa.keyboard.CardStackView
 import com.kk.shurufa.keyboard.Dir
 import com.kk.shurufa.keyboard.DpadView
 import com.kk.shurufa.keyboard.GridPanel
@@ -75,7 +76,8 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
     private lateinit var dpad: DpadView
     private lateinit var cursorKeys: KeyboardView
     private lateinit var clipPanel: LinearLayout
-    private lateinit var clipList: GridPanel
+    private lateinit var clipStack: CardStackView
+    private lateinit var clipHeader: KeyboardView
     private lateinit var quickPanel: QuickPanel
 
     enum class Panel { LETTERS, NUM, SYMBOLS, MATH, PHONE, CURSOR, CLIPBOARD, CANDIDATES, QUICK }
@@ -110,6 +112,14 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
     private var pendingClipAt = 0L
 
     private var predictions: List<String> = emptyList()
+    private var clipTab = "recent"
+    /** 临时拉高: the clipboard and the candidate grid can take more of the screen. */
+    private var tall = false
+    // 退格回退: the last word that came from Rime, with the pinyin that produced it
+    private var lastCommitText = ""
+    private var lastCommitInput = ""
+    private var lastCommitAt = 0L
+    private var inputBeforeKey = ""
     private val history = EditHistory()
 
     // 拼音模式: the syllables of the chosen part of the composition, kept as it is confirmed
@@ -164,6 +174,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
     private val liveKeys = setOf(
         "sym_recent", Prefs.ZH_TRAD, Prefs.ZH_EMOJI, Prefs.ZH_PREDICT, Prefs.PINYIN_MODE, Prefs.MATH_FORMAT,
         Prefs.VIBRATE, Prefs.SOUND, Prefs.CLIP_KEEP, Prefs.CLIP_SUGGEST, Prefs.ZH_CORRECTION, Prefs.STRESS_MODE,
+        Prefs.BACKSPACE_RESELECT, Prefs.NUM_MODE,
     )
 
     override fun onSharedPreferenceChanged(sp: SharedPreferences?, key: String?) {
@@ -202,7 +213,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
         buildNumPanel()
         buildCursorPanel()
         buildClipPanel()
-        quickPanel = QuickPanel(this, prefs).also { it.theme = theme; it.onTile = { id -> onQuickTile(id) } }
+        quickPanel = QuickPanel(this, prefs).also { it.theme = theme; it.onTile = { id -> onQuickTile(id) }; it.onPress = { haptics.play(HapticEvent.LETTER) } }
         column.addView(bar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         column.addView(content, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         root.addView(column, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
@@ -274,7 +285,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
         if ((isPassword || isAddress) && isZh) tempLang = prefs.languages.firstOrNull { layout(it).engine != "rime" } ?: "en"
         panel = when {
             cls == InputType.TYPE_CLASS_PHONE -> Panel.PHONE
-            (cls == InputType.TYPE_CLASS_NUMBER || cls == InputType.TYPE_CLASS_DATETIME) && prefs.numberFieldMath -> { mathTab = "basic"; Panel.MATH }
+            (cls == InputType.TYPE_CLASS_NUMBER || cls == InputType.TYPE_CLASS_DATETIME) && prefs.numberFieldMath -> { mathTab = "basic"; numPanel() }
             else -> Panel.LETTERS
         }
         shift = 0; autoShift = false
@@ -347,7 +358,15 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
         panel = p
         content.removeAllViews()
         val lp = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-        val fixed = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, kbHeight(lettersRows().size.coerceAtLeast(4)))
+        val base = kbHeight(lettersRows().size.coerceAtLeast(4))
+        val barH = dp(46f).toInt()
+        val tallH = maxOf(base, (resources.displayMetrics.heightPixels * 0.56f).toInt() - barH)
+        val canTall = p == Panel.CLIPBOARD || p == Panel.CANDIDATES
+        // the symbol panel hides the toolbar and uses its height for symbols
+        val noBar = p == Panel.SYMBOLS
+        bar.visibility = if (noBar) View.GONE else View.VISIBLE
+        val fixed = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
+            when { noBar -> base + barH; canTall && tall -> tallH; else -> base })
         when (p) {
             Panel.LETTERS -> { keyboard.setRows(lettersRows()); content.addView(keyboard, lp) }
             Panel.PHONE -> { keyboard.setRows(layout("phone").rows); content.addView(keyboard, lp) }
@@ -386,6 +405,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
         val clipFresh = pendingClip != null && SystemClock.uptimeMillis() - pendingClipAt < 90_000
         when {
             panel == Panel.MATH -> math?.let { m -> bar.showMath(m.tabs.map { it.id to it.name }, mathTab, prefs.mathFormat) }
+            panel == Panel.NUM -> bar.showMath(emptyList(), "", prefs.mathFormat, simple = true)
             isZh && RimeEngine.state == RimeEngine.State.DEPLOYING && panel == Panel.LETTERS -> bar.showMessage("正在部署雾凇拼音词库，首次约需一分钟…")
             isZh && RimeEngine.state == RimeEngine.State.PREPARING && panel == Panel.LETTERS -> bar.showMessage("正在准备中文词库…")
             isZh && RimeEngine.state == RimeEngine.State.FAILED -> bar.showMessage("中文引擎启动失败：${RimeEngine.error ?: "未知错误"}")
@@ -409,6 +429,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
             theme = this@KkImeService.theme; cellStyle = GridPanel.CellStyle.FLAT; columns = 4; rowHeightDp = 50f; textSp = 19f
             highlightFirst = true; overlay = this@KkImeService.overlay
             onItem = { i -> onCandidate(i) }
+            onFeedback = { k -> haptics.play(if (k == "popup") HapticEvent.POPUP else HapticEvent.LETTER) }
             longOptions = { i -> candidateOptions(i) }
             onLongOption = { i, o -> onCandidateOption(i, o) }
         }
@@ -416,6 +437,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
             heightScale = 0.9f
             setRows(listOf(
                 listOf(Key(fn = "collapse", label = "收起")),
+                listOf(Key(fn = "tall", label = "拉高")),
                 listOf(Key(fn = "backspace")),
                 listOf(Key(fn = "reinput", label = "重输")),
             ))
@@ -430,10 +452,12 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
         symRail = GridPanel(this, prefs).apply {
             theme = this@KkImeService.theme; columns = 1; rowHeightDp = 38f; textSp = 14f; cellStyle = GridPanel.CellStyle.RAIL
             onItem = { i -> symCat = symbols[i].id; refreshSymbols(); bar.activeTool = toolFor(panel) }
+            onFeedback = { haptics.play(HapticEvent.FUNCTION) }
         }
         symCells = GridPanel(this, prefs).apply {
             theme = this@KkImeService.theme; cellStyle = GridPanel.CellStyle.SOFT
             onItem = { i -> symItems.getOrNull(i)?.let { onSymbol(it) } }
+            onFeedback = { haptics.play(HapticEvent.LETTER) }
         }
         top.addView(symRail, LinearLayout.LayoutParams(dp(76f).toInt(), ViewGroup.LayoutParams.MATCH_PARENT))
         top.addView(symCells, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
@@ -450,7 +474,8 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
         numPanel = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         numStrip = GridPanel(this, prefs).apply {
             theme = this@KkImeService.theme; columns = 1; rowHeightDp = 44f; textSp = 19f; cellStyle = GridPanel.CellStyle.SOFT
-            onItem = { i -> numItems.getOrNull(i)?.let { commitComposingFirst(); commit(it); recordSymbol(it) } }
+            onItem = { i -> numItems.getOrNull(i)?.let { onNumStrip(it) } }
+            onFeedback = { haptics.play(HapticEvent.LETTER) }
         }
         numKeys = newKeyboard()
         numPanel.addView(numStrip, LinearLayout.LayoutParams(dp(66f).toInt(), ViewGroup.LayoutParams.MATCH_PARENT))
@@ -459,10 +484,29 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
 
     private fun refreshNum() {
         val zh = isZh
-        numItems = (if (zh) "， 。 ？ ！ 、 ： ； @ % + - × ÷ = （ ） # ~ ￥ …… “ ”"
-        else ", . ? ! : ; @ % + - * / = ( ) # ~ ₽ € $ \" '").split(' ')
+        // operators first (the simple calculator), then the punctuation of the current language
+        numItems = ("+ − × ÷ = ( ) % " + if (zh) "， 。 ？ ！ 、 ： ； @ # ~ ￥ …… “ ”"
+        else ", . ? ! : ; @ # ~ ₽ € $ \" '").split(' ')
         numStrip.setItems(numItems)
         numKeys.setRows(layout("num").rows)
+    }
+
+    private fun onNumStrip(sym: String) {
+        commitComposingFirst()
+        if (sym == "=") { commit("=", pairable = false); showCalcResult(); return }
+        commit(sym)
+        recordSymbol(sym)
+        bar.showResult(null)
+    }
+
+    /** 简易/科学: !#1 and number fields open the number keyboard in the mode used last. */
+    private fun numPanel() = if (prefs.numMode == "sci") Panel.MATH else Panel.NUM
+
+    private fun showCalcResult() {
+        if (!prefs.mathCalc) return
+        val before = currentInputConnection?.getTextBeforeCursor(200, 0)?.toString() ?: return
+        val line = before.substringAfterLast('\n').dropLast(1)
+        Calc.eval(line.substringAfterLast('='))?.let { bar.showResult(Calc.format(it)) }
     }
 
     private fun buildCursorPanel() {
@@ -477,7 +521,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
         }
         cursorKeys = newKeyboard().apply { setRows(layout("cursor").rows) }
         cursorPanel.addView(dpad, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
-        cursorPanel.addView(cursorKeys, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1.25f))
+        cursorPanel.addView(cursorKeys, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1.1f))
     }
 
     private fun refreshSymbols() {
@@ -514,41 +558,53 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
 
     private fun buildClipPanel() {
         clipPanel = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        clipList = GridPanel(this, prefs).apply {
-            theme = this@KkImeService.theme; columns = 2; rowHeightDp = 78f; textSp = 14f; cellStyle = GridPanel.CellStyle.CARD
-            overlay = this@KkImeService.overlay
-            onItem = { i -> clipItems.getOrNull(i)?.let { commit(it.text, pairable = false); history.push(EditHistory.Op.Insert(it.text)) } }
-            longOptions = { i ->
-                val e = clipItems.getOrNull(i)
-                if (e == null) emptyList() else listOf(
-                    Output("取消", "§cancel"),
-                    Output(if (e.pinned) "取消固定" else "固定", "§pin"),
-                    Output("删除", "§delete"),
-                )
+        clipHeader = newKeyboard().apply { heightScale = 0.78f }
+        clipStack = CardStackView(this, prefs).apply {
+            theme = this@KkImeService.theme
+            onFeedback = { k -> haptics.play(if (k == "popup") HapticEvent.POPUP else HapticEvent.LETTER) }
+            onTap = { i ->
+                clipShown().getOrNull(i)?.let { commit(it.text, pairable = false); history.push(EditHistory.Op.Insert(it.text)) }
             }
-            onLongOption = { i, o ->
-                val e = clipItems.getOrNull(i)
-                if (e != null) when (o.text) {
-                    "§pin" -> clips.togglePin(e.text)
-                    "§delete" -> clips.remove(e.text)
+            onLong = { i ->
+                clipShown().getOrNull(i)?.let {
+                    clips.togglePin(it.text)
+                    Toast.makeText(this@KkImeService, if (it.pinned) "已从收藏移除" else "已收藏", Toast.LENGTH_SHORT).show()
                 }
-                refreshClips()
+                refreshClips(keep = true)
+            }
+            onDismiss = { i ->
+                clipShown().getOrNull(i)?.let { e ->
+                    // in 收藏, swiping up only takes the card out of the favorites
+                    if (clipTab == "fav") clips.togglePin(e.text) else clips.remove(e.text)
+                }
+                haptics.play(HapticEvent.GESTURE)
+                refreshClips(keep = true)
             }
         }
         val bottom = newKeyboard()
         bottom.setRows(listOf(listOf(
-            Key(fn = "abc", label = "返回", width = 1.4f), Key(fn = "clear_clips", label = "清空未固定", width = 2f),
-            Key(fn = "space", width = 2.4f), Key(fn = "backspace", width = 1.2f), Key(fn = "enter", width = 1.2f),
+            Key(fn = "abc", label = "返回", width = 1.4f), Key(fn = "space", width = 3f),
+            Key(fn = "backspace", width = 1.2f), Key(fn = "enter", width = 1.2f),
         )))
-        clipPanel.addView(clipList, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        clipPanel.addView(clipHeader, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        clipPanel.addView(clipStack, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         clipPanel.addView(bottom, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
     }
 
-    private fun refreshClips() {
-        clipItems = clips.entries()
-        clipList.marks = clipItems.indices.filter { clipItems[it].pinned }.toSet()
-        clipList.tags = clipItems.map { ClipHistory.kind(it.text) }
-        clipList.setItems(if (clipItems.isEmpty()) listOf("复制过的文字会出现在这里。点一下粘贴，长按可以固定或删除。") else clipItems.map { it.text })
+    private fun clipShown(): List<ClipHistory.Entry> = if (clipTab == "fav") clips.favorites() else clips.entries()
+
+    private fun refreshClips(keep: Boolean = false) {
+        clipItems = clipShown()
+        val recentN = clips.entries().size
+        val favN = clips.favorites().size
+        clipHeader.setRows(listOf(listOf(
+            Key(fn = "clip_recent", label = "最近 $recentN", width = 1.6f, style = if (clipTab == "recent") KeyStyle.ACTION else KeyStyle.FUNC),
+            Key(fn = "clip_fav", label = "收藏 $favN", width = 1.6f, style = if (clipTab == "fav") KeyStyle.ACTION else KeyStyle.FUNC),
+            Key(fn = "tall", label = if (tall) "还原高度" else "拉高", width = 1.3f),
+            Key(fn = "clear_clips", label = "清空最近", width = 1.3f),
+        )))
+        clipStack.emptyText = if (clipTab == "fav") "还没有收藏。长按一张卡片把它加入收藏。" else "复制过的文字会出现在这里。"
+        clipStack.setCards(clipItems.map { CardStackView.Card(it.text, ClipHistory.kind(it.text), it.pinned) }, keep)
     }
 
     private fun refreshQuick() {
@@ -585,7 +641,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
             "theme" -> prefs.put(Prefs.THEME, when (prefs.theme) { "system" -> "light"; "light" -> "dark"; else -> "system" })
             "vibrate" -> prefs.put(Prefs.VIBRATE, !prefs.vibrate)
             "sound" -> prefs.put(Prefs.SOUND, !prefs.sound)
-            "math" -> showPanel(Panel.MATH)
+            "math" -> onFunction(Key(fn = "sci"))
             "symbols" -> { symCat = "common"; showPanel(Panel.SYMBOLS) }
             "cursor" -> showPanel(Panel.CURSOR)
             "clipboard" -> showPanel(Panel.CLIPBOARD)
@@ -607,6 +663,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
     /** Sends a key to Rime and applies the result. Returns false when Rime did not take it. */
     private fun rimeKey(code: Int, mask: Int = 0): Boolean {
         if (!RimeEngine.ready) return false
+        inputBeforeKey = RimeBridge.input()
         val handled = RimeBridge.processKey(code, mask)
         flushRime()
         return handled
@@ -619,6 +676,10 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
             resetSyllables()
             commit(out, pairable = false)
             history.push(EditHistory.Op.Insert(out))
+            if (inputBeforeKey.isNotEmpty() && out.any { isCjk(it) }) {
+                lastCommitText = out; lastCommitInput = inputBeforeKey; lastCommitAt = SystemClock.uptimeMillis()
+            } else lastCommitInput = ""
+            inputBeforeKey = ""
             predictions = if (prefs.zhPredict && !prefs.pinyinMode && out.any { isCjk(it) })
                 predictor.suggest(currentInputConnection?.getTextBeforeCursor(8, 0)?.toString() ?: out) else emptyList()
         } else if (prefs.zhPreeditInline && RimeBridge.input().isEmpty()) currentInputConnection?.finishComposingText()
@@ -716,6 +777,24 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
         if (prefs.autoPair && pairs[last] == after) { ic.deleteSurroundingText(last.length, 1); return }
         history.push(EditHistory.Op.Delete(last))
         if (Build.VERSION.SDK_INT >= 24) ic.deleteSurroundingTextInCodePoints(1, 0) else ic.deleteSurroundingText(1, 0)
+    }
+
+    /**
+     * 退格回退: right after a word came from Rime, backspace takes the whole word back and
+     * restores its pinyin, so another candidate can be picked.
+     */
+    private fun reselectLastWord(): Boolean {
+        if (!prefs.backspaceReselect || !isZh || !RimeEngine.ready || lastCommitInput.isEmpty()) return false
+        if (SystemClock.uptimeMillis() - lastCommitAt > 5000) return false
+        val ic = currentInputConnection ?: return false
+        val word = lastCommitText
+        if (ic.getTextBeforeCursor(word.length, 0)?.toString() != word || !ic.getSelectedText(0).isNullOrEmpty()) return false
+        val input = lastCommitInput
+        lastCommitInput = ""
+        ic.deleteSurroundingText(word.length, 0)
+        RimeBridge.setInput(input)
+        flushRime()
+        return true
     }
 
     /** 上滑清空: drops the pinyin while composing, otherwise the whole field (undoable). */
@@ -840,7 +919,21 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
     override fun onFunction(key: Key) {
         val ic = currentInputConnection
         when (key.fn) {
-            "backspace" -> { predictions = emptyList(); if (composing) rimeKey(RimeBridge.XK_BackSpace) else { deleteBackward(); updateAutoCap(); syncBar() } }
+            "backspace" -> {
+                predictions = emptyList()
+                when {
+                    composing -> rimeKey(RimeBridge.XK_BackSpace)
+                    reselectLastWord() -> {}
+                    else -> {
+                        deleteBackward()
+                        updateAutoCap()
+                        // 前文联想: after deleting, suggest what fits the text that is left
+                        if (isZh && prefs.zhPredict && panel == Panel.LETTERS)
+                            predictions = predictor.suggest(ic?.getTextBeforeCursor(8, 0)?.toString().orEmpty())
+                        syncBar()
+                    }
+                }
+            }
             "space" -> {
                 if (composing) { rimeKey(RimeBridge.XK_space); return }
                 predictions = emptyList()
@@ -868,7 +961,12 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
                 keyboard.invalidate()
             }
             "language" -> switchLanguage(1)
-            "symbols" -> { commitComposingFirst(); showPanel(Panel.NUM) }
+            "symbols" -> { commitComposingFirst(); showPanel(numPanel()) }
+            "sci" -> { prefs.put(Prefs.NUM_MODE, "sci"); showPanel(Panel.MATH) }
+            "simple" -> { prefs.put(Prefs.NUM_MODE, "simple"); showPanel(Panel.NUM) }
+            "tall" -> { tall = !tall; showPanel(panel) }
+            "clip_recent" -> { clipTab = "recent"; refreshClips() }
+            "clip_fav" -> { clipTab = "fav"; refreshClips() }
             "num" -> showPanel(Panel.NUM)
             "more_symbols" -> { symCat = "common"; showPanel(Panel.SYMBOLS) }
             "math" -> { commitComposingFirst(); showPanel(Panel.MATH) }
@@ -924,8 +1022,9 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
     private fun fnOptions(fn: String, key: Key): List<Output> = when (fn) {
         "language" -> prefs.languages.map { Output(layout(it).label, "§lang:$it") } +
             listOf(Output("系统切换", "§picker"), Output("设置", "§settings"))
-        "symbols" -> listOf(Output("数字", "§num"), Output("全部符号", "§sym"), Output("数学", "§math"), Output("光标", "§cursor"), Output("剪贴板", "§clip"))
+        "symbols" -> listOf(Output("全部符号", "§sym"), Output("数字·简易", "§num"), Output("数字·科学", "§科学"), Output("光标", "§cursor"), Output("剪贴板", "§clip"))
         "more_symbols" -> listOf(Output("全部符号", "§sym"), Output("数学", "§math"))
+        "sci" -> listOf(Output("全部符号", "§sym"))
         "enter" -> listOf(Output("换行", "§newline"), Output(enterActionName(), "§action"))
         "shift" -> listOf(Output("大写锁定", "§caps"))
         else -> key.long.map { Output(it.label, "§" + it.text) }
@@ -947,8 +1046,9 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
             t.startsWith("§lang:") -> setLanguage(t.removePrefix("§lang:"))
             t == "§picker" -> (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager).showInputMethodPicker()
             t == "§settings" -> openSettings()
-            t == "§num" -> showPanel(Panel.NUM)
+            t == "§num" -> onFunction(Key(fn = "simple"))
             t == "§sym" || t == "§全部符号" -> { symCat = "common"; showPanel(Panel.SYMBOLS) }
+            t == "§科学" -> onFunction(Key(fn = "sci"))
             t == "§math" || t == "§数学" -> showPanel(Panel.MATH)
             t == "§cursor" -> showPanel(Panel.CURSOR)
             t == "§clip" -> showPanel(Panel.CLIPBOARD)
@@ -1023,22 +1123,13 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
         }
     }
 
-    override fun onFeedback(kind: String) {
-        haptics.play(if (kind == "popup") HapticEvent.POPUP else HapticEvent.GESTURE)
-    }
-
     // ---- math ---------------------------------------------------------------------------
 
     private fun mathOut(o: Output) {
         val text = if (prefs.mathFormat == "tex") o.tex else o.text
         commit(text, pairable = false)
         bar.showResult(null)
-        if (o.label == "=" && prefs.mathCalc && prefs.mathFormat == "uni") {
-            val before = currentInputConnection?.getTextBeforeCursor(200, 0)?.toString() ?: return
-            val line = before.substringAfterLast('\n').dropLast(1)
-            val expr = line.substringAfterLast('=')
-            Calc.eval(expr)?.let { bar.showResult(Calc.format(it)) }
-        }
+        if (o.label == "=" && prefs.mathFormat == "uni") showCalcResult()
     }
 
     private fun nextSlot() {
@@ -1083,6 +1174,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
         }
         if (!RimeEngine.ready) return
         trackSyllables()
+        inputBeforeKey = RimeBridge.input()
         RimeBridge.selectCandidateGlobal(index)
         flushRime()
     }
@@ -1098,6 +1190,12 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
         flushRime()
         Toast.makeText(this, if (ok) "已删除，下次不会再把它排到前面" else "这个词没有学习记录", Toast.LENGTH_SHORT).show()
     }
+
+    override fun onFeedback(kind: String) {
+        haptics.play(when (kind) { "popup" -> HapticEvent.POPUP; "press" -> HapticEvent.LETTER; else -> HapticEvent.GESTURE })
+    }
+
+    override fun onNumMode(mode: String) = onFunction(Key(fn = if (mode == "sci") "sci" else "simple"))
 
     override fun onExpand() {
         showPanel(if (panel == Panel.CANDIDATES) Panel.LETTERS else Panel.CANDIDATES)
@@ -1185,7 +1283,9 @@ class ClipHistory(private val file: File, private val keep: () -> Int) {
 
     fun remove(text: String) { list.removeAll { it.text == text }; save() }
     fun clearUnpinned() { list.removeAll { !it.pinned }; save() }
-    fun entries(): List<Entry> = list.filter { it.pinned } + list.filter { !it.pinned }
+    /** Everything, newest first; favorites stay where they were copied. */
+    fun entries(): List<Entry> = list.toList()
+    fun favorites(): List<Entry> = list.filter { it.pinned }
 
     companion object {
         /** A short tag for what a clip looks like. */

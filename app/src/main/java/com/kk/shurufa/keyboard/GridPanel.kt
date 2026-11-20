@@ -44,6 +44,8 @@ class GridPanel(context: Context, private val prefs: Prefs) : View(context) {
     var overlay: PopupOverlay? = null
     var longOptions: ((Int) -> List<Output>)? = null
     var onLongOption: ((Int, Output) -> Unit)? = null
+    /** Touch feedback: "press" when a cell is touched, "popup" when its menu opens. */
+    var onFeedback: ((String) -> Unit)? = null
 
     enum class CellStyle { SOLID, SOFT, RAIL, FLAT, CARD }
 
@@ -86,22 +88,38 @@ class GridPanel(context: Context, private val prefs: Prefs) : View(context) {
         tp.textSize = sp(textSp)
         val cw = (width - 2 * pad - g * (columns - 1)) / columns
         if (flat) {
-            var col = 0; var row = 0
-            items.forEach { s ->
-                val units = ceil((tp.measureText(s) + dp(28f)) / cw).toInt().coerceIn(1, columns)
-                if (col + units > columns) { row++; col = 0 }
-                cells += RectF(col * cw, row * rh, (col + units) * cw, (row + 1) * rh)
-                col += units
+            // A grid of [columns] units. Each word takes as many units as its text needs (two at
+            // least for words), rows are filled greedily, and the units left at the end of a row
+            // are handed to its widest words, so every row is flush and cell edges line up.
+            val unit = width.toFloat() / columns
+            val need = items.map { s ->
+                val n = ceil((tp.measureText(s) + dp(26f)) / unit).toInt()
+                n.coerceIn(if (s.codePointCount(0, s.length) >= 2) 2 else 1, columns)
             }
-            // stretch the last cell of each row to the edge so rows end flush
             var i = 0
-            while (i < cells.size) {
+            var row = 0
+            while (i < items.size) {
                 var j = i
-                while (j + 1 < cells.size && cells[j + 1].top == cells[i].top) j++
-                cells[j].right = width.toFloat()
-                i = j + 1
+                var used = 0
+                while (j < items.size && used + need[j] <= columns) { used += need[j]; j++ }
+                if (j == i) { used = need[i]; j = i + 1 }
+                val spans = need.subList(i, j).toMutableList()
+                var spare = columns - used
+                // only stretch rows that are not the last, so a short tail stays compact
+                if (j < items.size) {
+                    val order = spans.indices.sortedByDescending { spans[it] }
+                    var k = 0
+                    while (spare > 0 && order.isNotEmpty()) { spans[order[k % order.size]]++; spare--; k++ }
+                }
+                var col = 0
+                for ((n, idx) in (i until j).withIndex()) {
+                    cells += RectF(col * unit, row * rh, (col + spans[n]) * unit, (row + 1) * rh)
+                    col += spans[n]
+                }
+                row++
+                i = j
             }
-        } else {
+                } else {
             items.forEachIndexed { i, _ ->
                 val r = i / columns; val c = i % columns
                 val x = pad + c * (cw + g); val y = pad + r * (rh + g)
@@ -172,8 +190,8 @@ class GridPanel(context: Context, private val prefs: Prefs) : View(context) {
     private fun drawFlatCell(c: Canvas, i: Int, s: String, r: RectF, a: Float) {
         if (i == pressed) { bg.color = theme.soft; c.drawRect(r, bg) }
         bg.color = theme.divider
-        c.drawRect(r.left, r.bottom - dp(0.7f), r.right, r.bottom, bg)
-        if (r.right < width - 1) c.drawRect(r.right - dp(0.7f), r.top + dp(12f), r.right, r.bottom - dp(12f), bg)
+        c.drawRect(r.left + dp(6f), r.bottom - dp(0.7f), r.right - dp(6f), r.bottom, bg)
+        if (r.right < width - 1) c.drawRect(r.right - dp(0.7f), r.top + dp(14f), r.right, r.bottom - dp(14f), bg)
         label(c, s, r, sp(textSp), if (highlightFirst && i == 0) theme.accent else theme.ink, a)
     }
 
@@ -235,7 +253,7 @@ class GridPanel(context: Context, private val prefs: Prefs) : View(context) {
         r.offset(ox, oy)
         overlay?.showOptions(r, dp(44f), opts, downX + ox, false)
         menuFor = i
-        performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+        onFeedback?.invoke("popup")
         invalidate()
     }
 
@@ -250,6 +268,7 @@ class GridPanel(context: Context, private val prefs: Prefs) : View(context) {
                 scroller.forceFinished(true)
                 downX = e.x; downY = e.y; lastY = e.y; dragging = false; menuFor = -1
                 pressed = hit(e.x, e.y)
+                if (pressed >= 0) onFeedback?.invoke("press")
                 if (pressed >= 0 && longOptions != null) handler.postDelayed(longRunnable, 420)
                 invalidate()
             }
