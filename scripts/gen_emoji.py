@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Builds the emoji data shipped in the APK (the keyboard can download newer data itself).
 
-  emoji.txt          group<TAB>emoji emoji ...   (fully-qualified, no skin-tone variants)
+  emoji.txt          group<TAB>emoji emoji ...   (fully-qualified; one entry per emoji)
+  emoji_variants.txt emoji<TAB>variant variant ...  (skin tones, man/woman forms: long-press)
   emoji_names.txt    emoji<TAB>中文关键词|...<TAB>english|keywords   (CLDR annotations, for 查找)
   emoji_version.txt  the Unicode emoji version
 
@@ -12,7 +13,17 @@ import json, sys, os
 NAMES = {"Smileys & Emotion": "表情", "People & Body": "人物", "Animals & Nature": "动物", "Food & Drink": "食物",
          "Travel & Places": "旅行", "Activities": "活动", "Objects": "物品", "Symbols": "符号", "Flags": "旗帜"}
 test, zh, zhd, en, end, out = sys.argv[1:7]
-groups, cur, version = {}, None, ""
+TONES = range(0x1F3FB, 0x1F400)
+GENDER = (0x2640, 0x2642)
+
+def base_key(cps):
+    """Skin tones and a trailing ‍♀️/‍♂️ removed: every variant of an emoji shares this key."""
+    c = [x for x in cps if x not in TONES and x != 0xFE0F]
+    if len(c) >= 3 and c[-2] == 0x200D and c[-1] in GENDER:
+        c = c[:-2]
+    return tuple(c)
+
+groups, variants, owner, cur, version = {}, {}, {}, None, ""
 for line in open(test, encoding="utf-8"):
     if line.startswith("# Version:"):
         version = line.split(":", 1)[1].strip()
@@ -26,9 +37,14 @@ for line in open(test, encoding="utf-8"):
     if "fully-qualified" not in rest:
         continue
     cps = [int(c, 16) for c in codes.split()]
-    if any(0x1F3FB <= c <= 0x1F3FF for c in cps):  # skin tone variants
-        continue
-    groups.setdefault(cur, []).append("".join(chr(c) for c in cps))
+    e = "".join(chr(c) for c in cps)
+    k = base_key(cps)
+    if k in owner:
+        variants[owner[k]].append(e)
+    else:
+        owner[k] = e
+        variants[e] = []
+        groups.setdefault(cur, []).append(e)
 
 def ann(*paths):
     m = {}
@@ -51,5 +67,9 @@ with open(os.path.join(out, "emoji_names.txt"), "w", encoding="utf-8") as f:
             z, n = zm.get(k, []), em.get(k, [])
             if z or n:
                 f.write(e + "\t" + "|".join(z) + "\t" + "|".join(n) + "\n")
+with open(os.path.join(out, "emoji_variants.txt"), "w", encoding="utf-8") as f:
+    for e, v in variants.items():
+        if v:
+            f.write(e + "\t" + " ".join(v) + "\n")
 open(os.path.join(out, "emoji_version.txt"), "w").write(version + "\n")
 print(version, {NAMES.get(g, g): len(v) for g, v in groups.items()})

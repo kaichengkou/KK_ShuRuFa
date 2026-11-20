@@ -21,16 +21,20 @@ class EmojiData(private val context: Context) {
     var groups: List<Pair<String, List<String>>> = emptyList()
         private set
     private var names: Map<String, Item> = emptyMap()
+    /** Skin-tone and man/woman forms of an emoji, for its long-press menu. */
+    var variants: Map<String, List<String>> = emptyMap()
+        private set
 
     private val dir get() = File(context.filesDir, "emoji")
 
     fun load() {
         val shipped = runCatching { asset("emoji_version.txt").trim() }.getOrDefault("")
         val local = File(dir, "emoji_version.txt").takeIf { it.isFile }?.readText()?.trim().orEmpty()
-        val useLocal = local.isNotEmpty() && newer(local, shipped) && File(dir, "emoji.txt").isFile && File(dir, "emoji_names.txt").isFile
+        val useLocal = local.isNotEmpty() && newer(local, shipped) && listOf("emoji.txt", "emoji_names.txt", "emoji_variants.txt").all { File(dir, it).isFile }
         fun read(name: String) = if (useLocal) File(dir, name).readText() else asset(name)
         version = if (useLocal) local else shipped
         groups = parseGroups(read("emoji.txt"))
+        variants = parseGroups(read("emoji_variants.txt")).toMap()
         names = read("emoji_names.txt").lineSequence().mapNotNull { l ->
             val p = l.split('\t')
             if (p.size < 3) null else Item(p[0], p[1].split('|').filter { it.isNotEmpty() }, p[2].split('|').filter { it.isNotEmpty() })
@@ -84,6 +88,12 @@ class EmojiData(private val context: Context) {
             "Travel & Places" to "旅行", "Activities" to "活动", "Objects" to "物品", "Symbols" to "符号", "Flags" to "旗帜",
         )
 
+        /** Skin tones and a trailing ‍♀️/‍♂️ removed: every variant of an emoji shares this key. */
+        fun baseKey(cps: List<Int>): List<Int> {
+            val c = cps.filter { it !in 0x1F3FB..0x1F3FF && it != 0xFE0F }
+            return if (c.size >= 3 && c[c.size - 2] == 0x200D && (c.last() == 0x2640 || c.last() == 0x2642)) c.dropLast(2) else c
+        }
+
         fun parseGroups(text: String) = text.lineSequence().mapNotNull { l ->
             val t = l.indexOf('\t')
             if (t < 0) null else l.substring(0, t) to l.substring(t + 1).split(' ').filter { it.isNotEmpty() }
@@ -124,6 +134,8 @@ class EmojiData(private val context: Context) {
             val version = Regex("^# Version: *(\\S+)", RegexOption.MULTILINE).find(test)?.groupValues?.get(1) ?: error("无法识别版本")
             if (!newer(version, current)) return null
             val groups = LinkedHashMap<String, MutableList<String>>()
+            val variants = LinkedHashMap<String, MutableList<String>>()
+            val owner = HashMap<List<Int>, String>()
             var cur: String? = null
             for (line in test.lineSequence()) {
                 if (line.startsWith("# group:")) { cur = line.substringAfter(':').trim().takeIf { it != "Component" }; continue }
@@ -131,8 +143,12 @@ class EmojiData(private val context: Context) {
                 val (codes, rest) = line.split(';', limit = 2)
                 if (!rest.contains("fully-qualified")) continue
                 val cps = codes.trim().split(Regex("\\s+")).map { it.toInt(16) }
-                if (cps.any { it in 0x1F3FB..0x1F3FF }) continue
-                groups.getOrPut(cur) { mutableListOf() } += cps.joinToString("") { String(Character.toChars(it)) }
+                val e = cps.joinToString("") { String(Character.toChars(it)) }
+                // every skin-tone and man/woman form joins the first emoji with the same base
+                val key = baseKey(cps)
+                val first = owner[key]
+                if (first != null) variants.getOrPut(first) { mutableListOf() } += e
+                else { owner[key] = e; groups.getOrPut(cur) { mutableListOf() } += e }
             }
             fun ann(lang: String): Map<String, List<String>> {
                 val m = HashMap<String, List<String>>()
@@ -158,6 +174,7 @@ class EmojiData(private val context: Context) {
                     if (z.isNotEmpty() || n.isNotEmpty()) append(e).append('\t').append(z.joinToString("|")).append('\t').append(n.joinToString("|")).append('\n')
                 }
             })
+            File(dir, "emoji_variants.txt").writeText(variants.entries.joinToString("") { (e, v) -> e + "\t" + v.joinToString(" ") + "\n" })
             // written last: only a complete download counts
             File(dir, "emoji_version.txt").writeText(version + "\n")
             return version

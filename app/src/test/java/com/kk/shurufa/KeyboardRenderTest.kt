@@ -320,6 +320,22 @@ class KeyboardRenderTest {
         ecells.columns = 3; ecells.textSp = 14f; ecells.rowHeightDp = 44f
         ecells.setItems(ctx.assets.open("data/kaomoji.txt").bufferedReader().readLines().filter { it.isNotBlank() })
         panelShot("emoji_kaomoji", emo)
+        // 长按选肤色: rows of the emoji's forms
+        val d = com.kk.shurufa.ime.EmojiData(ctx).apply { load() }
+        val opts = (listOf("👮") + d.variants["👮"]!!).chunked(6).map { r -> r.map { Output.of(it) } }
+        val frame = FrameLayout(ctx)
+        val ov = PopupOverlay(ctx, prefs)
+        val g2 = com.kk.shurufa.keyboard.GridPanel(ctx, prefs).apply { columns = 7; rowHeightDp = 46f; textSp = 25f; cellStyle = com.kk.shurufa.keyboard.GridPanel.CellStyle.PLAIN }
+        frame.addView(g2, FrameLayout.LayoutParams(-1, -1)); frame.addView(ov, FrameLayout.LayoutParams(-1, -1))
+        val fw = ctx.resources.displayMetrics.widthPixels; val fh = (ctx.resources.displayMetrics.density * 300).toInt()
+        frame.measure(View.MeasureSpec.makeMeasureSpec(fw, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(fh, View.MeasureSpec.EXACTLY))
+        frame.layout(0, 0, fw, fh)
+        g2.setItems(d.groups[1].second.take(28))
+        val dd = ctx.resources.displayMetrics.density
+        ov.showOptionRows(android.graphics.RectF(fw * 0.3f, fh - 60 * dd, fw * 0.3f + 48 * dd, fh - 14 * dd), 46 * dd, opts, fw * 0.3f)
+        idle(400)
+        val bmp = Bitmap.createBitmap(fw, fh, Bitmap.Config.ARGB_8888); frame.draw(Canvas(bmp))
+        File("build/screens/emoji_tones.png").outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
         // 查找: the bar lists matches for the word before the cursor
         val found = com.kk.shurufa.ime.EmojiData(ctx).apply { load() }.search("开心").take(20)
         val kb2 = KeyboardView(ctx, prefs).apply { listener = this@KeyboardRenderTest.listener; setRows(LayoutRepo(ctx).keyboard("zh").rows) }

@@ -66,6 +66,11 @@ class DataTest {
         // a phrase finds the words inside it
         assertTrue(d.search("今天好开心").take(20).contains("😄"))
         assertEquals("😂", d.search("笑哭").first())
+        // one entry per emoji: tones and man/woman forms are only in the long-press menu
+        val all = d.groups.flatMap { it.second }
+        assertTrue("👋" in all && "👋🏻" !in all && "👮‍♀️" !in all)
+        assertEquals(5, d.variants["👋"]!!.size)
+        assertTrue(d.variants["👮"]!!.containsAll(listOf("👮‍♂️", "👮‍♀️", "👮🏽‍♀️")))
         assertTrue(d.search("ЖЖЖ").toString(), d.search("ЖЖЖ").isEmpty())
         assertTrue(com.kk.shurufa.ime.EmojiData.newer("18.0", "16.0"))
         assertTrue(!com.kk.shurufa.ime.EmojiData.newer("16.0", "16.0"))

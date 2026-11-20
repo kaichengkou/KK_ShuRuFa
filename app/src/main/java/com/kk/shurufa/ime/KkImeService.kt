@@ -145,6 +145,8 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
     private var emojiShown: List<String> = emptyList()
     private val recentEmoji = mutableListOf<String>()
     private val recentKao = mutableListOf<String>()
+    /** 肤色: the variant last chosen for an emoji, shown in its place in the grid. */
+    private val toneChoice = HashMap<String, String>()
     // 表情查找: the keyboard types into a query instead of the app, the bar shows matches
     private var emojiSearch = false
     private val searchQuery = StringBuilder()
@@ -174,6 +176,9 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
         if (prefs.packPoetry) predictor.loadPoetry()
         recentEmoji += prefs.sp.getString("emoji_recent", "")!!.split(' ').filter { it.isNotEmpty() }
         recentKao += prefs.sp.getString("kao_recent", "")!!.split('\u0001').filter { it.isNotEmpty() }
+        prefs.sp.getString("emoji_tone", "")!!.split('\u0002').forEach { p ->
+            val i = p.indexOf('\u0001'); if (i > 0) toneChoice[p.substring(0, i)] = p.substring(i + 1)
+        }
         emojiData = EmojiData(this)
         loadEmoji()
         maybeUpdateEmoji()
@@ -208,7 +213,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
 
     /** Settings that only change behavior; everything else rebuilds the keyboard. */
     private val liveKeys = setOf(
-        "sym_recent", "emoji_recent", "kao_recent", Prefs.EMOJI_AUTO_UPDATE, Prefs.ZH_TRAD, Prefs.ZH_EMOJI, Prefs.ZH_PREDICT, Prefs.PINYIN_MODE, Prefs.MATH_FORMAT,
+        "sym_recent", "emoji_recent", "kao_recent", "emoji_tone", Prefs.EMOJI_AUTO_UPDATE, Prefs.ZH_TRAD, Prefs.ZH_EMOJI, Prefs.ZH_PREDICT, Prefs.PINYIN_MODE, Prefs.MATH_FORMAT,
         Prefs.VIBRATE, Prefs.SOUND, Prefs.CLIP_KEEP, Prefs.CLIP_SUGGEST, Prefs.ZH_CORRECTION, Prefs.STRESS_MODE,
         Prefs.BACKSPACE_RESELECT, Prefs.NUM_MODE, Prefs.TYPO_MARK, Prefs.RARE_ANNOTATE, Prefs.PACK_POETRY, Prefs.SYMBOL_MEMORY,
         Prefs.CLIP_MAX_CHARS, Prefs.CLIP_FRICTION, Prefs.CLIP_COLUMNS,
@@ -549,7 +554,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
             emojiSearch && !composing && panel == Panel.LETTERS -> {
                 val q = searchQuery.toString().trim()
                 val drawable = emojiGroups.flatMapTo(HashSet()) { it.second }
-                searchResults = emojiData.search(q, 120).filter { it in drawable }
+                searchResults = emojiData.search(q, 120).filter { it in drawable }.map { toneChoice[it] ?: it }
                 bar.showPredictions(searchResults, when {
                     q.isEmpty() -> "查找表情：输入中文或英文关键词"
                     searchResults.isEmpty() -> "没有找到和「$q」相关的表情"
@@ -1575,7 +1580,11 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
             theme = this@KkImeService.theme; columns = 7; rowHeightDp = 46f; textSp = 25f; cellStyle = GridPanel.CellStyle.PLAIN
             emptyText = "发过的表情会出现在这里"
             onItem = { i -> emojiShown.getOrNull(i)?.let { onEmoji(it) } }
-            onFeedback = { haptics.play(HapticEvent.LETTER) }
+            onFeedback = { k -> haptics.play(if (k == "popup") HapticEvent.POPUP else HapticEvent.LETTER) }
+            overlay = this@KkImeService.overlay
+            // 长按选肤色: the emoji and its forms, six to a row (one row per man/woman form)
+            longOptionRows = { i -> emojiShown.getOrNull(i)?.let { variantRows(it) }.orEmpty() }
+            onLongOption = { i, o -> emojiShown.getOrNull(i)?.let { shown -> chooseVariant(shown, o.text) } }
         }
         top.addView(emojiRail, LinearLayout.LayoutParams(dp(64f).toInt(), ViewGroup.LayoutParams.MATCH_PARENT))
         top.addView(emojiCells, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
@@ -1597,7 +1606,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
         emojiShown = when {
             emojiGroup == 0 -> recentEmoji.toList()
             kao -> (recentKao + kaomoji).distinct()
-            else -> emojiGroups.getOrNull(emojiGroup - 1)?.second.orEmpty()
+            else -> emojiGroups.getOrNull(emojiGroup - 1)?.second.orEmpty().map { toneChoice[it] ?: it }
         }
         // kaomoji are wide: three to a row, in text size
         emojiCells.columns = if (kao) 3 else 7
@@ -1619,6 +1628,37 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
         recentEmoji.remove(e); recentEmoji.add(0, e)
         while (recentEmoji.size > 32) recentEmoji.removeAt(recentEmoji.size - 1)
         prefs.sp.edit().putString("emoji_recent", recentEmoji.joinToString(" ")).apply()
+    }
+
+    /** The base emoji a shown one belongs to (a chosen skin tone maps back to its base). */
+    private fun emojiBase(e: String): String = if (emojiData.variants.containsKey(e)) e
+        else toneChoice.entries.firstOrNull { it.value == e }?.key
+        ?: emojiData.variants.entries.firstOrNull { e in it.value }?.key ?: e
+
+    private fun variantRows(shown: String): List<List<Output>> {
+        val base = emojiBase(shown)
+        val forms = emojiData.variants[base].orEmpty().filter { glyphPaint.hasGlyph(it) }
+        if (forms.isEmpty()) return emptyList()
+        return (listOf(base) + forms).chunked(6).map { row -> row.map { Output.of(it) } }
+    }
+
+    private fun chooseVariant(shown: String, v: String) {
+        val base = emojiBase(shown)
+        if (v == base) toneChoice.remove(base) else toneChoice[base] = v
+        prefs.sp.edit().putString("emoji_tone", toneChoice.entries.joinToString("\u0002") { it.key + "\u0001" + it.value }).apply()
+        onEmoji(v)
+        refreshEmojiKeepScroll()
+    }
+
+    /** Re-reads the current tab without moving the grid (after a tone was chosen). */
+    private fun refreshEmojiKeepScroll() {
+        if (emojiGroup in 1..emojiGroups.size) {
+            emojiShown = emojiGroups[emojiGroup - 1].second.map { toneChoice[it] ?: it }
+            emojiCells.setItems(emojiShown, resetScroll = false)
+        } else if (emojiGroup == 0) {
+            emojiShown = recentEmoji.toList()
+            emojiCells.setItems(emojiShown, resetScroll = false)
+        }
     }
 
     // ---- 表情查找 ------------------------------------------------------------------------

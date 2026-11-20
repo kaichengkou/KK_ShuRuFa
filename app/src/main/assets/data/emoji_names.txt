@@ -211,6 +211,7 @@
 👐	张开双手|十|双手|摊手	open hands|hand|hands|hug|jazz|open|swerve
 🤲	掌心向上托起|双掌|双掌向上|希望|祈祷|祷告	palms up together|cupped|dua|hands|palms|pray|prayer|together|up|wish
 🤝	握手|一言为定|会面|协议|君子协定	handshake|agreement|deal|hand|meeting|shake
+🫱🏻‍🫲🏼	握手: 较浅肤色中等-浅肤色|一言为定|中等-浅肤色|会面|协议|君子协定|握手|较浅肤色	handshake: light skin tone, medium-light skin tone|agreement|deal|hand|handshake|light skin tone|medium-light skin tone|meeting|shake
 🙏	双手合十|合掌|感恩|拜托|祈求|祈祷|祈福|祝福|谢谢	folded hands|appreciate|ask|beg|blessed|bow|cmon|five|folded|gesture|hand|high|please|pray|thanks|thx
 ✍️	写字|写|手|笔	writing hand|hand|write|writing
 💅	涂指甲油|修指甲|忙完了|护手|指甲油|美甲|闷|随便啦	nail polish|bored|care|cosmetics|done|makeup|manicure|nail|polish|whatever
@@ -241,8 +242,6 @@
 👱	金色头发的人|人|脸|金发	person: blond hair|blond|blond-haired|human|person
 👨	男人|兄弟|成人|男	man|adult|bro
 🧔	有胡子的人|人|大胡子|男|络腮胡|胡子|胡须|腮帮子|连鬓胡子	person: beard|beard|bearded|person|whiskers
-🧔‍♂️	有络腮胡子的男人|男人|胡子	man: beard|beard|bearded|man|whiskers
-🧔‍♀️	有络腮胡子的女人|女人|胡子	woman: beard|beard|bearded|whiskers|woman
 👨‍🦰	男人: 红发|兄弟|成人|男|男人|红发	man: red hair|adult|bro|man|red hair
 👨‍🦱	男人: 卷发|兄弟|卷发|成人|男|男人	man: curly hair|adult|bro|curly hair|man
 👨‍🦳	男人: 白发|兄弟|成人|男|男人|白发	man: white hair|adult|bro|man|white hair
@@ -256,41 +255,19 @@
 🧑‍🦳	成人: 白发|中性|性别中立|性格不明|成人|白发	person: white hair|adult|person|white hair
 👩‍🦲	女人: 秃顶|女|女人|淑女|秃顶|金发	woman: bald|adult|bald|lady|woman
 🧑‍🦲	成人: 秃顶|中性|性别中立|性格不明|成人|秃顶	person: bald|adult|bald|person
-👱‍♀️	金发女|女|金发	woman: blond hair|blond|blond-haired|blonde|hair|woman
-👱‍♂️	金发男|男|金发	man: blond hair|blond|blond-haired|hair|man
 🧓	老年人|中性|性别不明|性别中性|成人|熟龄|老人|老男人|老龄	older person|adult|elderly|grandparent|old|person|wise
 👴	老爷爷|祖父|秃头|老人|老头	old man|adult|bald|elderly|gramps|grandfather|grandpa|man|old|wise
 👵	老奶奶|祖母|老人|老太	old woman|adult|elderly|grandma|grandmother|granny|lady|old|wise|woman
 🙍	皱眉|不开心|不满|不爽|失望|心烦意乱|恼火|沮丧|皱眉的人	person frowning|annoyed|disappointed|disgruntled|disturbed|frown|frowning|frustrated|gesture|irritated|person|upset
-🙍‍♂️	皱眉男|不开心|男|皱眉|表情	man frowning|annoyed|disappointed|disgruntled|disturbed|frown|frowning|frustrated|gesture|irritated|man|upset
-🙍‍♀️	皱眉女|不开心|女|皱眉	woman frowning|annoyed|disappointed|disgruntled|disturbed|frown|frowning|frustrated|gesture|irritated|upset|woman
 🙎	撅嘴|不开心|不高兴|低落|噘嘴|失望|怒视|撅嘴的人|生闷气|皱眉|苦相|表情	person pouting|disappointed|downtrodden|frown|grimace|person|pouting|scowl|sulk|upset|whine
-🙎‍♂️	撅嘴男|不开心|噘嘴|男|表情	man pouting|disappointed|downtrodden|frown|grimace|man|pouting|scowl|sulk|upset|whine
-🙎‍♀️	撅嘴女|不开心|噘嘴|女	woman pouting|disappointed|downtrodden|frown|grimace|pouting|scowl|sulk|upset|whine|woman
 🙅	禁止手势|不允许|不可能|不行|不通过|反对|手|用手势表示不的人|禁止	person gesturing NO|forbidden|gesture|hand|NO|not|person|prohibit
-🙅‍♂️	禁止手势男|不行|反对|男|禁止	man gesturing NO|forbidden|gesture|hand|man|NO|not|prohibit
-🙅‍♀️	禁止手势女|不行|反对|女|禁止	woman gesturing NO|forbidden|gesture|hand|NO|not|prohibit|woman
 🙆	OK手势|ok|同意|女子用手势表示好|好的|手|手势|摆姿势|锻炼	person gesturing OK|exercise|gesture|gesturing|hand|OK|omg|person
-🙆‍♂️	OK手势男|ok|OK|ok手势男|可以|同意|好的|男|运动	man gesturing OK|exercise|gesture|gesturing|hand|man|OK|omg
-🙆‍♀️	OK手势女|OK|可以|同意|女|好的	woman gesturing OK|exercise|gesture|gesturing|hand|OK|omg|woman
 💁	前台|介绍|伸手给小费|信息|八卦|帮助|手|拨弄头发|自信时髦|请您离开|随便啦	person tipping hand|fetch|flick|flip|gossip|hand|person|sarcasm|sarcastic|sassy|seriously|tipping|whatever
-💁‍♂️	前台男|前台|嘲讽|小费|男	man tipping hand|fetch|flick|flip|gossip|hand|man|sarcasm|sarcastic|sassy|seriously|tipping|whatever
-💁‍♀️	前台女|前台|女	woman tipping hand|fetch|flick|flip|gossip|hand|sarcasm|sarcastic|sassy|seriously|tipping|whatever|woman
 🙋	举手|举手的人|嗨|开心|我参加|我可以帮忙|我知道|手|看这里|选我	person raising hand|gesture|hand|here|know|me|person|pick|question|raise|raising
-🙋‍♂️	男生举手|举手|发问|手势|男	man raising hand|gesture|hand|here|know|man|me|pick|question|raise|raising
-🙋‍♀️	女生举手|举手|女	woman raising hand|gesture|hand|here|know|me|pick|question|raise|raising|woman
 🧏	失聪者|听力|听力障碍|听障|无障碍|耳朵|耳聋|聋	deaf person|accessibility|deaf|ear|gesture|hear|person
-🧏‍♂️	失聪的男人|听力障碍|男|耳朵|聋	deaf man|accessibility|deaf|ear|gesture|hear|man
-🧏‍♀️	失聪的女人|听力障碍|女|耳朵|聋	deaf woman|accessibility|deaf|ear|gesture|hear|woman
 🙇	鞠躬|不好意思|冥想|姿势|对不起|惭愧|感谢|懊悔|祈求宽恕|道歉|鞠躬的人	person bowing|apology|ask|beg|bow|bowing|favor|forgive|gesture|meditate|meditation|person|pity|regret|sorry
-🙇‍♂️	男生鞠躬|不好意思|对不起|男|道歉	man bowing|apology|ask|beg|bow|bowing|favor|forgive|gesture|man|meditate|meditation|pity|regret|sorry
-🙇‍♀️	女生鞠躬|不好意思|女|对不起|道歉|静思|鞠躬	woman bowing|apology|ask|beg|bow|bowing|favor|forgive|gesture|meditate|meditation|pity|regret|sorry|woman
 🤦	捂脸|人|尴尬|恼怒|我的天哪|扶额|无语|难以置信|震惊	person facepalming|again|bewilder|disbelief|exasperation|facepalm|no|not|oh|omg|person|shock|smh
-🤦‍♂️	男生捂脸|尴尬|恼怒|我的天哪|扶额|捂脸|无奈|无语|男|男子捂脸|难以置信|震惊	man facepalming|again|bewilder|disbelief|exasperation|facepalm|man|no|not|oh|omg|shock|smh
-🤦‍♀️	女生捂脸|女|女子捂脸|尴尬|恼怒|我的天哪|扶额|捂脸|无奈|无语|难以置信|震惊	woman facepalming|again|bewilder|disbelief|exasperation|facepalm|no|not|oh|omg|shock|smh|woman
 🤷	耸肩|不关心|不知道|人|天晓得|怀疑|我哪知|我猜的|无所谓|无视	person shrugging|doubt|dunno|guess|idk|ignorance|indifference|knows|maybe|person|shrug|shrugging|whatever|who
-🤷‍♂️	男生耸肩|不关心|不知道|天晓得|怀疑|我哪知|我猜的|无所谓|无视|男|男子耸肩|耸肩	man shrugging|doubt|dunno|guess|idk|ignorance|indifference|knows|man|maybe|shrug|shrugging|whatever|who
-🤷‍♀️	女生耸肩|不关心|不知道|天晓得|女|女子耸肩|怀疑|我哪知|我猜的|无所谓|无视|耸肩	woman shrugging|doubt|dunno|guess|idk|ignorance|indifference|knows|maybe|shrug|shrugging|whatever|who|woman
 🧑‍⚕️	卫生工作者|医生|护士|治疗师	health worker|doctor|health|healthcare|nurse|therapist|worker
 👨‍⚕️	男医生|医护人员|医生|护士|治疗师|男|男人|男治疗师	man health worker|doctor|health|healthcare|man|nurse|therapist|worker
 👩‍⚕️	女医生|医护人员|医生|女|女人|女治疗师|护士|治疗师	woman health worker|doctor|health|healthcare|nurse|therapist|woman|worker
@@ -340,32 +317,18 @@
 👨‍🚒	男消防员|救火|消防|消防员|消防车|男	man firefighter|fire|firefighter|firetruck|man
 👩‍🚒	女消防员|女|救火|消防|消防员|消防车|火灾	woman firefighter|fire|firefighter|firetruck|woman
 👮	警察|交警|传唤|公安|卧底|武警|法警|警官|警方|逮捕	police officer|apprehend|arrest|citation|cop|law|officer|over|police|pulled|undercover
-👮‍♂️	男警察|男|警官|警察	man police officer|apprehend|arrest|citation|cop|law|man|officer|over|police|pulled|undercover
-👮‍♀️	女警察|交警|公安|卧底|女|武警|法警|警官|警察|警方|逮捕	woman police officer|apprehend|arrest|citation|cop|law|officer|over|police|pulled|undercover|woman
 🕵️	侦探|特工|男|间谍	detective|sleuth|spy
-🕵️‍♂️	男侦探|侦探|男|间谍	man detective|detective|man|sleuth|spy
-🕵️‍♀️	女侦探|侦探|女|特工|间谍	woman detective|detective|sleuth|spy|woman
 💂	卫兵|伦敦|卫士|守卫|白金汉宫	guard|buckingham|helmet|london|palace
-💂‍♂️	男卫兵|卫兵|卫士|守卫|男	man guard|buckingham|guard|helmet|london|man|palace
-💂‍♀️	女卫兵|卫兵|卫士|女|守卫	woman guard|buckingham|guard|helmet|london|palace|woman
 🥷	忍者|人物|侠客|刺客|士兵|战斗|打斗|狡猾|秘密|隐藏|隐身	ninja|assassin|fight|fighter|hidden|person|secret|skills|sly|soldier|stealth|war
 👷	建筑工人|包工头|头盔|安全帽|工人|工程师|建筑|建造|搬砖|改造	construction worker|build|construction|fix|hardhat|hat|man|person|rebuild|remodel|repair|work|worker
-👷‍♂️	男建筑工人|工人|建筑|男	man construction worker|build|construction|fix|hardhat|hat|man|rebuild|remodel|repair|work|worker
-👷‍♀️	女建筑工人|头盔|女|工人|建筑	woman construction worker|build|construction|fix|hardhat|hat|man|rebuild|remodel|repair|woman|work|worker
 🫅	戴王冠的人|君主|君威|国王|王冠|王后|王室|皇室|贵族	person with crown|crown|monarch|noble|person|regal|royal|royalty
 🤴	王子|皇家	prince|crown|fairy|fairytale|fantasy|king|royal|royalty|tale
 👸	公主|皇冠|童话	princess|crown|fairy|fairytale|fantasy|queen|royal|royalty|tale
 👳	戴头巾的人|头巾	person wearing turban|person|turban|wearing
-👳‍♂️	戴头巾的男人|头巾|男	man wearing turban|man|turban|wearing
-👳‍♀️	戴头巾的女人|头巾|女|特本	woman wearing turban|turban|wearing|woman
 👲	戴瓜皮帽的人|人物|帽子|瓜皮帽	person with skullcap|cap|Chinese|gua|guapi|hat|mao|person|pi|skullcap
 🧕	带头饰的女人|头巾|希贾布|戴头巾的女人	woman with headscarf|bandana|head|headscarf|hijab|kerchief|mantilla|tichel|woman
 🤵	穿燕尾服的人|人|新郎|正式|燕尾服|男人|穿燕尾服的男人	person in tuxedo|formal|person|tuxedo|wedding
-🤵‍♂️	穿礼服的男人|男人|礼服	man in tuxedo|formal|groom|man|tuxedo|wedding
-🤵‍♀️	穿礼服的女人|女人|礼服	woman in tuxedo|formal|tuxedo|wedding|woman
 👰	戴头纱的人|人|头纱|婚礼|戴头纱的新娘|新娘|结婚	person with veil|person|veil|wedding
-👰‍♂️	戴头纱的男人|头纱|男人	man with veil|man|veil|wedding
-👰‍♀️	戴头纱的女人|头纱|女人	woman with veil|bride|veil|wedding|woman
 🤰	孕妇|女人|怀孕|怀孕的女人	pregnant woman|pregnant|woman
 🫃	怀孕的男人|充满|吃撑|怀孕|男子|腹部|臃肿	pregnant man|belly|bloated|full|man|overeat|pregnant
 🫄	怀孕的人|充满|吃撑|怀孕|腹部|臃肿	pregnant person|belly|bloated|full|overeat|person|pregnant|stuffed
@@ -378,52 +341,24 @@
 🤶	圣诞奶奶|圣诞|圣诞节|节日	Mrs. Claus|celebration|Christmas|claus|fairy|fantasy|holiday|merry|mother|Mrs|santa|tale|xmas
 🧑‍🎄	圣诞人|人|人物|圣诞|圣诞帽|圣诞快乐|圣诞老人|圣诞老公公|节日	Mx Claus|celebration|Christmas|claus|fairy|fantasy|holiday|merry|Mx|santa|tale|xmas
 🦸	超级英雄|女英雄|女超人|好人|英雄|蝙蝠侠|超人|超能力	superhero|good|hero|superpower
-🦸‍♂️	男超级英雄|好人|男人|英雄|超能力	man superhero|good|hero|man|superhero|superpower
-🦸‍♀️	女超级英雄|女人|好人|英雄|超能力	woman superhero|good|hero|heroine|superhero|superpower|woman
 🦹	超级大坏蛋|人|坏蛋|大反派|恶魔|罪犯|超级恶棍|超能力|邪恶	supervillain|bad|criminal|evil|superpower|villain
-🦹‍♂️	男超级大坏蛋|坏蛋|男人|罪犯|超能力	man supervillain|bad|criminal|evil|man|superpower|supervillain|villain
-🦹‍♀️	女超级大坏蛋|坏蛋|女人|罪犯|超能力	woman supervillain|bad|criminal|evil|superpower|supervillain|villain|woman
 🧙	法师|召唤|女巫|女魔术师|巫师|智者|法术|男巫|男魔术师|魔咒|魔术师	mage|fantasy|magic|play|sorcerer|sorceress|sorcery|spell|summon|witch|wizard
-🧙‍♂️	男法师|男巫|男魔术师	man mage|fantasy|mage|magic|man|play|sorcerer|sorceress|sorcery|spell|summon|witch|wizard
-🧙‍♀️	女法师|女巫|女魔术师	woman mage|fantasy|mage|magic|play|sorcerer|sorceress|sorcery|spell|summon|witch|wizard|woman
 🧚	精灵|仙女|仙子|童话|翅膀	fairy|fairytale|fantasy|myth|person|pixie|tale|wings
-🧚‍♂️	仙人|仙男|天卫十五|天卫四|男精灵	man fairy|fairy|fairytale|fantasy|man|myth|Oberon|person|pixie|Puck|tale|wings
-🧚‍♀️	仙女|女精灵|妖精王后	woman fairy|fairy|fairytale|fantasy|myth|person|pixie|tale|Titania|wings|woman
 🧛	吸血鬼|万圣节|不死族|利牙|恐怖|毒牙|装扮服装|超自然	vampire|blood|Dracula|fangs|halloween|scary|supernatural|teeth|undead
-🧛‍♂️	男吸血鬼|男不死族	man vampire|blood|fangs|halloween|man|scary|supernatural|teeth|undead|vampire
-🧛‍♀️	女吸血鬼|女不死族	woman vampire|blood|fangs|halloween|scary|supernatural|teeth|undead|vampire|woman
 🧜	人鱼|三叉戟|女人鱼|民间传说|海妖|海底|海洋生物|男人鱼|童话|美人鱼	merperson|creature|fairytale|folklore|ocean|sea|siren|trident
-🧜‍♂️	男人鱼|特里同	merman|creature|fairytale|folklore|Neptune|ocean|Poseidon|sea|siren|trident|Triton
-🧜‍♀️	美人鱼|女人鱼	mermaid|creature|fairytale|folklore|merwoman|ocean|sea|siren|trident
 🧝	小精灵|神秘|精灵|魔幻|魔法	elf|elves|enchantment|fantasy|folklore|magic|magical|myth
-🧝‍♂️	男小精灵|男性魔术	man elf|elf|elves|enchantment|fantasy|folklore|magic|magical|man|myth
-🧝‍♀️	女小精灵|女性魔术	woman elf|elf|elves|enchantment|fantasy|folklore|magic|magical|myth|woman
 🧞	妖怪|奇幻|愿望|擦拭神灯|杰尼|灯神|神灵|神秘|神话|精灵|镇尼	genie|djinn|fantasy|jinn|lamp|myth|rub|wishes
-🧞‍♂️	男妖怪|男神灵	man genie|djinn|fantasy|genie|jinn|lamp|man|myth|rub|wishes
-🧞‍♀️	女妖怪|女神灵	woman genie|djinn|fantasy|genie|jinn|lamp|myth|rub|wishes|woman
 🧟	僵尸|万圣节|不死族|半死不活|吓人|行尸走肉	zombie|apocalypse|dead|halloween|horror|scary|undead|walking
-🧟‍♂️	男僵尸|男行尸走肉	man zombie|apocalypse|dead|halloween|horror|man|scary|undead|walking|zombie
-🧟‍♀️	女僵尸|女行尸走肉	woman zombie|apocalypse|dead|halloween|horror|scary|undead|walking|woman|zombie
 🧌	穴居巨怪|幻想|怪兽|怪物|神话故事	troll|fairy|fantasy|monster|tale|trolling
 🫈	毛怪|多毛|大型|大脚怪|大脚野人|森林|欧洲野人|神秘生物|雪怪	hairy creature|bigfoot|cryptid|forest|giant|hairy|sasquatch|woodwose|yeti
 💆	按摩|享受按摩的人|头痛|放松|水疗|治疗|紧张|缓解|美容|美容沙龙|面部	person getting massage|face|getting|headache|massage|person|relax|relaxing|salon|soothe|spa|tension|therapy|treatment
-💆‍♂️	男生按摩|头痛|按摩|男|脸	man getting massage|face|getting|headache|man|massage|relax|relaxing|salon|soothe|spa|tension|therapy|treatment
-💆‍♀️	女生按摩|女|按摩	woman getting massage|face|getting|headache|massage|relax|relaxing|salon|soothe|spa|tension|therapy|treatment|woman
 💇	理发|剪头|发型|理发师|理发的人|美发|美容|美容沙龙|美容院|造型师	person getting haircut|barber|beauty|chop|cosmetology|cut|groom|hair|haircut|parlor|person|shears|style
-💇‍♂️	男生理发|剪头|理发|男	man getting haircut|barber|beauty|chop|cosmetology|cut|groom|hair|haircut|man|parlor|person|shears|style
-💇‍♀️	女生理发|剪头|女|理发	woman getting haircut|barber|beauty|chop|cosmetology|cut|groom|hair|haircut|parlor|person|shears|style|woman
 🚶	行人|压马路|徒步|散步|昂首阔步|竞走|行走的人|走路|远足|闲逛	person walking|amble|gait|hike|man|pace|pedestrian|person|stride|stroll|walk|walking
-🚶‍♂️	男行人|徒步|男|走路	man walking|amble|gait|hike|man|pace|pedestrian|stride|stroll|walk|walking
-🚶‍♀️	女行人|女|徒步|漫步|缓行|走|走路|路人	woman walking|amble|gait|hike|man|pace|pedestrian|stride|stroll|walk|walking|woman
 🚶‍➡️	行人: 面向右边|压马路|徒步|散步|昂首阔步|竞走|行人|行走的人|走路|远足|闲逛|面向右边	person walking: facing right|amble|facing|gait|hike|man|pace|pedestrian|person|right|stride|stroll|walk|walking
 🚶‍♀️‍➡️	女行人: 面向右边|女|女行人|徒步|漫步|缓行|走|走路|路人|面向右边	woman walking: facing right|amble|facing|gait|hike|man|pace|pedestrian|right|stride|stroll|walk|walking|woman
 🚶‍♂️‍➡️	男行人: 面向右边|徒步|男|男行人|走路|面向右边	man walking: facing right|amble|facing|gait|hike|man|pace|pedestrian|right|stride|stroll|walk|walking
 🧍	站立者|人物|站着|站着的人|站立	person standing|person|stand|standing
-🧍‍♂️	站立的男人|男|站着|站立	man standing|man|stand|standing
-🧍‍♀️	站立的女人|女|站着|站立	woman standing|stand|standing|woman
 🧎	下跪者|下跪|跪下|跪坐	person kneeling|kneel|kneeling|knees|person
-🧎‍♂️	跪下的男人|下跪|男|跪坐	man kneeling|kneel|kneeling|knees|man
-🧎‍♀️	跪下的女人|下跪|女|跪坐	woman kneeling|kneel|kneeling|knees|woman
 🧎‍➡️	下跪者: 面向右边|下跪|下跪者|跪下|跪坐|面向右边	person kneeling: facing right|facing|kneel|kneeling|knees|person|right
 🧎‍♀️‍➡️	跪下的女人: 面向右边|下跪|女|跪下的女人|跪坐|面向右边	woman kneeling: facing right|facing|kneel|kneeling|knees|right|woman
 🧎‍♂️‍➡️	跪下的男人: 面向右边|下跪|男|跪下的男人|跪坐|面向右边	man kneeling: facing right|facing|kneel|kneeling|knees|man|right
@@ -446,8 +381,6 @@
 👩‍🦽	坐手动轮椅的女人|女|女人|女子|手动|无障碍|轮椅	woman in manual wheelchair|accessibility|manual|wheelchair|woman
 👩‍🦽‍➡️	坐手动轮椅的女人: 面向右边|坐手动轮椅的女人|女|女人|女子|手动|无障碍|轮椅|面向右边	woman in manual wheelchair: facing right|accessibility|facing|manual|right|wheelchair|woman
 🏃	跑步者|匆忙|向前冲|奔跑|快跑|赛跑|跑步|跑路|闪人|马拉松	person running|fast|hurry|marathon|move|person|quick|race|racing|run|rush|speed
-🏃‍♂️	男生跑步|男|跑|马拉松	man running|fast|hurry|man|marathon|move|quick|race|racing|run|rush|speed
-🏃‍♀️	女生跑步|冲刺|女|比赛|跑|跑步|马拉松	woman running|fast|hurry|marathon|move|quick|race|racing|run|rush|speed|woman
 🏃‍➡️	跑步者: 面向右边|匆忙|向前冲|奔跑|快跑|赛跑|跑步|跑步者|跑路|闪人|面向右边|马拉松	person running: facing right|facing|fast|hurry|marathon|move|person|quick|race|racing|right|run|rush|speed
 🏃‍♀️‍➡️	女生跑步: 面向右边|冲刺|女|女生跑步|比赛|跑|跑步|面向右边|马拉松	woman running: facing right|facing|fast|hurry|marathon|move|quick|race|racing|right|run|rush|speed|woman
 🏃‍♂️‍➡️	男生跑步: 面向右边|男|男生跑步|跑|面向右边|马拉松	man running: facing right|facing|fast|hurry|man|marathon|move|quick|race|racing|right|run|rush|speed
@@ -456,71 +389,48 @@
 🕺	跳舞的男人|佛拉门戈|男人|男舞者|舞者|跳舞	man dancing|dance|dancer|dancing|elegant|festive|flair|flamenco|groove|let’s|man|salsa|tango
 🕴️	西装革履的人|商务|正装|男|西装革履	person in suit levitating|business|levitating|person|suit
 👯	戴兔耳朵的人|兔子服|兔耳朵|双人舞|双胞胎|同好|永远的好朋友|派对|灵魂伴侣|聚会|舞者|跳舞|闺蜜	people with bunny ears|bestie|bff|bunny|counterpart|dancer|double|ear|identical|pair|party|partying|people|soulmate|twin|twinsies
-👯‍♂️	兔先生|兔耳朵|同好|永远的好朋友|派对|男生派对|聚会|跳舞	men with bunny ears|bestie|bff|bunny|counterpart|dancer|double|ear|identical|men|pair|party|partying|people|soulmate|twin|twinsies
-👯‍♀️	兔女郎|兔耳朵|女生派对|派对|聚会|跳舞	women with bunny ears|bestie|bff|bunny|counterpart|dancer|double|ear|identical|pair|party|partying|people|soulmate|twin|twinsies|women
+🧑🏻‍🐰‍🧑🏼	戴兔耳朵的人: 较浅肤色中等-浅肤色|中等-浅肤色|兔子服|兔耳朵|双人舞|双胞胎|同好|戴兔耳朵的人|永远的好朋友|派对|灵魂伴侣|聚会|舞者|跳舞|较浅肤色|闺蜜	people with bunny ears: light skin tone, medium-light skin tone|bestie|bff|bunny|counterpart|dancer|double|ear|identical|light skin tone|medium-light skin tone|pair|party|partying|people|soulmate|twin|twinsies
+👨🏻‍🐰‍👨🏼	兔先生: 较浅肤色中等-浅肤色|中等-浅肤色|兔先生|兔耳朵|同好|永远的好朋友|派对|男生派对|聚会|跳舞|较浅肤色	men with bunny ears: light skin tone, medium-light skin tone|bestie|bff|bunny|counterpart|dancer|double|ear|identical|light skin tone|medium-light skin tone|men|pair|party|partying|people|soulmate|twin|twinsies
+👩🏻‍🐰‍👩🏼	兔女郎: 较浅肤色中等-浅肤色|中等-浅肤色|兔女郎|兔耳朵|女生派对|派对|聚会|跳舞|较浅肤色	women with bunny ears: light skin tone, medium-light skin tone|bestie|bff|bunny|counterpart|dancer|double|ear|identical|light skin tone|medium-light skin tone|pair|party|partying|people|soulmate|twin|twinsies|women
 🧖	蒸房里的人|在桑拿间的人|放松|桑拿|桑拿浴|蒸房|蒸气漫溢|蒸汽浴	person in steamy room|day|luxurious|pamper|person|relax|room|sauna|spa|steam|steambath|unwind
-🧖‍♂️	蒸房里的男人|桑拿|男性桑拿	man in steamy room|day|luxurious|man|pamper|relax|room|sauna|spa|steam|steambath|unwind
-🧖‍♀️	蒸房里的女人|女性桑拿|桑拿	woman in steamy room|day|luxurious|pamper|relax|room|sauna|spa|steam|steambath|unwind|woman
 🧗	攀爬的人|向上爬的人|攀岩|攀岩者|爬山|登山|登山者	person climbing|climb|climber|climbing|mountain|person|rock|scale|up
-🧗‍♂️	攀爬的男人|登山者	man climbing|climb|climber|climbing|man|mountain|rock|scale|up
-🧗‍♀️	攀爬的女人|登山者	woman climbing|climb|climber|climbing|mountain|rock|scale|up|woman
 🤺	击剑选手|人|体育|击剑|剑	person fencing|fencer|fencing|person|sword
 🏇	赛马|三冠|赛马骑师|马|骑师|骑马	horse racing|horse|jockey|racehorse|racing|riding|sport
 ⛷️	滑雪的人|滑雪|雪	skier|ski|snow
 🏂	滑雪板|单板|单板滑雪|滑雪|雪	snowboarder|ski|snow|snowboard|sport
 🏌️	打高尔夫的人|pga|小鸟球|推杆进球|球|球座|球穴区|球童|职业高尔夫协会|运动|高尔夫	person golfing|ball|birdie|caddy|driving|golf|golfing|green|person|pga|putt|range|tee
-🏌️‍♂️	男生打高尔夫|男|高尔夫	man golfing|ball|birdie|caddy|driving|golf|golfing|green|man|pga|putt|range|tee
-🏌️‍♀️	女生打高尔夫|女|高尔夫|高尔夫练球场	woman golfing|ball|birdie|caddy|driving|golf|golfing|green|pga|putt|range|tee|woman
 🏄	冲浪|冲浪的人|冲浪者|波浪|海上运动|海洋|海滩|涌浪|网上冲浪|运动	person surfing|beach|ocean|person|sport|surf|surfer|surfing|swell|waves
-🏄‍♂️	男生冲浪|冲浪|男	man surfing|beach|man|ocean|sport|surf|surfer|surfing|swell|waves
-🏄‍♀️	女生冲浪|冲浪|女|海滩	woman surfing|beach|ocean|person|sport|surf|surfer|surfing|swell|waves
 🚣	划艇|划桨|划船运动|木筏|河|泛舟湖上|湖|独木舟|船|钓鱼	person rowing boat|boat|canoe|cruise|fishing|lake|oar|paddle|person|raft|river|row|rowboat|rowing
-🚣‍♂️	男生划船|划船|划艇|男|船	man rowing boat|boat|canoe|cruise|fishing|lake|man|oar|paddle|raft|river|row|rowboat|rowing
-🚣‍♀️	女生划船|划船|划艇|女|船	woman rowing boat|boat|canoe|cruise|fishing|lake|oar|paddle|raft|river|row|rowboat|rowing|woman
 🏊	游泳|游泳的人|游泳者|自由泳|运动|铁人三项	person swimming|freestyle|person|sport|swim|swimmer|swimming|triathlon
-🏊‍♂️	男生游泳|游泳|男	man swimming|freestyle|man|sport|swim|swimmer|swimming|triathlon
-🏊‍♀️	女生游泳|女|游泳	woman swimming|freestyle|man|sport|swim|swimmer|swimming|triathlon
 ⛹️	玩球|体育|全网无阻|打球|游戏|玩|球|篮球|篮球运动员|罚球|运动|运球|锦标赛	person bouncing ball|athletic|ball|basketball|bouncing|championship|dribble|net|person|player|throw
-⛹️‍♂️	男生玩球|球|男	man bouncing ball|athletic|ball|basketball|bouncing|championship|dribble|man|net|player|throw
-⛹️‍♀️	女生玩球|女|女生打篮球|游戏|玩|球|篮球	woman bouncing ball|athletic|ball|basketball|bouncing|championship|dribble|net|player|throw|woman
 🏋️	举重|举重的人|举重运动员|举铁|健美者|力量举重|杠铃|硬拉|训练|运动	person lifting weights|barbell|bodybuilder|deadlift|lifter|lifting|person|powerlifting|weight|weightlifter|weights|workout
-🏋️‍♂️	男生举重|举重|男	man lifting weights|barbell|bodybuilder|deadlift|lifter|lifting|man|powerlifting|weight|weightlifter|weights|workout
-🏋️‍♀️	女生举重|举重|女|训练	woman lifting weights|barbell|bodybuilder|deadlift|lifter|lifting|powerlifting|weight|weightlifter|weights|woman|workout
 🚴	骑自行车|单车|脚踏车|自行车|自行车赛|自行车骑士|运动|骑单车|骑脚踏车者|骑自行车的人|骑自行车者	person biking|bicycle|bicyclist|bike|biking|cycle|cyclist|person|riding|sport
-🚴‍♂️	男生骑自行车|单车|男|自行车|骑车	man biking|bicycle|bicyclist|bike|biking|cycle|cyclist|man|riding|sport
-🚴‍♀️	女生骑自行车|单车|女|女生骑车|自行车|骑车	woman biking|bicycle|bicyclist|bike|biking|cycle|cyclist|riding|sport|woman
 🚵	骑山地车|体育竞技|单车|山|山地自行车|山地车|山地骑行的人|自行车|运动|骑山地车的人|骑自行车|骑自行车者	person mountain biking|bicycle|bicyclist|bike|biking|cycle|cyclist|mountain|person|riding|sport
-🚵‍♂️	男生骑山地车|单车|山地车|男|自行车|骑山地车的人	man mountain biking|bicycle|bicyclist|bike|biking|cycle|cyclist|man|mountain|riding|sport
-🚵‍♀️	女生骑山地车|单车|女|山地车|自行车|骑车	woman mountain biking|bicycle|bicyclist|bike|biking|cycle|cyclist|mountain|riding|sport|woman
 🤸	侧手翻|人|体操|体育|兴奋|快乐|杂技|活泼|翻筋斗	person cartwheeling|active|cartwheel|cartwheeling|excited|flip|gymnastics|happy|person|somersault
-🤸‍♂️	男生侧手翻|体操|侧手翻|兴奋|快乐|杂技|活泼|男|男子侧手翻|翻筋斗	man cartwheeling|active|cartwheel|cartwheeling|excited|flip|gymnastics|happy|man|somersault
-🤸‍♀️	女生侧手翻|体操|侧手翻|兴奋|女|女子侧手翻|快乐|杂技|活泼|翻筋斗	woman cartwheeling|active|cartwheel|cartwheeling|excited|flip|gymnastics|happy|somersault|woman
 🤼	摔跤选手|人|体育|对决|打架|搏斗|摔跤|摔跤比赛|擂台争霸|运动	people wrestling|combat|duel|grapple|people|ring|tournament|wrestle|wrestling
-🤼‍♂️	男生摔跤|对决|打架|搏斗|摔跤|摔跤比赛|擂台争霸|男|男子摔跤|运动	men wrestling|combat|duel|grapple|men|ring|tournament|wrestle|wrestling
-🤼‍♀️	女生摔跤|女|女子摔跤|对决|打架|搏斗|摔跤|摔跤比赛|擂台争霸|运动	women wrestling|combat|duel|grapple|ring|tournament|women|wrestle|wrestling
+🧑🏻‍🫯‍🧑🏼	摔跤选手: 较浅肤色中等-浅肤色|中等-浅肤色|人|体育|对决|打架|搏斗|摔跤|摔跤比赛|摔跤选手|擂台争霸|较浅肤色|运动	people wrestling: light skin tone, medium-light skin tone|combat|duel|grapple|light skin tone|medium-light skin tone|people|ring|tournament|wrestle|wrestling
+👨🏻‍🫯‍👨🏼	男生摔跤: 较浅肤色中等-浅肤色|中等-浅肤色|对决|打架|搏斗|摔跤|摔跤比赛|擂台争霸|男|男子摔跤|男生摔跤|较浅肤色|运动	men wrestling: light skin tone, medium-light skin tone|combat|duel|grapple|light skin tone|medium-light skin tone|men|ring|tournament|wrestle|wrestling
+👩🏻‍🫯‍👩🏼	女生摔跤: 较浅肤色中等-浅肤色|中等-浅肤色|女|女子摔跤|女生摔跤|对决|打架|搏斗|摔跤|摔跤比赛|擂台争霸|较浅肤色|运动	women wrestling: light skin tone, medium-light skin tone|combat|duel|grapple|light skin tone|medium-light skin tone|ring|tournament|women|wrestle|wrestling
 🤽	水球|人|体育|水上足球|水上运动|游泳|马可波罗游戏	person playing water polo|person|playing|polo|sport|swimming|water|waterpolo
-🤽‍♂️	男生玩水球|水上足球|水上运动|水球|游泳|男|男子玩水球|马可波罗游戏	man playing water polo|man|playing|polo|sport|swimming|water|waterpolo
-🤽‍♀️	女生玩水球|女|女子玩水球|水上足球|水上运动|水球|游泳|马可波罗游戏	woman playing water polo|playing|polo|sport|swimming|water|waterpolo|woman
 🤾	手球|人|体育|投|投球|抛|接球|犯规投球|球|运动|高球	person playing handball|athletics|ball|catch|chuck|handball|hurl|lob|person|pitch|playing|sport|throw|toss
-🤾‍♂️	男生玩手球|墙手球|手球|男	man playing handball|athletics|ball|catch|chuck|handball|hurl|lob|man|pitch|playing|sport|throw|toss
-🤾‍♀️	女生玩手球|女|女子玩手球|手球|扔|投球|抛|接球|犯规投球|球|运动|高球	woman playing handball|athletics|ball|catch|chuck|handball|hurl|lob|pitch|playing|sport|throw|toss|woman
 🤹	抛接杂耍|一心多用|人|平衡|平衡艺术|抛接|抛接球|操纵|杂技|杂耍|表演	person juggling|act|balance|balancing|handle|juggle|juggling|manage|multitask|person|skill
-🤹‍♂️	男生抛接杂耍|一心多用|平衡艺术|抛接球|操纵|杂技|杂耍|男|男子|颠球	man juggling|act|balance|balancing|handle|juggle|juggling|man|manage|multitask|skill
-🤹‍♀️	女生抛接杂耍|女|杂技|杂耍|颠球	woman juggling|act|balance|balancing|handle|juggle|juggling|manage|multitask|skill|woman
 🧘	盘腿的人|冥想|放松|沉思|瑜伽|盘腿而坐|禅|莲花坐的人	person in lotus position|cross|legged|legs|lotus|meditation|peace|person|position|relax|serenity|yoga|yogi|zen
-🧘‍♂️	盘腿的男人|和尚|瑜伽男	man in lotus position|cross|legged|legs|lotus|man|meditation|peace|position|relax|serenity|yoga|yogi|zen
-🧘‍♀️	盘腿的女人|尼姑|比丘尼|瑜伽女	woman in lotus position|cross|legged|legs|lotus|meditation|peace|position|relax|serenity|woman|yoga|yogi|zen
 🛀	洗澡的人|洗澡|浴盆|浴缸|澡盆|盆浴	person taking bath|bath|bathtub|person|taking|tub
 🛌	躺在床上的人|入睡|夜里|宾馆|晚安|酒店	person in bed|bed|bedtime|good|goodnight|hotel|nap|night|person|sleep|tired|zzz
 🧑‍🤝‍🧑	手拉手的两个人|两个人手牵手|人|情侣|手|手牵手的人|拉手|握手|牵手	people holding hands|bae|bestie|bff|couple|dating|flirt|friends|hand|hold|people|twins
 👭	手拉手的两个女人|两个女人|好朋友|情侣|手拉手|朋友	women holding hands|bae|bestie|bff|couple|dating|flirt|friends|girls|hand|hold|sisters|twins|women
+👩🏻‍🤝‍👩🏼	手拉手的两个女人: 较浅肤色中等-浅肤色|两个女人|中等-浅肤色|好朋友|情侣|手拉手|手拉手的两个女人|朋友|较浅肤色	women holding hands: light skin tone, medium-light skin tone|bae|bestie|bff|couple|dating|flirt|friends|girls|hand|hold|light skin tone|medium-light skin tone|sisters|twins|women
 👫	手拉手的一男一女|一男一女|情侣|手拉手|相恋	woman and man holding hands|bae|bestie|bff|couple|dating|flirt|friends|hand|hold|man|twins|woman
+👩🏻‍🤝‍👨🏼	手拉手的一男一女: 较浅肤色中等-浅肤色|一男一女|中等-浅肤色|情侣|手拉手|手拉手的一男一女|相恋|较浅肤色	woman and man holding hands: light skin tone, medium-light skin tone|bae|bestie|bff|couple|dating|flirt|friends|hand|hold|light skin tone|man|medium-light skin tone|twins|woman
 👬	手拉手的两个男人|两个男人|双子座|情侣|手拉手|朋友|黄道十二宫	men holding hands|bae|bestie|bff|boys|brothers|couple|dating|flirt|friends|hand|hold|men|twins
+👨🏻‍🤝‍👨🏼	手拉手的两个男人: 较浅肤色中等-浅肤色|两个男人|中等-浅肤色|双子座|情侣|手拉手|手拉手的两个男人|朋友|较浅肤色|黄道十二宫	men holding hands: light skin tone, medium-light skin tone|bae|bestie|bff|boys|brothers|couple|dating|flirt|friends|hand|hold|light skin tone|medium-light skin tone|men|twins
 💏	亲吻|宝贝|情侣|接吻|浪漫|约会	kiss|anniversary|babe|bae|couple|date|dating|heart|love|mwah|person|romance|together|xoxo
+🧑🏻‍❤️‍💋‍🧑🏼	亲吻: 成人成人较浅肤色中等-浅肤色|中等-浅肤色|亲吻|宝贝|情侣|成人|接吻|浪漫|约会|较浅肤色	kiss: person, person, light skin tone, medium-light skin tone|anniversary|babe|bae|couple|date|dating|heart|kiss|light skin tone|love|medium-light skin tone|mwah|person|romance|together|xoxo
 👩‍❤️‍💋‍👨	亲吻: 女人男人|亲吻|女人|宝贝|情侣|接吻|浪漫|男人|约会	kiss: woman, man|anniversary|babe|bae|couple|date|dating|heart|kiss|love|man|mwah|person|romance|together|woman|xoxo
 👨‍❤️‍💋‍👨	亲吻: 男人男人|亲吻|宝贝|情侣|接吻|浪漫|男人|约会	kiss: man, man|anniversary|babe|bae|couple|date|dating|heart|kiss|love|man|mwah|person|romance|together|xoxo
 👩‍❤️‍💋‍👩	亲吻: 女人女人|亲吻|女人|宝贝|情侣|接吻|浪漫|约会	kiss: woman, woman|anniversary|babe|bae|couple|date|dating|heart|kiss|love|mwah|person|romance|together|woman|xoxo
 💑	情侣|恋爱|浪漫|红心|约会	couple with heart|anniversary|babe|bae|couple|dating|heart|kiss|love|person|relationship|romance|together|you
+🧑🏻‍❤️‍🧑🏼	情侣: 成人成人较浅肤色中等-浅肤色|中等-浅肤色|恋爱|情侣|成人|浪漫|红心|约会|较浅肤色	couple with heart: person, person, light skin tone, medium-light skin tone|anniversary|babe|bae|couple|dating|heart|kiss|light skin tone|love|medium-light skin tone|person|relationship|romance|together|you
 👩‍❤️‍👨	情侣: 女人男人|女人|恋爱|情侣|浪漫|男人|红心|约会	couple with heart: woman, man|anniversary|babe|bae|couple|dating|heart|kiss|love|man|person|relationship|romance|together|woman|you
 👨‍❤️‍👨	情侣: 男人男人|恋爱|情侣|浪漫|男人|红心|约会	couple with heart: man, man|anniversary|babe|bae|couple|dating|heart|kiss|love|man|person|relationship|romance|together|you
 👩‍❤️‍👩	情侣: 女人女人|女人|恋爱|情侣|浪漫|红心|约会	couple with heart: woman, woman|anniversary|babe|bae|couple|dating|heart|kiss|love|person|relationship|romance|together|woman|you

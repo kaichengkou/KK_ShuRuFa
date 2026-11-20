@@ -43,6 +43,8 @@ class GridPanel(context: Context, private val prefs: Prefs) : View(context) {
     var highlightFirst = false
     var overlay: PopupOverlay? = null
     var longOptions: ((Int) -> List<Output>)? = null
+    /** Like [longOptions], in rows (row 0 nearest the finger). Takes precedence when set. */
+    var longOptionRows: ((Int) -> List<List<Output>>)? = null
     var onLongOption: ((Int, Output) -> Unit)? = null
     /** Touch feedback: "press" when a cell is touched, "popup" when its menu opens. */
     var onFeedback: ((String) -> Unit)? = null
@@ -282,12 +284,14 @@ class GridPanel(context: Context, private val prefs: Prefs) : View(context) {
     private val longRunnable = Runnable {
         val i = pressed
         if (i < 0 || dragging) return@Runnable
+        val rows = longOptionRows?.invoke(i)?.filter { it.isNotEmpty() }
         val opts = longOptions?.invoke(i).orEmpty()
-        if (opts.isEmpty()) return@Runnable
+        if (rows.isNullOrEmpty() && opts.isEmpty()) return@Runnable
         val r = RectF(cells[i]).apply { offset(0f, -scrollPos) }
         val (ox, oy) = overlayOffset()
         r.offset(ox, oy)
-        overlay?.showOptions(r, dp(44f), opts, downX + ox, false)
+        if (!rows.isNullOrEmpty()) overlay?.showOptionRows(r, dp(44f), rows, downX + ox)
+        else overlay?.showOptions(r, dp(44f), opts, downX + ox, false)
         menuFor = i
         onFeedback?.invoke("popup")
         invalidate()
@@ -305,7 +309,7 @@ class GridPanel(context: Context, private val prefs: Prefs) : View(context) {
                 downX = e.x; downY = e.y; lastY = e.y; dragging = false; menuFor = -1
                 pressed = hit(e.x, e.y)
                 if (pressed >= 0) onFeedback?.invoke("press")
-                if (pressed >= 0 && longOptions != null) handler.postDelayed(longRunnable, 420)
+                if (pressed >= 0 && (longOptions != null || longOptionRows != null)) handler.postDelayed(longRunnable, 420)
                 invalidate()
             }
             MotionEvent.ACTION_MOVE -> {

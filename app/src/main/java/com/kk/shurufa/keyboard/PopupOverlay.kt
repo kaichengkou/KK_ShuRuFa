@@ -156,6 +156,15 @@ class PopupOverlay(context: Context, private val prefs: Prefs) : View(context) {
         }
     }
 
+    /** Visible characters: an emoji sequence (👮🏽‍♀️) counts as one. */
+    private fun glyphs(s: String): Int {
+        val it = android.icu.text.BreakIterator.getCharacterInstance()
+        it.setText(s)
+        var n = 0
+        while (it.next() != android.icu.text.BreakIterator.DONE) n++
+        return n
+    }
+
     fun selected(): Output? = if (selRow < 0) null else rows.getOrNull(selRow)?.getOrNull(selCol)
 
     fun hideOptions() {
@@ -241,7 +250,7 @@ class PopupOverlay(context: Context, private val prefs: Prefs) : View(context) {
                 val y = cellTop(r) + cellH / 2
                 text.color = if (r == selRow && i == selCol) theme.onAccent else theme.ink
                 text.alpha = (255 * show).toInt()
-                text.textSize = sp(if (o.label.codePointCount(0, o.label.length) <= 2) 21f else Ui.BODY)
+                text.textSize = sp(if (glyphs(o.label) <= 2) 21f else Ui.BODY)
                 val tw = text.measureText(o.label)
                 if (tw > cellW - dp(6f)) text.textSize *= (cellW - dp(6f)) / tw
                 val fm = text.fontMetrics
