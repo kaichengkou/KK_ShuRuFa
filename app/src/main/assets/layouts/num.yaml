@@ -1,0 +1,10 @@
+# !#1 数字符号页：右边是数字键（实心），左边一列可滚动的常用标点（由程序按语言填充）
+# 数字键也能滑动：0 上滑 %，点号四向是 , : - /
+id: num
+label: 数字
+engine: direct
+rows:
+  - ["1", "2", "3", {fn: backspace}]
+  - ["4", "5", "6", {fn: space, label: 空格}]
+  - ["7", "8", "9", {fn: enter}]
+  - [{fn: abc, label: 返回}, "0|%", {key: ".", style: soft, up: ",", down: ":", left: "-", right: "/"}, {fn: more_symbols, label: 符号, long: [全部符号, 数学]}]

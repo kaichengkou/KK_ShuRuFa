@@ -18,8 +18,8 @@ android {
         applicationId = "com.kk.shurufa"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
         ndk { abiFilters += abis }
         externalNativeBuild {
             cmake { arguments += listOf("-DANDROID_STL=c++_static", "-DCMAKE_BUILD_TYPE=Release") }
@@ -64,13 +64,14 @@ android {
     sourceSets["main"].assets.srcDir(layout.buildDirectory.dir("generated/rimeAssets"))
     packaging { jniLibs { useLegacyPackaging = false } }
     testOptions { unitTests.isIncludeAndroidResources = true }
-    androidResources { noCompress += listOf("yaml", "txt", "json", "gram", "lua") }
+    androidResources { noCompress += listOf("yaml", "json", "gram", "lua") }
 }
 
 // Copy the Rime schema and dictionaries (rime-ice) into the APK assets.
 val prepareRimeData by tasks.registering(Sync::class) {
     from(rootProject.file("rime-data/rime-ice")) {
-        include("*.yaml", "cn_dicts/**", "en_dicts/**", "opencc/**", "lua/**", "rime.lua")
+        include("*.yaml", "custom_phrase.txt", "cn_dicts/**", "en_dicts/**", "opencc/**", "lua/**", "rime.lua")
+        exclude("cn_dicts/41448.dict.yaml")
         exclude("*.custom.yaml", "squirrel.yaml", "weasel.yaml")
         into("rime")
     }
@@ -81,7 +82,21 @@ val prepareRimeData by tasks.registering(Sync::class) {
     }
     into(layout.buildDirectory.dir("generated/rimeAssets"))
 }
-tasks.named("preBuild") { dependsOn(prepareRimeData) }
+// Word-association index (联想) and the pinyin tone table (拼音模式), generated from the data sources.
+val extraAssets = layout.buildDirectory.dir("generated/extraAssets")
+val prepareExtraData by tasks.registering(Exec::class) {
+    val out = extraAssets.get().asFile
+    inputs.dir(rootProject.file("rime-data/rime-ice/cn_dicts"))
+    inputs.file(rootProject.file("rime-data/pinyin-data/pinyin.txt"))
+    inputs.files(rootProject.file("scripts/gen_predict.py"), rootProject.file("scripts/gen_tones.py"))
+    outputs.dir(out)
+    commandLine("sh", "-c",
+        "mkdir -p '$out/data' && " +
+        "python3 '${rootProject.file("scripts/gen_predict.py")}' '${rootProject.file("rime-data/rime-ice")}' '$out/data/predict_zh.txt' && " +
+        "python3 '${rootProject.file("scripts/gen_tones.py")}' '${rootProject.file("rime-data/pinyin-data/pinyin.txt")}' '$out/data/pinyin_tones.txt'")
+}
+android.sourceSets["main"].assets.srcDir(extraAssets)
+tasks.named("preBuild") { dependsOn(prepareRimeData, prepareExtraData) }
 
 dependencies {
     implementation("androidx.core:core-ktx:1.15.0")

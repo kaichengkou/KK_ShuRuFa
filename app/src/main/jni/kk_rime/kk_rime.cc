@@ -247,6 +247,14 @@ FN(jboolean, selectCandidateGlobal)(JNIEnv*, jobject, jint index) {
   return r;
 }
 
+// Forget a learned candidate (index in the whole menu); system words lose their learned weight.
+FN(jboolean, deleteCandidate)(JNIEnv*, jobject, jint index) {
+  std::lock_guard<std::mutex> lock(g_mutex);
+  bool r = api()->delete_candidate(session(), index);
+  refreshLocked();
+  return r;
+}
+
 FN(jstring, commitText)(JNIEnv* env, jobject) { return jstr(env, g.commit); }
 FN(jstring, preedit)(JNIEnv* env, jobject) { return jstr(env, g.preedit); }
 FN(jstring, input)(JNIEnv* env, jobject) { return jstr(env, g.input); }

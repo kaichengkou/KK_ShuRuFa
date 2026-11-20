@@ -19,3 +19,6 @@
 [submodule "rime-data/rime-ice"]
 	path = rime-data/rime-ice
 	url = https://github.com/iDvel/rime-ice.git
+[submodule "rime-data/pinyin-data"]
+	path = rime-data/pinyin-data
+	url = https://github.com/mozillazg/pinyin-data.git

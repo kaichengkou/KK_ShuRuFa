@@ -1,9 +1,9 @@
-# 光标面板（工具栏里的光标按钮打开）
+# 光标面板右侧的操作键（左侧是圆形方向盘，中间点一下进入选择模式）
 id: cursor
 label: 光标
 engine: direct
 rows:
-  - [{fn: word_left, label: 上一词}, {fn: up, label: "↑"}, {fn: word_right, label: 下一词}, {fn: copy, label: 复制}]
-  - [{fn: left, label: "←"}, {fn: select, label: 选择}, {fn: right, label: "→"}, {fn: cut, label: 剪切}]
-  - [{fn: home, label: 行首}, {fn: down, label: "↓"}, {fn: end, label: 行尾}, {fn: paste, label: 粘贴}]
-  - [{fn: abc, label: 返回}, {fn: select_all, label: 全选}, {fn: backspace}, {fn: enter}]
+  - [{fn: select_all, label: 全选}, {fn: copy, label: 复制}, {fn: cut, label: 剪切}]
+  - [{fn: word_left, label: 上一词}, {fn: paste, label: 粘贴, style: action}, {fn: word_right, label: 下一词}]
+  - [{fn: home, label: 行首}, {fn: end, label: 行尾}, {fn: backspace}]
+  - [{fn: abc, label: 返回}, {fn: undo, label: 撤销}, {fn: enter, style: soft}]

@@ -21,6 +21,8 @@ import kotlin.math.min
 @SuppressLint("ViewConstructor")
 class PopupOverlay(context: Context, private val prefs: Prefs) : View(context) {
     var theme: KbTheme = KbTheme.resolve(context, prefs)
+    /** Called when the selection moves to another option (for haptics). */
+    var onTick: (() -> Unit)? = null
 
     private fun dp(v: Float) = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, resources.displayMetrics)
     private fun sp(v: Float) = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, v, resources.displayMetrics)
@@ -126,7 +128,7 @@ class PopupOverlay(context: Context, private val prefs: Prefs) : View(context) {
             if (sel >= 0) {
                 selX.animateTo(cellLeft(sel), dur(110))
                 selY.animateTo(cellTop(sel), dur(110))
-                performHapticFeedback(android.view.HapticFeedbackConstants.CLOCK_TICK)
+                onTick?.invoke()
             }
             invalidate()
         }
@@ -159,7 +161,7 @@ class PopupOverlay(context: Context, private val prefs: Prefs) : View(context) {
         bg.color = theme.popup
         bg.alpha = (255 * alpha).toInt()
         bg.setShadowLayer(dp(6f), 0f, dp(2f), (0x40 * alpha).toInt() shl 24)
-        c.drawRoundRect(r, dp(10f), dp(10f), bg)
+        c.drawRoundRect(r, dp(14f), dp(14f), bg)
         bg.clearShadowLayer()
     }
 
@@ -208,7 +210,7 @@ class PopupOverlay(context: Context, private val prefs: Prefs) : View(context) {
             bg.color = theme.accent
             bg.alpha = (255 * show).toInt()
             val x = selX.value; val y = selY.value
-            c.drawRoundRect(x + dp(1f), y + dp(1f), x + cellW - dp(1f), y + cellH - dp(1f), dp(8f), dp(8f), bg)
+            c.drawRoundRect(x + dp(1.5f), y + dp(1.5f), x + cellW - dp(1.5f), y + cellH - dp(1.5f), dp(10f), dp(10f), bg)
         }
         text.typeface = if (opMath) Typeface.SERIF else Typeface.DEFAULT
         opts.forEachIndexed { i, o ->

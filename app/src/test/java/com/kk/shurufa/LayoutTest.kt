@@ -10,7 +10,7 @@ import org.junit.Test
 import java.io.File
 
 class LayoutTest {
-    private val repo = LayoutRepo(null) { File("src/main/assets/layouts/$it").readText() }
+    private val repo = LayoutRepo(null, source = { File("src/main/assets/layouts/$it").readText() })
 
     @Test fun chineseLayoutMatchesSamsung() {
         val zh = repo.keyboard("zh")

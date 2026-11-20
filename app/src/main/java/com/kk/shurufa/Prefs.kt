@@ -31,6 +31,8 @@ class Prefs(context: Context) {
     val candidateScale get() = f(CAND_SCALE, 1f)
     val bottomPaddingDp get() = i(BOTTOM_PADDING, 4)
 
+    val accent get() = s(ACCENT, "teal")                  // teal | indigo | coral | green | violet | graphite | system
+
     // Motion
     val animations get() = b(ANIMATIONS, true)
     val animSpeed get() = f(ANIM_SPEED, 1f)               // duration multiplier, lower is faster
@@ -49,7 +51,7 @@ class Prefs(context: Context) {
     val spaceSwipe get() = s(SPACE_SWIPE, "language")     // language | cursor | none
     val spaceLongPress get() = s(SPACE_LONG_PRESS, "cursor") // cursor | none
     val cursorStepDp get() = f(CURSOR_STEP_DP, 11f)
-    val backspaceSwipe get() = b(BACKSPACE_SWIPE, true)
+    val backspaceSwipe get() = b(BACKSPACE_SWIPE, true)   // up = clear, down = undo
     val backspaceRepeatMs get() = i(BACKSPACE_REPEAT, 55)
     val lpCase get() = b(LP_CASE, true)
     val lpHints get() = b(LP_HINTS, true)
@@ -66,6 +68,12 @@ class Prefs(context: Context) {
     val zhEmoji get() = b(ZH_EMOJI, true)
     val zhEnglishMix get() = b(ZH_EN_MIX, true)
     val zhPreeditInline get() = b(ZH_PREEDIT_INLINE, false)
+    val zhPredict get() = b(ZH_PREDICT, true)
+    val zhCorrection get() = b(ZH_CORRECTION, true)
+    val pinyinMode get() = b(PINYIN_MODE, false)
+    val stressMode get() = b(STRESS_MODE, false)
+    val clipKeep get() = i(CLIP_KEEP, 40)
+    val clipSuggest get() = b(CLIP_SUGGEST, true)
 
     // Symbols
     val autoPair get() = b(AUTO_PAIR, true)
@@ -136,6 +144,13 @@ class Prefs(context: Context) {
         const val ZH_EMOJI = "zh_emoji"
         const val ZH_EN_MIX = "zh_en_mix"
         const val ZH_PREEDIT_INLINE = "zh_preedit_inline"
+        const val ZH_PREDICT = "zh_predict"
+        const val ZH_CORRECTION = "zh_correction"
+        const val PINYIN_MODE = "pinyin_mode"
+        const val STRESS_MODE = "stress_mode"
+        const val CLIP_KEEP = "clip_keep"
+        const val CLIP_SUGGEST = "clip_suggest"
+        const val ACCENT = "accent"
         const val AUTO_PAIR = "auto_pair"
         const val SYMBOL_RETURN = "symbol_return"
         const val SMART_PUNCT = "smart_punct"

@@ -61,7 +61,19 @@ object Icons {
     private val lock = p { addRoundRect(RectF(5f, 11f, 19f, 20f), 2f, 2f, Path.Direction.CW); moveTo(8f, 11f); lineTo(8f, 8f); quadTo(8f, 4f, 12f, 4f); quadTo(16f, 4f, 16f, 8f); lineTo(16f, 11f) }
     private val unlock = p { addRoundRect(RectF(5f, 11f, 19f, 20f), 2f, 2f, Path.Direction.CW); moveTo(8f, 11f); lineTo(8f, 8f); quadTo(8f, 4f, 12f, 4f); quadTo(15f, 4f, 15.8f, 6.5f) }
 
+    private val quick = p {
+        addRoundRect(RectF(4f, 4f, 10.5f, 10.5f), 2f, 2f, Path.Direction.CW)
+        addRoundRect(RectF(13.5f, 4f, 20f, 10.5f), 2f, 2f, Path.Direction.CW)
+        addRoundRect(RectF(4f, 13.5f, 10.5f, 20f), 2f, 2f, Path.Direction.CW)
+        addCircle(16.75f, 16.75f, 3.25f, Path.Direction.CW)
+    }
+    private val close = p { moveTo(6.5f, 6.5f); lineTo(17.5f, 17.5f); moveTo(17.5f, 6.5f); lineTo(6.5f, 17.5f) }
+    private val up = p { moveTo(12f, 5f); lineTo(12f, 19f); moveTo(6.5f, 10.5f); lineTo(12f, 5f); lineTo(17.5f, 10.5f) }
+    private val down = p { moveTo(12f, 5f); lineTo(12f, 19f); moveTo(6.5f, 13.5f); lineTo(12f, 19f); lineTo(17.5f, 13.5f) }
+    private val pin = p { moveTo(9f, 4f); lineTo(15f, 4f); moveTo(10f, 4f); lineTo(10f, 10f); lineTo(7f, 14f); lineTo(17f, 14f); lineTo(14f, 10f); lineTo(14f, 4f); moveTo(12f, 14f); lineTo(12f, 20f) }
+
     val all = mapOf(
+        "quick" to quick, "close" to close, "up" to up, "down" to down, "pin" to pin,
         "backspace" to backspace, "enter" to enter, "shift" to shift, "language" to globe,
         "left" to left, "right" to right, "next_slot" to next, "mic" to mic, "ai" to spark,
         "emoji" to smile, "translate" to translate, "cursor" to cursor, "clipboard" to clip,

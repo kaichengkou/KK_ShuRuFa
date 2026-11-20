@@ -1,2 +1,8 @@
+# KK输入法 patches for rime-ice
 patch:
   menu/page_size: 10
+  # librime's built-in typo correction (adjacent keys on QWERTY)
+  translator/enable_correction: true
+  # face emoji keep their place; other emoji move behind the first five words
+  engine/filters/+:
+    - lua_filter@*kk_emoji_order

@@ -9,15 +9,13 @@ import android.inputmethodservice.InputMethodService
 import android.media.AudioManager
 import android.os.Build
 import android.os.SystemClock
-import android.os.VibrationEffect
-import android.os.Vibrator
-import android.os.VibratorManager
 import android.text.InputType
 import android.util.TypedValue
 import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowInsets
+import android.view.WindowInsetsController
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.ExtractedTextRequest
 import android.view.inputmethod.InputMethodManager
@@ -27,9 +25,12 @@ import android.widget.Toast
 import com.kk.shurufa.Prefs
 import com.kk.shurufa.keyboard.CandidateBar
 import com.kk.shurufa.keyboard.Dir
+import com.kk.shurufa.keyboard.DpadView
 import com.kk.shurufa.keyboard.GridPanel
 import com.kk.shurufa.keyboard.KbTheme
 import com.kk.shurufa.keyboard.Key
+import com.kk.shurufa.keyboard.KeyOverride
+import com.kk.shurufa.keyboard.KeyStyle
 import com.kk.shurufa.keyboard.KeyboardLayout
 import com.kk.shurufa.keyboard.KeyboardListener
 import com.kk.shurufa.keyboard.KeyboardView
@@ -37,9 +38,11 @@ import com.kk.shurufa.keyboard.LayoutRepo
 import com.kk.shurufa.keyboard.MathLayout
 import com.kk.shurufa.keyboard.Output
 import com.kk.shurufa.keyboard.PopupOverlay
+import com.kk.shurufa.keyboard.QuickPanel
 import com.kk.shurufa.keyboard.SymbolCategory
 import com.kk.shurufa.rime.RimeBridge
 import com.kk.shurufa.rime.RimeEngine
+import com.kk.shurufa.settings.KeyOverrides
 import com.kk.shurufa.settings.SettingsActivity
 import java.io.File
 import kotlin.math.abs
@@ -50,21 +53,32 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
     private lateinit var prefs: Prefs
     private lateinit var repo: LayoutRepo
     private lateinit var theme: KbTheme
+    private lateinit var haptics: Haptics
+    private lateinit var predictor: Predictor
+    private lateinit var tones: PinyinTones
 
     private lateinit var root: FrameLayout
     private lateinit var bar: CandidateBar
     private lateinit var content: FrameLayout
     private lateinit var keyboard: KeyboardView
     private lateinit var overlay: PopupOverlay
+    private lateinit var candPanel: LinearLayout
     private lateinit var candGrid: GridPanel
     private lateinit var symbolPanel: LinearLayout
     private lateinit var symRail: GridPanel
     private lateinit var symCells: GridPanel
     private lateinit var symBottom: KeyboardView
+    private lateinit var numPanel: LinearLayout
+    private lateinit var numStrip: GridPanel
+    private lateinit var numKeys: KeyboardView
+    private lateinit var cursorPanel: LinearLayout
+    private lateinit var dpad: DpadView
+    private lateinit var cursorKeys: KeyboardView
     private lateinit var clipPanel: LinearLayout
     private lateinit var clipList: GridPanel
+    private lateinit var quickPanel: QuickPanel
 
-    enum class Panel { LETTERS, SYMBOLS, MATH, PHONE, CURSOR, CLIPBOARD, CANDIDATES }
+    enum class Panel { LETTERS, NUM, SYMBOLS, MATH, PHONE, CURSOR, CLIPBOARD, CANDIDATES, QUICK }
 
     private var panel = Panel.LETTERS
     private var lang = "zh"
@@ -83,15 +97,25 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
     private var symCat = "common"
     private var symLock = false
     private var symItems: List<Output> = emptyList()
+    private var numItems: List<String> = emptyList()
     private var recentSymbols = mutableListOf<String>()
 
     private var selStart = 0
     private var selEnd = 0
     private var selectMode = false
-    private var bsAnchor = -1
 
     private lateinit var clips: ClipHistory
     private var clipItems: List<ClipHistory.Entry> = emptyList()
+    private var pendingClip: String? = null
+    private var pendingClipAt = 0L
+
+    private var predictions: List<String> = emptyList()
+    private val history = EditHistory()
+
+    // 拼音模式: the syllables of the chosen part of the composition, kept as it is confirmed
+    private val confirmedSyllables = mutableListOf<String>()
+    private var lastHanPrefix = 0
+    private var lastSyllables: List<String> = emptyList()
 
     private val rimeListener: (RimeEngine.State) -> Unit = { onRimeState(it) }
 
@@ -102,10 +126,14 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
     override fun onCreate() {
         super.onCreate()
         prefs = Prefs(this)
-        repo = LayoutRepo(this)
+        repo = LayoutRepo(this, overrides = { KeyOverrides.load(prefs, it) })
+        haptics = Haptics(this, prefs)
+        predictor = Predictor(this)
+        tones = PinyinTones(this)
+        if (prefs.zhPredict) predictor.load()
         prefs.sp.registerOnSharedPreferenceChangeListener(this)
         recentSymbols = prefs.sp.getString("sym_recent", "")!!.split('\u0001').filter { it.isNotEmpty() }.toMutableList()
-        clips = ClipHistory(File(filesDir, "clipboard.txt"))
+        clips = ClipHistory(File(filesDir, "clipboard.txt")) { prefs.clipKeep }
         (getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).addPrimaryClipChangedListener(clipListener)
         RimeEngine.addListener(rimeListener)
         RimeEngine.start(this)
@@ -126,14 +154,29 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
             clip.description.extras?.getBoolean("android.content.extra.IS_SENSITIVE") == true
         if (sensitive) return@OnPrimaryClipChangedListener
         val text = clip.getItemAt(0)?.coerceToText(this)?.toString() ?: return@OnPrimaryClipChangedListener
+        if (text.isBlank()) return@OnPrimaryClipChangedListener
         clips.add(text)
-        if (panel == Panel.CLIPBOARD) refreshClips()
+        if (prefs.clipSuggest) { pendingClip = text; pendingClipAt = SystemClock.uptimeMillis() }
+        if (::bar.isInitialized) { if (panel == Panel.CLIPBOARD) refreshClips(); syncBar() }
     }
 
+    /** Settings that only change behavior; everything else rebuilds the keyboard. */
+    private val liveKeys = setOf(
+        "sym_recent", Prefs.ZH_TRAD, Prefs.ZH_EMOJI, Prefs.ZH_PREDICT, Prefs.PINYIN_MODE, Prefs.MATH_FORMAT,
+        Prefs.VIBRATE, Prefs.SOUND, Prefs.CLIP_KEEP, Prefs.CLIP_SUGGEST, Prefs.ZH_CORRECTION, Prefs.STRESS_MODE,
+    )
+
     override fun onSharedPreferenceChanged(sp: SharedPreferences?, key: String?) {
-        if (key == "sym_recent" || key?.startsWith("app_lang_") == true) return
+        if (key == null || key.startsWith("app_lang_") || key.startsWith("hap_")) return
+        when (key) {
+            Prefs.ZH_EMOJI, Prefs.ZH_TRAD -> applyRimeOptions()
+            Prefs.ZH_PREDICT -> if (prefs.zhPredict) predictor.load() else { predictions = emptyList(); syncBar() }
+            Prefs.ZH_CORRECTION -> RimeEngine.redeploy(this)
+            Prefs.MATH_FORMAT -> if (::bar.isInitialized) syncBar()
+            Prefs.STRESS_MODE -> if (::keyboard.isInitialized && panel == Panel.LETTERS) keyboard.setRows(lettersRows())
+        }
+        if (key in liveKeys) { if (panel == Panel.QUICK && ::quickPanel.isInitialized) refreshQuick(); return }
         layouts.clear(); math = null
-        if (key == Prefs.ZH_EMOJI || key == Prefs.ZH_TRAD) applyRimeOptions()
         if (::root.isInitialized) setInputView(onCreateInputView())
     }
 
@@ -150,18 +193,17 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
         root = FrameLayout(this)
         root.setBackgroundColor(theme.background)
         val column = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        bar = CandidateBar(this, prefs).also { it.theme = theme; it.listener = this }
+        overlay = PopupOverlay(this, prefs).also { it.theme = theme; it.onTick = { haptics.play(HapticEvent.OPTION) } }
+        bar = CandidateBar(this, prefs).also { it.theme = theme; it.listener = this; it.overlay = overlay }
         content = FrameLayout(this)
-        overlay = PopupOverlay(this, prefs).also { it.theme = theme }
-        keyboard = KeyboardView(this, prefs).also { it.theme = theme; it.listener = this; it.overlay = overlay }
-        candGrid = GridPanel(this, prefs).apply {
-            theme = this@KkImeService.theme; columns = 0; textSp = 19f; rowHeightDp = 46f
-            onItem = { i -> onCandidate(i) }
-        }
+        keyboard = newKeyboard()
+        buildCandidatePanel()
         buildSymbolPanel()
+        buildNumPanel()
+        buildCursorPanel()
         buildClipPanel()
-        content.addView(keyboard, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-        if (prefs.toolbarVisible || true) column.addView(bar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        quickPanel = QuickPanel(this, prefs).also { it.theme = theme; it.onTile = { id -> onQuickTile(id) } }
+        column.addView(bar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         column.addView(content, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         root.addView(column, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         root.addView(overlay, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
@@ -171,9 +213,29 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
             v.setPadding(0, 0, 0, bottom)
             ins
         }
+        paintNavigationBar()
         showPanel(panel)
         return root
     }
+
+    /** The system draws its IME buttons below the keys; give that strip the keyboard's color. */
+    private fun paintNavigationBar() {
+        val w = window?.window ?: return
+        @Suppress("DEPRECATION")
+        w.navigationBarColor = theme.background
+        if (Build.VERSION.SDK_INT >= 29) w.isNavigationBarContrastEnforced = false
+        if (Build.VERSION.SDK_INT >= 30) {
+            w.insetsController?.setSystemBarsAppearance(
+                if (theme.dark) 0 else WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS,
+                WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS,
+            )
+        } else {
+            @Suppress("DEPRECATION")
+            w.decorView.systemUiVisibility = if (theme.dark) 0 else View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+        }
+    }
+
+    private fun newKeyboard() = KeyboardView(this, prefs).also { it.theme = theme; it.listener = this; it.overlay = overlay }
 
     private fun loadData() {
         try {
@@ -200,6 +262,8 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
         super.onStartInputView(info, restarting)
         tempLang = null
         selectMode = false
+        predictions = emptyList()
+        history.clear()
         val cls = info.inputType and InputType.TYPE_MASK_CLASS
         val variation = info.inputType and InputType.TYPE_MASK_VARIATION
         if (prefs.perAppLanguage && !restarting) prefs.appLanguage(info.packageName ?: "")?.takeIf { it in prefs.languages }?.let { lang = it }
@@ -213,14 +277,16 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
             (cls == InputType.TYPE_CLASS_NUMBER || cls == InputType.TYPE_CLASS_DATETIME) && prefs.numberFieldMath -> { mathTab = "basic"; Panel.MATH }
             else -> Panel.LETTERS
         }
-        shift = 0
-        if (::root.isInitialized) showPanel(panel)
+        shift = 0; autoShift = false
+        if (::root.isInitialized) { paintNavigationBar(); showPanel(panel) }
         updateAutoCap()
     }
 
     override fun onFinishInputView(finishingInput: Boolean) {
         super.onFinishInputView(finishingInput)
-        if (RimeEngine.ready) { RimeBridge.clearComposition() }
+        if (RimeEngine.ready) RimeBridge.clearComposition()
+        resetSyllables()
+        predictions = emptyList()
         currentInputConnection?.finishComposingText()
         if (::bar.isInitialized) syncBar()
     }
@@ -244,8 +310,20 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
 
     // ---- panels -------------------------------------------------------------------------
 
+    private val vowels = "аеёиоуыэюя"
+
     private fun lettersRows(): List<List<Key>> {
-        val base = layout(curLang).rows
+        var base = layout(curLang).rows
+        if (curLang == "ru" && prefs.stressMode) {
+            // 重音模式: every Russian vowel flicks up to its stressed form
+            base = base.map { row ->
+                row.map { k ->
+                    val ch = k.main?.text
+                    if (ch != null && ch.length == 1 && ch[0] in vowels) k.copy(flicks = k.flicks + (Dir.UP to Output.of(ch + "́")))
+                    else k
+                }
+            }
+        }
         if (!prefs.numberRow || base.isEmpty()) return base
         val digits = (1..10).map { Key(main = Output.of((it % 10).toString())) }
         return listOf(digits) + base
@@ -256,7 +334,16 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
         return (dp(6f) + dp(prefs.bottomPaddingDp + 2f) + rows * keyH + (rows - 1) * dp(prefs.keyGapDp)).toInt()
     }
 
+    private fun toolFor(p: Panel) = when (p) {
+        Panel.CURSOR -> "cursor"
+        Panel.CLIPBOARD -> "clipboard"
+        Panel.QUICK -> "quick"
+        Panel.SYMBOLS -> if (symCat == "kao") "emoji" else null
+        else -> null
+    }
+
     private fun showPanel(p: Panel) {
+        val from = panel
         panel = p
         content.removeAllViews()
         val lp = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
@@ -264,7 +351,6 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
         when (p) {
             Panel.LETTERS -> { keyboard.setRows(lettersRows()); content.addView(keyboard, lp) }
             Panel.PHONE -> { keyboard.setRows(layout("phone").rows); content.addView(keyboard, lp) }
-            Panel.CURSOR -> { keyboard.setRows(layout("cursor").rows); content.addView(keyboard, lp) }
             Panel.MATH -> {
                 val m = math
                 if (m == null) { showPanel(Panel.LETTERS); return }
@@ -272,35 +358,44 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
                 keyboard.setRows(tab.rows + listOf(m.bottom), math = true)
                 content.addView(keyboard, lp)
             }
-            Panel.SYMBOLS -> { refreshSymbols(); content.addView(symbolPanel, fixed); animateIn(symbolPanel) }
-            Panel.CLIPBOARD -> { refreshClips(); content.addView(clipPanel, fixed); animateIn(clipPanel) }
+            Panel.NUM -> { refreshNum(); content.addView(numPanel, fixed); if (from != p) animateIn(numPanel) }
+            Panel.CURSOR -> { dpad.selecting = selectMode; content.addView(cursorPanel, fixed); if (from != p) animateIn(cursorPanel) }
+            Panel.SYMBOLS -> { refreshSymbols(); content.addView(symbolPanel, fixed); if (from != p) animateIn(symbolPanel) }
+            Panel.CLIPBOARD -> { refreshClips(); content.addView(clipPanel, fixed); if (from != p) animateIn(clipPanel) }
+            Panel.QUICK -> { refreshQuick(); content.addView(quickPanel, fixed); quickPanel.animateIn() }
             Panel.CANDIDATES -> {
-                candGrid.setItems(RimeBridge.candidates(240).toList())
-                content.addView(candGrid, fixed)
+                candGrid.setItems(RimeBridge.candidates(300).toList())
+                content.addView(candPanel, fixed)
+                animateIn(candPanel)
             }
         }
         bar.expanded = p == Panel.CANDIDATES
+        bar.activeTool = toolFor(p)
         syncBar()
     }
 
     private fun animateIn(v: View) {
         if (!prefs.animations) return
-        v.alpha = 0f; v.translationY = dp(10f)
-        v.animate().alpha(1f).translationY(0f).setDuration((170 * prefs.animSpeed).toLong()).start()
+        v.alpha = 0f; v.translationY = dp(12f)
+        v.animate().alpha(1f).translationY(0f).setDuration((190 * prefs.animSpeed).toLong())
+            .setInterpolator(android.view.animation.PathInterpolator(0.2f, 0f, 0f, 1f)).start()
     }
 
     private fun syncBar() {
         if (!::bar.isInitialized) return
+        val clipFresh = pendingClip != null && SystemClock.uptimeMillis() - pendingClipAt < 90_000
         when {
             panel == Panel.MATH -> math?.let { m -> bar.showMath(m.tabs.map { it.id to it.name }, mathTab, prefs.mathFormat) }
-            isZh && RimeEngine.state == RimeEngine.State.DEPLOYING && panel == Panel.LETTERS -> bar.showMessage("首次部署雾凇拼音词库，约需一分钟…")
+            isZh && RimeEngine.state == RimeEngine.State.DEPLOYING && panel == Panel.LETTERS -> bar.showMessage("正在部署雾凇拼音词库，首次约需一分钟…")
             isZh && RimeEngine.state == RimeEngine.State.PREPARING && panel == Panel.LETTERS -> bar.showMessage("正在准备中文词库…")
             isZh && RimeEngine.state == RimeEngine.State.FAILED -> bar.showMessage("中文引擎启动失败：${RimeEngine.error ?: "未知错误"}")
             composing -> {
-                val cands = RimeBridge.candidates(80).toList()
-                bar.showCandidates(RimeBridge.preedit(), cands, emptyList())
+                trackSyllables()
+                bar.showCandidates(RimeBridge.preedit(), RimeBridge.candidates(80).toList())
                 if (prefs.zhPreeditInline) currentInputConnection?.setComposingText(RimeBridge.input(), 1)
             }
+            predictions.isNotEmpty() && panel == Panel.LETTERS -> bar.showPredictions(predictions)
+            clipFresh && panel == Panel.LETTERS -> bar.showClip(pendingClip!!, ClipHistory.kind(pendingClip!!))
             else -> {
                 bar.showToolbar()
                 if (panel == Panel.CANDIDATES) showPanel(Panel.LETTERS)
@@ -308,26 +403,81 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
         }
     }
 
+    private fun buildCandidatePanel() {
+        candPanel = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        candGrid = GridPanel(this, prefs).apply {
+            theme = this@KkImeService.theme; cellStyle = GridPanel.CellStyle.FLAT; columns = 4; rowHeightDp = 50f; textSp = 19f
+            highlightFirst = true; overlay = this@KkImeService.overlay
+            onItem = { i -> onCandidate(i) }
+            longOptions = { i -> candidateOptions(i) }
+            onLongOption = { i, o -> onCandidateOption(i, o) }
+        }
+        val side = newKeyboard().apply {
+            heightScale = 0.9f
+            setRows(listOf(
+                listOf(Key(fn = "collapse", label = "收起")),
+                listOf(Key(fn = "backspace")),
+                listOf(Key(fn = "reinput", label = "重输")),
+            ))
+        }
+        candPanel.addView(candGrid, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
+        candPanel.addView(side, LinearLayout.LayoutParams(dp(68f).toInt(), ViewGroup.LayoutParams.MATCH_PARENT))
+    }
+
     private fun buildSymbolPanel() {
         symbolPanel = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val top = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         symRail = GridPanel(this, prefs).apply {
             theme = this@KkImeService.theme; columns = 1; rowHeightDp = 38f; textSp = 14f; cellStyle = GridPanel.CellStyle.RAIL
-            onItem = { i -> symCat = symbols[i].id; refreshSymbols() }
+            onItem = { i -> symCat = symbols[i].id; refreshSymbols(); bar.activeTool = toolFor(panel) }
         }
         symCells = GridPanel(this, prefs).apply {
-            theme = this@KkImeService.theme
+            theme = this@KkImeService.theme; cellStyle = GridPanel.CellStyle.SOFT
             onItem = { i -> symItems.getOrNull(i)?.let { onSymbol(it) } }
         }
-        top.addView(symRail, LinearLayout.LayoutParams(dp(74f).toInt(), ViewGroup.LayoutParams.MATCH_PARENT))
+        top.addView(symRail, LinearLayout.LayoutParams(dp(76f).toInt(), ViewGroup.LayoutParams.MATCH_PARENT))
         top.addView(symCells, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
-        symBottom = KeyboardView(this, prefs).also { it.theme = theme; it.listener = this; it.overlay = overlay }
+        symBottom = newKeyboard()
         symBottom.setRows(listOf(listOf(
-            Key(fn = "abc", label = "返回", width = 1.4f), Key(fn = "math", label = "数学", width = 1.2f),
-            Key(fn = "lock"), Key(fn = "space", width = 3f), Key(fn = "backspace", width = 1.2f), Key(fn = "enter", width = 1.2f),
+            Key(fn = "abc", label = "返回", width = 1.4f), Key(fn = "num", label = "123", width = 1.2f), Key(fn = "math", label = "数学", width = 1.2f),
+            Key(fn = "lock"), Key(fn = "space", width = 2.6f), Key(fn = "backspace", width = 1.2f), Key(fn = "enter", width = 1.2f),
         )))
         symbolPanel.addView(top, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         symbolPanel.addView(symBottom, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+    }
+
+    private fun buildNumPanel() {
+        numPanel = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        numStrip = GridPanel(this, prefs).apply {
+            theme = this@KkImeService.theme; columns = 1; rowHeightDp = 44f; textSp = 19f; cellStyle = GridPanel.CellStyle.SOFT
+            onItem = { i -> numItems.getOrNull(i)?.let { commitComposingFirst(); commit(it); recordSymbol(it) } }
+        }
+        numKeys = newKeyboard()
+        numPanel.addView(numStrip, LinearLayout.LayoutParams(dp(66f).toInt(), ViewGroup.LayoutParams.MATCH_PARENT))
+        numPanel.addView(numKeys, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
+    }
+
+    private fun refreshNum() {
+        val zh = isZh
+        numItems = (if (zh) "， 。 ？ ！ 、 ： ； @ % + - × ÷ = （ ） # ~ ￥ …… “ ”"
+        else ", . ? ! : ; @ % + - * / = ( ) # ~ ₽ € $ \" '").split(' ')
+        numStrip.setItems(numItems)
+        numKeys.setRows(layout("num").rows)
+    }
+
+    private fun buildCursorPanel() {
+        cursorPanel = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        dpad = DpadView(this, prefs).apply {
+            theme = this@KkImeService.theme
+            onArrow = { d ->
+                haptics.play(HapticEvent.CURSOR)
+                sendKey(when (d) { Dir.UP -> KeyEvent.KEYCODE_DPAD_UP; Dir.DOWN -> KeyEvent.KEYCODE_DPAD_DOWN; Dir.LEFT -> KeyEvent.KEYCODE_DPAD_LEFT; Dir.RIGHT -> KeyEvent.KEYCODE_DPAD_RIGHT }, shiftMeta())
+            }
+            onCenter = { selectMode = !selectMode; selecting = selectMode; haptics.play(HapticEvent.FUNCTION) }
+        }
+        cursorKeys = newKeyboard().apply { setRows(layout("cursor").rows) }
+        cursorPanel.addView(dpad, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
+        cursorPanel.addView(cursorKeys, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1.25f))
     }
 
     private fun refreshSymbols() {
@@ -348,28 +498,44 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
         symBottom.invalidate()
     }
 
+    private fun recordSymbol(text: String) {
+        recentSymbols.remove(text)
+        recentSymbols.add(0, text)
+        while (recentSymbols.size > 12) recentSymbols.removeAt(recentSymbols.size - 1)
+        prefs.sp.edit().putString("sym_recent", recentSymbols.joinToString("\u0001")).apply()
+    }
+
     private fun onSymbol(o: Output) {
         commitComposingFirst()
         commit(o.text)
-        recentSymbols.remove(o.text)
-        recentSymbols.add(0, o.text)
-        while (recentSymbols.size > 12) recentSymbols.removeAt(recentSymbols.size - 1)
-        prefs.sp.edit().putString("sym_recent", recentSymbols.joinToString("\u0001")).apply()
+        recordSymbol(o.text)
         if (!symLock && prefs.symbolAutoReturn) showPanel(Panel.LETTERS)
     }
 
     private fun buildClipPanel() {
         clipPanel = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         clipList = GridPanel(this, prefs).apply {
-            theme = this@KkImeService.theme; columns = 1; rowHeightDp = 46f; textSp = 15f; cellStyle = GridPanel.CellStyle.ROW
-            onItem = { i -> clipItems.getOrNull(i)?.let { commit(it.text, pairable = false) } }
-            onItemLong = { i ->
-                clipItems.getOrNull(i)?.let { clips.togglePin(it.text) }
+            theme = this@KkImeService.theme; columns = 2; rowHeightDp = 78f; textSp = 14f; cellStyle = GridPanel.CellStyle.CARD
+            overlay = this@KkImeService.overlay
+            onItem = { i -> clipItems.getOrNull(i)?.let { commit(it.text, pairable = false); history.push(EditHistory.Op.Insert(it.text)) } }
+            longOptions = { i ->
+                val e = clipItems.getOrNull(i)
+                if (e == null) emptyList() else listOf(
+                    Output("取消", "§cancel"),
+                    Output(if (e.pinned) "取消固定" else "固定", "§pin"),
+                    Output("删除", "§delete"),
+                )
+            }
+            onLongOption = { i, o ->
+                val e = clipItems.getOrNull(i)
+                if (e != null) when (o.text) {
+                    "§pin" -> clips.togglePin(e.text)
+                    "§delete" -> clips.remove(e.text)
+                }
                 refreshClips()
-                Toast.makeText(this@KkImeService, "已切换固定", Toast.LENGTH_SHORT).show()
             }
         }
-        val bottom = KeyboardView(this, prefs).also { it.theme = theme; it.listener = this; it.overlay = overlay }
+        val bottom = newKeyboard()
         bottom.setRows(listOf(listOf(
             Key(fn = "abc", label = "返回", width = 1.4f), Key(fn = "clear_clips", label = "清空未固定", width = 2f),
             Key(fn = "space", width = 2.4f), Key(fn = "backspace", width = 1.2f), Key(fn = "enter", width = 1.2f),
@@ -381,7 +547,52 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
     private fun refreshClips() {
         clipItems = clips.entries()
         clipList.marks = clipItems.indices.filter { clipItems[it].pinned }.toSet()
-        clipList.setItems(if (clipItems.isEmpty()) listOf("复制过的文字会出现在这里；长按一条可固定") else clipItems.map { it.text })
+        clipList.tags = clipItems.map { ClipHistory.kind(it.text) }
+        clipList.setItems(if (clipItems.isEmpty()) listOf("复制过的文字会出现在这里。点一下粘贴，长按可以固定或删除。") else clipItems.map { it.text })
+    }
+
+    private fun refreshQuick() {
+        val themeName = when (prefs.theme) { "light" -> "浅色"; "dark" -> "深色"; else -> "跟随系统" }
+        quickPanel.tiles = listOf(
+            QuickPanel.Tile("trad", "繁体", "简繁切换", prefs.zhTraditional),
+            QuickPanel.Tile("emoji", "Emoji", "候选里带表情", prefs.zhEmoji),
+            QuickPanel.Tile("predict", "联想", "推荐下一个词", prefs.zhPredict),
+            QuickPanel.Tile("correct", "纠错", "拼音按键纠错", prefs.zhCorrection),
+            QuickPanel.Tile("pinyin", "拼音模式", "上屏带调拼音", prefs.pinyinMode),
+            QuickPanel.Tile("stress", "重音模式", "俄语重音字母", prefs.stressMode),
+            QuickPanel.Tile("latex", "LaTeX", "数学键盘输出", prefs.mathFormat == "tex"),
+            QuickPanel.Tile("theme", "主题", themeName),
+            QuickPanel.Tile("vibrate", "振动", "", prefs.vibrate),
+            QuickPanel.Tile("sound", "按键音", "", prefs.sound),
+            QuickPanel.Tile("math", "数学键盘"),
+            QuickPanel.Tile("symbols", "全部符号"),
+            QuickPanel.Tile("cursor", "光标"),
+            QuickPanel.Tile("clipboard", "剪贴板"),
+            QuickPanel.Tile("picker", "切换输入法"),
+            QuickPanel.Tile("settings", "完整设置"),
+        )
+    }
+
+    private fun onQuickTile(id: String) {
+        when (id) {
+            "trad" -> prefs.put(Prefs.ZH_TRAD, !prefs.zhTraditional)
+            "emoji" -> prefs.put(Prefs.ZH_EMOJI, !prefs.zhEmoji)
+            "predict" -> prefs.put(Prefs.ZH_PREDICT, !prefs.zhPredict)
+            "correct" -> { prefs.put(Prefs.ZH_CORRECTION, !prefs.zhCorrection); Toast.makeText(this, "正在重新部署词库…", Toast.LENGTH_SHORT).show() }
+            "pinyin" -> prefs.put(Prefs.PINYIN_MODE, !prefs.pinyinMode)
+            "stress" -> prefs.put(Prefs.STRESS_MODE, !prefs.stressMode)
+            "latex" -> prefs.put(Prefs.MATH_FORMAT, if (prefs.mathFormat == "tex") "uni" else "tex")
+            "theme" -> prefs.put(Prefs.THEME, when (prefs.theme) { "system" -> "light"; "light" -> "dark"; else -> "system" })
+            "vibrate" -> prefs.put(Prefs.VIBRATE, !prefs.vibrate)
+            "sound" -> prefs.put(Prefs.SOUND, !prefs.sound)
+            "math" -> showPanel(Panel.MATH)
+            "symbols" -> { symCat = "common"; showPanel(Panel.SYMBOLS) }
+            "cursor" -> showPanel(Panel.CURSOR)
+            "clipboard" -> showPanel(Panel.CLIPBOARD)
+            "picker" -> (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager).showInputMethodPicker()
+            "settings" -> openSettings()
+        }
+        if (panel == Panel.QUICK) refreshQuick()
     }
 
     // ---- text editing -------------------------------------------------------------------
@@ -403,12 +614,34 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
 
     private fun flushRime() {
         val commit = RimeBridge.commitText()
-        if (commit.isNotEmpty()) commit(commit, pairable = false)
-        else if (prefs.zhPreeditInline && RimeBridge.input().isEmpty()) currentInputConnection?.finishComposingText()
+        if (commit.isNotEmpty()) {
+            val out = if (prefs.pinyinMode && commit.any { isCjk(it) }) tones.convert(commit, confirmedSyllables + lastSyllables) else commit
+            resetSyllables()
+            commit(out, pairable = false)
+            history.push(EditHistory.Op.Insert(out))
+            predictions = if (prefs.zhPredict && !prefs.pinyinMode && out.any { isCjk(it) })
+                predictor.suggest(currentInputConnection?.getTextBeforeCursor(8, 0)?.toString() ?: out) else emptyList()
+        } else if (prefs.zhPreeditInline && RimeBridge.input().isEmpty()) currentInputConnection?.finishComposingText()
+        if (RimeBridge.input().isEmpty()) resetSyllables()
         syncBar()
         if (panel == Panel.CANDIDATES) {
-            if (composing) candGrid.setItems(RimeBridge.candidates(240).toList()) else showPanel(Panel.LETTERS)
+            if (composing) candGrid.setItems(RimeBridge.candidates(300).toList()) else showPanel(Panel.LETTERS)
         }
+    }
+
+    private fun resetSyllables() { confirmedSyllables.clear(); lastHanPrefix = 0; lastSyllables = emptyList() }
+
+    /** Follows the preedit ("今天 tian qi") to remember which syllables produced the chosen characters. */
+    private fun trackSyllables() {
+        val tokens = RimeBridge.preedit().split(' ', '\'').filter { it.isNotEmpty() }
+        val han = tokens.takeWhile { t -> t.all { isCjk(it) } }.sumOf { it.length }
+        val syl = tokens.dropWhile { t -> t.all { isCjk(it) } }
+        if (han > lastHanPrefix) {
+            val consumed = han - lastHanPrefix
+            confirmedSyllables += lastSyllables.take(consumed)
+        }
+        lastHanPrefix = han
+        lastSyllables = syl
     }
 
     private val pairs = mapOf(
@@ -416,6 +649,12 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
         "《" to "》", "〈" to "〉", "「" to "」", "『" to "』", "〔" to "〕", "„" to "“", "⟨" to "⟩",
     )
     private val closers = pairs.values.toSet()
+
+    /** Absolute selection (start, end) in the field, or null when the editor does not say. */
+    private fun selection(): Pair<Int, Int>? {
+        val et = currentInputConnection?.getExtractedText(ExtractedTextRequest(), 0) ?: return null
+        return (et.startOffset + minOf(et.selectionStart, et.selectionEnd)) to (et.startOffset + maxOf(et.selectionStart, et.selectionEnd))
+    }
 
     /** Commits text; `‸` marks where the cursor should land. Handles bracket pairing. */
     private fun commit(text: String, pairable: Boolean = true) {
@@ -435,23 +674,21 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
         }
         val idx = t.indexOf('‸')
         val clean = t.replace("‸", "")
+        if (idx < 0 || idx >= clean.length) { ic.commitText(clean, 1); return }
+        // read the position before the edit: inside a batch edit the editor may report stale values
+        val start = selection()?.first
         ic.beginBatchEdit()
         ic.commitText(clean, 1)
-        if (idx in 0 until clean.length) moveBy(-(clean.length - idx))
+        if (start != null) ic.setSelection(start + idx, start + idx)
+        else repeat(clean.length - idx) { sendDownUpKeyEvents(KeyEvent.KEYCODE_DPAD_LEFT) }
         ic.endBatchEdit()
-    }
-
-    private fun cursorPos(): Int {
-        val ic = currentInputConnection ?: return selEnd
-        val et = ic.getExtractedText(ExtractedTextRequest(), 0)
-        return if (et != null) et.startOffset + et.selectionEnd else selEnd
     }
 
     private fun moveBy(n: Int) {
         val ic = currentInputConnection ?: return
-        val et = ic.getExtractedText(ExtractedTextRequest(), 0)
-        if (et != null) {
-            val p = (et.startOffset + et.selectionEnd + n).coerceAtLeast(0)
+        val sel = selection()
+        if (sel != null) {
+            val p = (sel.second + n).coerceAtLeast(0)
             ic.setSelection(p, p)
         } else {
             val code = if (n < 0) KeyEvent.KEYCODE_DPAD_LEFT else KeyEvent.KEYCODE_DPAD_RIGHT
@@ -470,12 +707,61 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
         val ic = currentInputConnection ?: return
         if (currentInputEditorInfo?.inputType == InputType.TYPE_NULL) { sendDownUpKeyEvents(KeyEvent.KEYCODE_DEL); return }
         val sel = ic.getSelectedText(0)
-        if (!sel.isNullOrEmpty()) { ic.commitText("", 1); return }
-        // delete an empty bracket pair together
-        val before = ic.getTextBeforeCursor(1, 0)?.toString()
+        if (!sel.isNullOrEmpty()) { history.push(EditHistory.Op.Delete(sel.toString())); ic.commitText("", 1); return }
+        val before = ic.getTextBeforeCursor(2, 0)?.toString().orEmpty()
         val after = ic.getTextAfterCursor(1, 0)?.toString()
-        if (prefs.autoPair && before != null && pairs[before] == after) { ic.deleteSurroundingText(1, 1); return }
+        if (before.isEmpty()) return
+        // delete an empty bracket pair together
+        val last = before.substring(before.offsetByCodePoints(before.length, -1))
+        if (prefs.autoPair && pairs[last] == after) { ic.deleteSurroundingText(last.length, 1); return }
+        history.push(EditHistory.Op.Delete(last))
         if (Build.VERSION.SDK_INT >= 24) ic.deleteSurroundingTextInCodePoints(1, 0) else ic.deleteSurroundingText(1, 0)
+    }
+
+    /** 上滑清空: drops the pinyin while composing, otherwise the whole field (undoable). */
+    private fun clearAll() {
+        if (composing) { RimeBridge.clearComposition(); flushRime(); return }
+        val ic = currentInputConnection ?: return
+        val et = ic.getExtractedText(ExtractedTextRequest(), 0)
+        val text = et?.text?.toString()
+        if (text != null) {
+            if (text.isEmpty()) return
+            history.push(EditHistory.Op.Clear(text, et.startOffset + et.selectionEnd))
+            ic.beginBatchEdit()
+            ic.setSelection(0, text.length)
+            ic.commitText("", 1)
+            ic.endBatchEdit()
+        } else {
+            val before = ic.getTextBeforeCursor(10000, 0)?.toString().orEmpty()
+            val after = ic.getTextAfterCursor(10000, 0)?.toString().orEmpty()
+            if (before.isEmpty() && after.isEmpty()) return
+            history.push(EditHistory.Op.Clear(before + after, before.length))
+            ic.deleteSurroundingText(before.length, after.length)
+        }
+        predictions = emptyList()
+        syncBar()
+        updateAutoCap()
+    }
+
+    /** 下滑撤销: undoes the keyboard's own last edit, or asks the app (Ctrl+Z) when there is none. */
+    private fun undo() {
+        val ic = currentInputConnection ?: return
+        when (val op = history.pop()) {
+            is EditHistory.Op.Insert -> {
+                val before = ic.getTextBeforeCursor(op.text.length, 0)?.toString()
+                if (before == op.text) ic.deleteSurroundingText(op.text.length, 0) else sendKey(KeyEvent.KEYCODE_Z, KeyEvent.META_CTRL_ON)
+            }
+            is EditHistory.Op.Delete -> ic.commitText(op.text, 1)
+            is EditHistory.Op.Clear -> {
+                ic.beginBatchEdit()
+                ic.commitText(op.text, 1)
+                ic.setSelection(op.cursor, op.cursor)
+                ic.endBatchEdit()
+            }
+            null -> sendKey(KeyEvent.KEYCODE_Z, KeyEvent.META_CTRL_ON)
+        }
+        predictions = emptyList()
+        syncBar()
     }
 
     private fun performEnter() {
@@ -485,14 +771,27 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
         val noAction = (info?.imeOptions ?: 0) and EditorInfo.IME_FLAG_NO_ENTER_ACTION != 0
         if (!noAction && action != EditorInfo.IME_ACTION_NONE && action != EditorInfo.IME_ACTION_UNSPECIFIED) ic.performEditorAction(action)
         else if (info?.inputType == InputType.TYPE_NULL) sendDownUpKeyEvents(KeyEvent.KEYCODE_ENTER)
-        else ic.commitText("\n", 1)
+        else { ic.commitText("\n", 1); history.push(EditHistory.Op.Insert("\n")) }
     }
 
+    /**
+     * 句首大写 for Russian and English. Decided from the text before the cursor, because many
+     * apps do not ask for sentence capitalization in their input type.
+     */
     private fun updateAutoCap() {
         if (!::keyboard.isInitialized) return
-        val directLetters = panel == Panel.LETTERS && !isZh
-        val caps = directLetters && prefs.autoCap && (currentInputConnection?.getCursorCapsMode(currentInputEditorInfo?.inputType ?: 0) ?: 0) != 0
         if (shift == 2) return
+        val info = currentInputEditorInfo
+        val cls = (info?.inputType ?: 0) and InputType.TYPE_MASK_CLASS
+        val variation = (info?.inputType ?: 0) and InputType.TYPE_MASK_VARIATION
+        val excluded = variation == InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS || variation == InputType.TYPE_TEXT_VARIATION_URI ||
+            variation == InputType.TYPE_TEXT_VARIATION_PASSWORD || variation == InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD ||
+            variation == InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD || variation == InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS
+        val caps = panel == Panel.LETTERS && !isZh && prefs.autoCap && cls == InputType.TYPE_CLASS_TEXT && !excluded && run {
+            val before = currentInputConnection?.getTextBeforeCursor(3, 0)?.toString() ?: return@run false
+            val t = before.trimEnd(' ')
+            t.isEmpty() || t.last() in ".!?…\n。！？" && (before.endsWith(" ") || t.last() == '\n')
+        }
         val want = if (caps) 1 else if (autoShift) 0 else shift
         if (want != shift || caps != autoShift) {
             shift = want; autoShift = caps
@@ -507,6 +806,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
 
     override fun onOutput(key: Key, output: Output) {
         if (panel == Panel.MATH) { mathOut(output); return }
+        predictions = emptyList()
         val t = output.text
         val isMain = output === key.main
         if (isZh && panel == Panel.LETTERS) {
@@ -514,43 +814,47 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
                 if (rimeKey(t[0].code)) return
                 if (!RimeEngine.ready) { commit(t); return }
             }
-            if (isMain && (t == "，" || t == "。") && composing) {
-                RimeBridge.commitComposition(); flushRime()
-            }
             commitComposingFirst()
-            commit(smartPunct(t))
+            val out = smartPunct(t)
+            commit(out)
+            history.push(EditHistory.Op.Insert(out))
+            syncBar()
             return
         }
         var out = t
         if (isMain && key.isLetter && shift > 0) out = t.uppercase()
         commit(out)
+        history.push(EditHistory.Op.Insert(out))
         if (isMain && key.isLetter && shift == 1) { shift = 0; autoShift = false; keyboard.invalidate() }
         updateAutoCap()
+        if (panel == Panel.LETTERS) syncBar()
     }
 
     private fun smartPunct(t: String): String {
         if (!prefs.smartPunct) return t
         val before = currentInputConnection?.getTextBeforeCursor(1, 0)?.toString() ?: return t
-        if (before.isNotEmpty() && before[0].isDigit()) return when (t) { "。" -> "."; "：" -> ":"; else -> t }
+        if (before.isNotEmpty() && before[0].isDigit()) return when (t) { "。" -> "."; "：" -> ":"; "，" -> ","; else -> t }
         return t
     }
 
     override fun onFunction(key: Key) {
         val ic = currentInputConnection
         when (key.fn) {
-            "backspace" -> if (composing) rimeKey(RimeBridge.XK_BackSpace) else { deleteBackward(); updateAutoCap() }
+            "backspace" -> { predictions = emptyList(); if (composing) rimeKey(RimeBridge.XK_BackSpace) else { deleteBackward(); updateAutoCap(); syncBar() } }
             "space" -> {
                 if (composing) { rimeKey(RimeBridge.XK_space); return }
+                predictions = emptyList()
                 val now = SystemClock.uptimeMillis()
                 val before = ic?.getTextBeforeCursor(2, 0)?.toString().orEmpty()
                 if (prefs.doubleSpacePeriod && !isZh && panel == Panel.LETTERS && now - lastSpaceAt < 600 &&
                     before.length == 2 && before[1] == ' ' && before[0].isLetterOrDigit()) {
                     ic?.deleteSurroundingText(1, 0); commit(". ")
-                } else commit(" ")
+                } else { commit(" "); history.push(EditHistory.Op.Insert(" ")) }
                 lastSpaceAt = now
                 updateAutoCap()
+                syncBar()
             }
-            "enter" -> if (composing) rimeKey(RimeBridge.XK_Return) else { performEnter(); updateAutoCap() }
+            "enter" -> if (composing) rimeKey(RimeBridge.XK_Return) else { predictions = emptyList(); performEnter(); updateAutoCap(); syncBar() }
             "shift" -> {
                 val now = SystemClock.uptimeMillis()
                 shift = when {
@@ -564,9 +868,14 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
                 keyboard.invalidate()
             }
             "language" -> switchLanguage(1)
-            "symbols" -> { commitComposingFirst(); symCat = "common"; showPanel(Panel.SYMBOLS) }
+            "symbols" -> { commitComposingFirst(); showPanel(Panel.NUM) }
+            "num" -> showPanel(Panel.NUM)
+            "more_symbols" -> { symCat = "common"; showPanel(Panel.SYMBOLS) }
             "math" -> { commitComposingFirst(); showPanel(Panel.MATH) }
             "abc" -> { selectMode = false; showPanel(Panel.LETTERS) }
+            "collapse" -> showPanel(Panel.LETTERS)
+            "reinput" -> { RimeBridge.clearComposition(); flushRime(); showPanel(Panel.LETTERS) }
+            "undo" -> undo()
             "lock" -> { symLock = !symLock; symBottom.lockOn = symLock; symBottom.invalidate()
                 Toast.makeText(this, if (symLock) "已锁定，可以连续输入符号" else "已解锁，点一个符号就回到字母键盘", Toast.LENGTH_SHORT).show() }
             "left" -> sendKey(KeyEvent.KEYCODE_DPAD_LEFT, shiftMeta())
@@ -577,10 +886,9 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
             "word_right" -> sendKey(KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.META_CTRL_ON or shiftMeta())
             "home" -> sendKey(KeyEvent.KEYCODE_MOVE_HOME, shiftMeta())
             "end" -> sendKey(KeyEvent.KEYCODE_MOVE_END, shiftMeta())
-            "select" -> { selectMode = !selectMode; Toast.makeText(this, if (selectMode) "选择模式：移动光标会选中文字" else "已退出选择模式", Toast.LENGTH_SHORT).show() }
             "select_all" -> ic?.performContextMenuAction(android.R.id.selectAll)
-            "copy" -> { ic?.performContextMenuAction(android.R.id.copy); selectMode = false }
-            "cut" -> { ic?.performContextMenuAction(android.R.id.cut); selectMode = false }
+            "copy" -> { ic?.performContextMenuAction(android.R.id.copy); selectMode = false; dpad.selecting = false }
+            "cut" -> { ic?.performContextMenuAction(android.R.id.cut); selectMode = false; dpad.selecting = false }
             "paste" -> ic?.performContextMenuAction(android.R.id.paste)
             "next_slot" -> nextSlot()
             "clear_clips" -> { clips.clearUnpinned(); refreshClips() }
@@ -590,7 +898,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
     private fun shiftMeta() = if (selectMode) KeyEvent.META_SHIFT_ON else 0
 
     override fun longOptions(key: Key): List<Output> {
-        key.fn?.let { return fnOptions(it) }
+        key.fn?.let { return fnOptions(it, key) }
         val m = key.main ?: return emptyList()
         val list = mutableListOf<Output>()
         if (panel == Panel.MATH) {
@@ -608,17 +916,19 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
             val up = m.text.uppercase(); val low = m.text.lowercase()
             if (shift > 0) { list += Output.of(low); list += Output.of(up) } else { list += Output.of(up); list += Output.of(low) }
         }
+        if (curLang == "ru" && m.text.length == 1 && m.text[0] in vowels) list += Output.of(m.text + "́")
         list += key.long
         return list.distinctBy { it.text }.takeIf { it.size > 1 || (it.size == 1 && it[0].text != m.text) } ?: emptyList()
     }
 
-    private fun fnOptions(fn: String): List<Output> = when (fn) {
+    private fun fnOptions(fn: String, key: Key): List<Output> = when (fn) {
         "language" -> prefs.languages.map { Output(layout(it).label, "§lang:$it") } +
             listOf(Output("系统切换", "§picker"), Output("设置", "§settings"))
-        "symbols" -> listOf(Output("符号", "§sym"), Output("数学", "§math"), Output("光标", "§cursor"), Output("剪贴板", "§clip"))
+        "symbols" -> listOf(Output("数字", "§num"), Output("全部符号", "§sym"), Output("数学", "§math"), Output("光标", "§cursor"), Output("剪贴板", "§clip"))
+        "more_symbols" -> listOf(Output("全部符号", "§sym"), Output("数学", "§math"))
         "enter" -> listOf(Output("换行", "§newline"), Output(enterActionName(), "§action"))
         "shift" -> listOf(Output("大写锁定", "§caps"))
-        else -> emptyList()
+        else -> key.long.map { Output(it.label, "§" + it.text) }
     }
 
     private fun enterActionName() = when ((currentInputEditorInfo?.imeOptions ?: 0) and EditorInfo.IME_MASK_ACTION) {
@@ -637,8 +947,9 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
             t.startsWith("§lang:") -> setLanguage(t.removePrefix("§lang:"))
             t == "§picker" -> (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager).showInputMethodPicker()
             t == "§settings" -> openSettings()
-            t == "§sym" -> onFunction(Key(fn = "symbols"))
-            t == "§math" -> onFunction(Key(fn = "math"))
+            t == "§num" -> showPanel(Panel.NUM)
+            t == "§sym" || t == "§全部符号" -> { symCat = "common"; showPanel(Panel.SYMBOLS) }
+            t == "§math" || t == "§数学" -> showPanel(Panel.MATH)
             t == "§cursor" -> showPanel(Panel.CURSOR)
             t == "§clip" -> showPanel(Panel.CLIPBOARD)
             t == "§newline" -> commit("\n")
@@ -651,11 +962,11 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
         val meta = shiftMeta()
         repeat(abs(dx)) { sendKey(if (dx < 0) KeyEvent.KEYCODE_DPAD_LEFT else KeyEvent.KEYCODE_DPAD_RIGHT, meta) }
         repeat(abs(dy)) { sendKey(if (dy < 0) KeyEvent.KEYCODE_DPAD_UP else KeyEvent.KEYCODE_DPAD_DOWN, meta) }
-        if (dx != 0 || dy != 0) feedback(light = true)
+        if (dx != 0 || dy != 0) haptics.play(HapticEvent.CURSOR)
     }
 
     override fun onCursorMode(active: Boolean) {
-        if (active) { commitComposingFirst(); feedback() }
+        if (active) { commitComposingFirst(); haptics.play(HapticEvent.GESTURE) }
     }
 
     override fun onSwitchLanguage(direction: Int): String? {
@@ -676,6 +987,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
         tempLang = null
         lang = id
         shift = 0; autoShift = false
+        predictions = emptyList()
         currentInputEditorInfo?.packageName?.let { if (prefs.perAppLanguage) prefs.setAppLanguage(it, id) }
         if (panel != Panel.LETTERS) showPanel(Panel.LETTERS) else { keyboard.setRows(lettersRows()); syncBar() }
         updateAutoCap()
@@ -685,57 +997,23 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
         if (composing) rimeKey(RimeBridge.XK_BackSpace) else deleteBackward()
     }
 
-    private var bsText = ""
-
-    override fun onBackspaceSwipe(words: Int, commit: Boolean) {
-        val ic = currentInputConnection ?: return
-        if (composing) { if (commit && words > 0) { RimeBridge.clearComposition(); flushRime() }; return }
-        if (bsAnchor < 0) {
-            bsAnchor = cursorPos()
-            bsText = ic.getTextBeforeCursor(400, 0)?.toString().orEmpty()
-        }
-        val end = bsAnchor
-        when {
-            commit -> {
-                if (words > 0) ic.commitText("", 1)
-                bsAnchor = -1
-                updateAutoCap()
-            }
-            words == 0 -> { ic.setSelection(end, end); bsAnchor = -1 }
-            else -> ic.setSelection((end - wordsBack(bsText, words)).coerceAtLeast(0), end)
-        }
-    }
-
-    /** Length of the last [n] words at the end of [s]; CJK text counts two characters as a word. */
-    private fun wordsBack(s: String, n: Int): Int {
-        var i = s.length
-        repeat(n) {
-            while (i > 0 && s[i - 1].isWhitespace()) i--
-            if (i > 0 && isCjk(s[i - 1])) {
-                var k = 0
-                while (i > 0 && isCjk(s[i - 1]) && k < 2) { i--; k++ }
-            } else if (i > 0 && !s[i - 1].isLetterOrDigit()) i--
-            else while (i > 0 && s[i - 1].isLetterOrDigit() && !isCjk(s[i - 1])) i--
-        }
-        return s.length - i
+    override fun onBackspaceGesture(action: String) {
+        if (action == "clear") clearAll() else undo()
     }
 
     private fun isCjk(c: Char) = Character.UnicodeScript.of(c.code) == Character.UnicodeScript.HAN
 
-    override fun onPress(key: Key) = feedback(sound = key.fn)
-
-    private fun feedback(light: Boolean = false, sound: String? = null) {
-        if (prefs.vibrate) {
-            val vib = if (Build.VERSION.SDK_INT >= 31) (getSystemService(VIBRATOR_MANAGER_SERVICE) as VibratorManager).defaultVibrator
-            else @Suppress("DEPRECATION") getSystemService(VIBRATOR_SERVICE) as Vibrator
-            val ms = if (light) (prefs.vibrateMs / 2).coerceAtLeast(4) else prefs.vibrateMs
-            val amp = if (light) (prefs.vibrateStrength / 2).coerceAtLeast(1) else prefs.vibrateStrength
-            if (vib.hasAmplitudeControl()) vib.vibrate(VibrationEffect.createOneShot(ms.toLong(), amp.coerceIn(1, 255)))
-            else vib.vibrate(VibrationEffect.createOneShot(ms.toLong(), VibrationEffect.DEFAULT_AMPLITUDE))
-        }
-        if (prefs.sound && !light) {
+    override fun onPress(key: Key) {
+        haptics.play(when (key.fn) {
+            null -> HapticEvent.LETTER
+            "space" -> HapticEvent.SPACE
+            "backspace" -> HapticEvent.BACKSPACE
+            "enter" -> HapticEvent.ENTER
+            else -> HapticEvent.FUNCTION
+        })
+        if (prefs.sound) {
             val am = getSystemService(AUDIO_SERVICE) as AudioManager
-            val fx = when (sound) {
+            val fx = when (key.fn) {
                 "backspace" -> AudioManager.FX_KEYPRESS_DELETE
                 "space" -> AudioManager.FX_KEYPRESS_SPACEBAR
                 "enter" -> AudioManager.FX_KEYPRESS_RETURN
@@ -743,6 +1021,10 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
             }
             am.playSoundEffect(fx, prefs.soundVolume)
         }
+    }
+
+    override fun onFeedback(kind: String) {
+        haptics.play(if (kind == "popup") HapticEvent.POPUP else HapticEvent.GESTURE)
     }
 
     // ---- math ---------------------------------------------------------------------------
@@ -770,24 +1052,68 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
 
     // ---- candidate bar listener ---------------------------------------------------------
 
+    private fun panelForTool(id: String) = when (id) {
+        "cursor" -> Panel.CURSOR
+        "clipboard" -> Panel.CLIPBOARD
+        "quick" -> Panel.QUICK
+        else -> null
+    }
+
     override fun onTool(id: String) {
+        val target = panelForTool(id)
+        // a second tap on the same button closes its panel
+        if (target != null && panel == target) { showPanel(Panel.LETTERS); return }
+        if (id == "emoji" && panel == Panel.SYMBOLS && symCat == "kao") { showPanel(Panel.LETTERS); return }
         when (id) {
-            "settings" -> openSettings()
-            "cursor" -> showPanel(Panel.CURSOR)
-            "clipboard" -> showPanel(Panel.CLIPBOARD)
+            "cursor", "clipboard", "quick" -> showPanel(target!!)
             "emoji" -> { symCat = "kao"; showPanel(Panel.SYMBOLS); Toast.makeText(this, "emoji 面板在下一版，先放了颜文字", Toast.LENGTH_SHORT).show() }
             "ai", "translate" -> Toast.makeText(this, "AI 和翻译在阶段 2 接入", Toast.LENGTH_SHORT).show()
         }
     }
 
     override fun onCandidate(index: Int) {
+        if (index < 0) {
+            // an association: commit it and suggest what follows
+            val word = predictions.getOrNull(-1 - index) ?: return
+            commit(word, pairable = false)
+            history.push(EditHistory.Op.Insert(word))
+            predictions = predictor.suggest(currentInputConnection?.getTextBeforeCursor(8, 0)?.toString() ?: word)
+            syncBar()
+            return
+        }
         if (!RimeEngine.ready) return
+        trackSyllables()
         RimeBridge.selectCandidateGlobal(index)
         flushRime()
     }
 
+    override fun candidateOptions(index: Int): List<Output> {
+        val word = RimeBridge.candidates(index + 1).getOrNull(index) ?: return emptyList()
+        return listOf(Output("取消", "§cancel"), Output("删除「$word」的学习记录", "§forget"))
+    }
+
+    override fun onCandidateOption(index: Int, option: Output) {
+        if (option.text != "§forget") return
+        val ok = RimeBridge.deleteCandidate(index)
+        flushRime()
+        Toast.makeText(this, if (ok) "已删除，下次不会再把它排到前面" else "这个词没有学习记录", Toast.LENGTH_SHORT).show()
+    }
+
     override fun onExpand() {
         showPanel(if (panel == Panel.CANDIDATES) Panel.LETTERS else Panel.CANDIDATES)
+    }
+
+    override fun onClipChip(text: String) {
+        commit(text, pairable = false)
+        history.push(EditHistory.Op.Insert(text))
+        pendingClip = null
+        syncBar()
+    }
+
+    override fun onDismissSuggestions() {
+        predictions = emptyList()
+        pendingClip = null
+        syncBar()
     }
 
     override fun onMathTab(id: String) { mathTab = id; showPanel(Panel.MATH) }
@@ -799,8 +1125,38 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
     }
 }
 
+/** The keyboard's own undo stack: what it typed, deleted or cleared. */
+class EditHistory {
+    sealed class Op {
+        data class Insert(val text: String) : Op()
+        data class Delete(val text: String) : Op()
+        data class Clear(val text: String, val cursor: Int) : Op()
+    }
+
+    private val ops = ArrayDeque<Op>()
+    private var lastAt = 0L
+
+    fun push(op: Op) {
+        val now = SystemClock.uptimeMillis()
+        val prev = ops.lastOrNull()
+        // consecutive single deletions or insertions within a short pause undo together
+        if (now - lastAt < 1500 && prev != null) {
+            if (op is Op.Delete && prev is Op.Delete) { ops.removeLast(); ops.addLast(Op.Delete(op.text + prev.text)); lastAt = now; return }
+            if (op is Op.Insert && prev is Op.Insert && op.text.length <= 2 && !op.text.contains('\n')) {
+                ops.removeLast(); ops.addLast(Op.Insert(prev.text + op.text)); lastAt = now; return
+            }
+        }
+        ops.addLast(op)
+        while (ops.size > 50) ops.removeFirst()
+        lastAt = now
+    }
+
+    fun pop(): Op? = ops.removeLastOrNull().also { lastAt = 0 }
+    fun clear() = ops.clear()
+}
+
 /** Recent clipboard texts, newest first; pinned entries stay when the rest is cleared. */
-class ClipHistory(private val file: File) {
+class ClipHistory(private val file: File, private val keep: () -> Int) {
     data class Entry(val text: String, val pinned: Boolean)
 
     private val list = mutableListOf<Entry>()
@@ -818,8 +1174,7 @@ class ClipHistory(private val file: File) {
         val pinned = list.firstOrNull { it.text == text }?.pinned ?: false
         list.removeAll { it.text == text }
         list.add(0, Entry(text, pinned))
-        val unpinned = list.filter { !it.pinned }
-        if (unpinned.size > 40) list.remove(unpinned.last())
+        while (list.count { !it.pinned } > keep()) list.remove(list.last { !it.pinned })
         save()
     }
 
@@ -828,7 +1183,21 @@ class ClipHistory(private val file: File) {
         if (i >= 0) { list[i] = list[i].copy(pinned = !list[i].pinned); save() }
     }
 
+    fun remove(text: String) { list.removeAll { it.text == text }; save() }
     fun clearUnpinned() { list.removeAll { !it.pinned }; save() }
-
     fun entries(): List<Entry> = list.filter { it.pinned } + list.filter { !it.pinned }
+
+    companion object {
+        /** A short tag for what a clip looks like. */
+        fun kind(t: String): String {
+            val s = t.trim()
+            return when {
+                Regex("^(https?://|www\\.)\\S+$").matches(s) -> "链接"
+                Regex("^[\\w.+-]+@[\\w-]+\\.[\\w.]+$").matches(s) -> "邮箱"
+                Regex("^\\d{4,8}$").matches(s) -> "验证码"
+                Regex("^\\+?[\\d\\s()-]{7,18}$").matches(s) && s.count { it.isDigit() } >= 7 -> "号码"
+                else -> ""
+            }
+        }
+    }
 }

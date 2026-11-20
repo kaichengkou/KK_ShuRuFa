@@ -14,7 +14,17 @@ data class Output(val label: String, val text: String, val tex: String = text) {
     }
 }
 
-enum class KeyStyle { NORMAL, FUNC }
+/** NORMAL: solid (letters, digits). FUNC/SOFT: translucent (functions, symbols). ACTION: accent (enter). */
+enum class KeyStyle { NORMAL, FUNC, SOFT, ACTION }
+
+private fun defaultStyle(fn: String?) = when (fn) {
+    null, "space" -> KeyStyle.NORMAL
+    "enter" -> KeyStyle.ACTION
+    else -> KeyStyle.FUNC
+}
+
+/** A user edit of one key from the key editor: flick characters and long-press list. */
+data class KeyOverride(val up: String?, val down: String?, val left: String?, val right: String?, val long: List<String>?)
 
 class Key(
     val main: Output? = null,
@@ -23,10 +33,21 @@ class Key(
     val fn: String? = null,
     val label: String? = null,
     val width: Float = 1f,
-    val style: KeyStyle = if (fn != null && fn != "space") KeyStyle.FUNC else KeyStyle.NORMAL,
+    val style: KeyStyle = defaultStyle(fn),
     val spacer: Boolean = false,
 ) {
     val isLetter get() = main != null && main.text.length == 1 && main.text[0].isLetter()
+
+    fun copy(flicks: Map<Dir, Output> = this.flicks, long: List<Output> = this.long, style: KeyStyle = this.style) =
+        Key(main, flicks, long, fn, label, width, style, spacer)
+
+    fun withOverride(o: KeyOverride): Key {
+        val fl = flicks.toMutableMap()
+        listOf(Dir.UP to o.up, Dir.DOWN to o.down, Dir.LEFT to o.left, Dir.RIGHT to o.right).forEach { (d, v) ->
+            if (v != null) { if (v.isEmpty()) fl.remove(d) else fl[d] = Output.of(v) }
+        }
+        return copy(flicks = fl, long = o.long?.map { Output.of(it) } ?: long)
+    }
 }
 
 class KeyboardLayout(
@@ -45,7 +66,12 @@ class SymbolCategory(val id: String, val name: String, val items: List<Output>, 
  * Loads keyboard layouts from YAML. Each file in assets/layouts can be overridden by a file with
  * the same name in the app's external files folder (Android/data/com.kk.shurufa/files/layouts).
  */
-class LayoutRepo(private val context: Context?, private val source: ((String) -> String)? = null) {
+class LayoutRepo(
+    private val context: Context?,
+    private val source: ((String) -> String)? = null,
+    /** Per-layout key edits keyed by the key's main character. */
+    private val overrides: ((String) -> Map<String, KeyOverride>)? = null,
+) {
     val userDir: File get() = File(context!!.getExternalFilesDir(null), "layouts")
 
     private fun read(name: String): Any? {
@@ -70,7 +96,10 @@ class LayoutRepo(private val context: Context?, private val source: ((String) ->
     fun keyboard(id: String): KeyboardLayout {
         val m = read("$id.yaml") as Map<*, *>
         val extraLong = (m["long"] as? Map<*, *>)?.entries?.associate { (k, v) -> k.toString() to outputs(v) } ?: emptyMap()
-        val rows = (m["rows"] as List<*>).map { row -> (row as List<*>).map { parseKey(it, extraLong) } }
+        val ov = overrides?.invoke(id).orEmpty()
+        val rows = (m["rows"] as List<*>).map { row ->
+            (row as List<*>).map { parseKey(it, extraLong) }.map { k -> k.main?.text?.let { ov[it] }?.let { k.withOverride(it) } ?: k }
+        }
         return KeyboardLayout(id, m["label"]?.toString() ?: id, m["engine"]?.toString() ?: "direct", rows)
     }
 
@@ -78,8 +107,14 @@ class LayoutRepo(private val context: Context?, private val source: ((String) ->
         val m = read("math.yaml") as Map<*, *>
         val tabs = (m["tabs"] as List<*>).map { t ->
             t as Map<*, *>
-            MathTab(t["id"].toString(), t["name"].toString(),
-                (t["rows"] as List<*>).map { r -> (r as List<*>).map { parseMathKey(it) } })
+            val id = t["id"].toString()
+            MathTab(id, t["name"].toString(),
+                (t["rows"] as List<*>).map { r ->
+                    (r as List<*>).map { parseMathKey(it) }.map { k ->
+                        // on the number page digits are solid and everything else is soft
+                        if (id == "basic" && k.main?.text?.singleOrNull()?.isDigit() != true) k.copy(style = KeyStyle.SOFT) else k
+                    }
+                })
         }
         val bottom = (m["bottom"] as List<*>).map { parseKey(it, emptyMap()) }
         return MathLayout(tabs, bottom)
@@ -151,6 +186,7 @@ class LayoutRepo(private val context: Context?, private val source: ((String) ->
                 node.containsKey("fn") -> Key(
                     fn = node["fn"].toString(), label = node["label"]?.toString(), width = w,
                     long = outputs(node["long"]),
+                    style = styleOf(node["style"]) ?: defaultStyle(node["fn"].toString()),
                 )
                 else -> {
                     val main = node["key"].toString()
@@ -162,13 +198,21 @@ class LayoutRepo(private val context: Context?, private val source: ((String) ->
                         main = Output.of(main), flicks = fl,
                         long = outputs(node["long"]) + (extraLong[main] ?: emptyList()),
                         width = w, label = node["label"]?.toString(),
-                        style = if (node["style"] == "func") KeyStyle.FUNC else KeyStyle.NORMAL,
+                        style = styleOf(node["style"]) ?: KeyStyle.NORMAL,
                     )
                 }
             }
         }
         null -> Key(spacer = true)
         else -> parseKey(node.toString(), extraLong)
+    }
+
+    private fun styleOf(v: Any?) = when (v?.toString()) {
+        "func" -> KeyStyle.FUNC
+        "soft" -> KeyStyle.SOFT
+        "action" -> KeyStyle.ACTION
+        "normal" -> KeyStyle.NORMAL
+        else -> null
     }
 
     private fun mathOut(v: Any?): Output? {
