@@ -3,7 +3,7 @@ id: en
 label: English
 engine: direct
 rows:
-  - [q|1||¹|₁, w|2||²|₂, e|3||³|₃, r|4||⁴|₄, t|5||⁵|₅, y|6||⁶|₆, u|7||⁷|₇, i|8||⁸|₈, o|9||⁹|₉, p|0||⁰|₀]
+  - [q|1, w|2, e|3, r|4, t|5, y|6, u|7, i|8, o|9, p|0]
   - [{spacer: 0.5}, "a|@", "s|#", "d|$", "f|_", "g|&", "h|-", "j|+", "k|(", "l|)", {spacer: 0.5}]
   - [{fn: shift, w: 1.5}, "z|*", "x|\"", "c|'", "v|:", "b|;", "n|!", "m|?", {fn: backspace, w: 1.5}]
   - [{fn: symbols, label: "!#1", w: 1.5}, {fn: language}, {key: ",", up: "!", style: soft, long: [";", ":", "!", "?", "-", "'", "\""]}, {fn: space, w: 4.5}, {key: ".", up: "?", style: soft, long: ["…", "?", "!", "/", "@"]}, {fn: enter, w: 1.5}]

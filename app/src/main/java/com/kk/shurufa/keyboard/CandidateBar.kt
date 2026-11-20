@@ -41,6 +41,9 @@ class CandidateBar(context: Context, private val prefs: Prefs) : View(context) {
         fun onCandidateOption(index: Int, option: Output) {}
         /** The pinyin line was tapped at character [index] of the preedit. */
         fun onPreeditTap(index: Int) {}
+        /** In pinyin editing, the caret was moved to [pos] (a position in the typed letters). */
+        fun onEditCaret(pos: Int) {}
+        fun onEditDone() {}
         /** "press" when a candidate, chip or button is touched, "popup" when a menu opens. */
         fun onFeedback(kind: String) {}
     }
@@ -52,7 +55,18 @@ class CandidateBar(context: Context, private val prefs: Prefs) : View(context) {
     var activeTool: String? = null
         set(v) { field = v; invalidate() }
 
-    enum class Mode { TOOLBAR, CANDIDATES, PREDICTIONS, CLIP, MATH, MESSAGE }
+    enum class Mode { TOOLBAR, CANDIDATES, PREDICTIONS, CLIP, MATH, MESSAGE, EDIT }
+
+    /** When set, vertical drags on the toolbar resize the open panel (phase 0 start, 1 move, 2 end). */
+    var onVerticalDrag: ((phase: Int, rawY: Float, velocityY: Float) -> Unit)? = null
+
+    private var editInput = ""
+    private var editCaret = 0
+    private var editGaps: Set<Int> = emptySet()
+    private val editPos = mutableListOf<Float>()   // x of each caret position 0..len
+    private val tabPillX = Tween(0f)
+    private val tabPillW = Tween(0f)
+    private var lastTab = ""
     var mode = Mode.TOOLBAR
         private set
 
@@ -94,7 +108,7 @@ class CandidateBar(context: Context, private val prefs: Prefs) : View(context) {
     private val handler = Handler(Looper.getMainLooper())
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-        setMeasuredDimension(MeasureSpec.getSize(widthMeasureSpec), dp(46f).toInt())
+        setMeasuredDimension(MeasureSpec.getSize(widthMeasureSpec), dp(50f).toInt())
     }
 
     private fun switchTo(m: Mode) {
@@ -135,6 +149,12 @@ class CandidateBar(context: Context, private val prefs: Prefs) : View(context) {
 
     fun showMessage(text: String) { message = text; switchTo(Mode.MESSAGE) }
 
+    /** 拼音编辑: the typed letters, large, with a caret that can be dragged letter by letter. */
+    fun showEdit(input: String, caretPos: Int, gapsBefore: Set<Int>) {
+        editInput = input; editCaret = caretPos.coerceIn(0, input.length); editGaps = gapsBefore
+        switchTo(Mode.EDIT)
+    }
+
     override fun onDraw(c: Canvas) {
         c.drawColor(theme.background)
         hits.clear()
@@ -147,6 +167,7 @@ class CandidateBar(context: Context, private val prefs: Prefs) : View(context) {
             Mode.CANDIDATES, Mode.PREDICTIONS -> drawCandidates(c, a)
             Mode.CLIP -> drawClip(c, a)
             Mode.MATH -> drawMath(c, a)
+            Mode.EDIT -> drawEdit(c, a)
             Mode.MESSAGE -> {
                 tp.color = theme.hint; tp.alpha = (255 * a).toInt(); tp.textSize = sp(13f); tp.textAlign = Paint.Align.CENTER
                 text(c, message, width / 2f, height / 2f)
@@ -212,13 +233,14 @@ class CandidateBar(context: Context, private val prefs: Prefs) : View(context) {
         val top = if (composing || predictionLabel.isNotEmpty()) dp(15f) else dp(4f)
         tp.textAlign = Paint.Align.LEFT
         val size = sp(18f * prefs.candidateScale)
-        val noteSize = sp(10f)
+        val noteSize = sp(9f)
         candidates.forEachIndexed { i, s ->
             tp.textSize = size
             val note = notes.getOrNull(i).orEmpty()
             val tw = tp.measureText(s)
-            val nw = if (note.isNotEmpty()) run { tp.textSize = noteSize; tp.measureText(note) + dp(3f) } else 0f
-            val cw = tw + nw + dp(24f)
+            val nw = if (note.isNotEmpty()) run { tp.textSize = noteSize; tp.measureText(note) } else 0f
+            // the note sits above the word, so it adds no width unless it is longer than the word
+            val cw = max(tw, nw) + dp(24f)
             val rect = RectF(x, top, x + cw, height.toFloat() - dp(3f))
             candRects += RectF(rect).apply { offset(scrollX0, 0f) }
             if (rect.right > 0 && rect.left < width) {
@@ -226,13 +248,12 @@ class CandidateBar(context: Context, private val prefs: Prefs) : View(context) {
                 tp.textSize = size
                 tp.color = if (i == 0 && composing) theme.accent else theme.ink
                 tp.alpha = (255 * a).toInt()
-                text(c, s, x + dp(12f), rect.centerY())
+                text(c, s, x + dp(12f) + (cw - dp(24f) - tw) / 2, rect.centerY() + dp(3f))
                 if (note.isNotEmpty()) {
-                    // a small proofreading note or reading, raised like a superscript
                     tp.textSize = noteSize
                     tp.color = if (note.contains('→') || note.contains('⇄')) theme.accent else theme.hint
                     tp.alpha = (255 * a).toInt()
-                    c.drawText(note, x + dp(12f) + tw + dp(3f), rect.centerY() - dp(3f), tp)
+                    c.drawText(note, x + dp(12f) + (cw - dp(24f) - nw) / 2, rect.top + dp(8.5f), tp)
                 }
             }
             x += cw
@@ -341,11 +362,24 @@ class CandidateBar(context: Context, private val prefs: Prefs) : View(context) {
         var x = midL - tabScroll
         tp.textSize = sp(13.5f)
         tp.typeface = Typeface.SERIF
+        // the highlight slides from the previous tab to the current one
+        var px = 0f; var pw = 0f; var xx = x
+        for ((id, name) in mathTabs) {
+            val w = tp.measureText(name) + dp(13f)
+            if (id == mathTab) { px = xx + tabScroll; pw = w }
+            xx += w + dp(1f)
+        }
+        if (mathTab != lastTab) {
+            if (lastTab.isEmpty()) { tabPillX.set(px); tabPillW.set(pw) }
+            else { tabPillX.animateTo(px, dur(220)); tabPillW.animateTo(pw, dur(220)) }
+            lastTab = mathTab
+        }
+        if (tabPillX.running || tabPillW.running) postInvalidateOnAnimation()
+        pill(c, RectF(tabPillX.value - tabScroll, dp(8f), tabPillX.value - tabScroll + tabPillW.value, height - dp(8f)), theme.accentSoft)
         for ((id, name) in mathTabs) {
             val w = tp.measureText(name) + dp(13f)
             val r = RectF(x, dp(8f), x + w, height - dp(8f))
             val on = id == mathTab
-            if (on) pill(c, r, theme.accentSoft)
             tp.color = if (on) theme.accent else theme.inkSoft; tp.alpha = (255 * a).toInt()
             tp.isFakeBoldText = on
             text(c, name, r.centerX(), r.centerY())
@@ -359,8 +393,44 @@ class CandidateBar(context: Context, private val prefs: Prefs) : View(context) {
         tp.typeface = Typeface.DEFAULT
     }
 
+    private fun drawEdit(c: Canvas, a: Float) {
+        val doneW = dp(56f)
+        val size = sp(21f)
+        tp.textSize = size; tp.textAlign = Paint.Align.LEFT; tp.typeface = Typeface.MONOSPACE
+        editPos.clear()
+        var x = dp(16f)
+        val cy = height / 2f
+        val gap = dp(9f)
+        editPos += x
+        for ((i, ch) in editInput.withIndex()) {
+            if (i in editGaps && i > 0) { x += gap; editPos[editPos.size - 1] = x - gap / 2 }
+            tp.color = theme.ink; tp.alpha = (255 * a).toInt()
+            text(c, ch.toString(), x, cy)
+            x += tp.measureText(ch.toString())
+            editPos += x
+        }
+        // caret
+        val cx = editPos.getOrElse(editCaret) { x }
+        bg.color = theme.accent
+        c.drawRoundRect(cx - dp(1.2f), cy - size * 0.62f, cx + dp(1.2f), cy + size * 0.62f, dp(1f), dp(1f), bg)
+        tp.typeface = Typeface.DEFAULT
+        val r = RectF(width - doneW - dp(6f), dp(8f), width - dp(6f), height - dp(8f))
+        pill(c, r, theme.accent)
+        tp.color = theme.onAccent; tp.textSize = sp(13f); tp.textAlign = Paint.Align.CENTER
+        text(c, "完成", r.centerX(), r.centerY())
+        hits += r to { listener?.onEditDone() }
+    }
+
+    private fun editCaretAt(x: Float): Int {
+        var best = 0; var bd = Float.MAX_VALUE
+        editPos.forEachIndexed { i, px -> val d = abs(px - x); if (d < bd) { bd = d; best = i } }
+        return best
+    }
+
     // ---- touch ----
     private var downX = 0f
+    private var downY = 0f
+    private var vDrag = false
     private var lastX = 0f
     private var dragging = false
     private var draggingTabs = false
@@ -407,6 +477,12 @@ class CandidateBar(context: Context, private val prefs: Prefs) : View(context) {
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 scroller.forceFinished(true)
+                downY = e.y; vDrag = false
+                if (mode == Mode.EDIT && e.x < width - dp(62f)) {
+                    editCaret = editCaretAt(e.x); listener?.onEditCaret(editCaret); invalidate()
+                    vt?.recycle(); vt = null
+                    return true
+                }
                 downX = e.x; lastX = e.x; dragging = false; draggingTabs = false; menuOpen = false
                 rawScroll = scrollX0
                 pressedCand = if (list && e.x < width - dp(44f) && !preeditRect.contains(e.x, e.y))
@@ -417,6 +493,16 @@ class CandidateBar(context: Context, private val prefs: Prefs) : View(context) {
                 invalidate()
             }
             MotionEvent.ACTION_MOVE -> {
+                if (mode == Mode.EDIT && e.x < width - dp(62f)) {
+                    val p = editCaretAt(e.x)
+                    if (p != editCaret) { editCaret = p; listener?.onEditCaret(p); invalidate() }
+                    return true
+                }
+                if (onVerticalDrag != null && mode == Mode.TOOLBAR && !vDrag && abs(e.y - downY) > slop && abs(e.y - downY) > abs(e.x - downX)) {
+                    vDrag = true; pressedTool = null
+                    onVerticalDrag?.invoke(0, e.rawY, 0f)
+                }
+                if (vDrag) { onVerticalDrag?.invoke(1, e.rawY, 0f); return true }
                 if (menuOpen) {
                     val (ox, oy) = overlayOffset()
                     overlay?.moveSelection(e.x + ox, e.y + oy)
@@ -443,6 +529,13 @@ class CandidateBar(context: Context, private val prefs: Prefs) : View(context) {
             }
             MotionEvent.ACTION_UP -> {
                 handler.removeCallbacks(longRunnable)
+                if (mode == Mode.EDIT && e.x < width - dp(62f)) return true
+                if (vDrag) {
+                    vt?.computeCurrentVelocity(1000)
+                    onVerticalDrag?.invoke(2, e.rawY, vt?.yVelocity ?: 0f)
+                    vDrag = false; vt?.recycle(); vt = null; invalidate()
+                    return true
+                }
                 when {
                     menuOpen -> {
                         overlay?.selected()?.let { listener?.onCandidateOption(pressedCand, it) }

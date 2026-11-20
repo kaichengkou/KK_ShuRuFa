@@ -1,10 +1,10 @@
-# 数字键盘 · 简易模式（!#1）。左边一列是可滚动的运算符和标点（由程序按语言填充）。
-# 标准 / 学术 两种模式在候选栏左侧切换；“符号”打开分类符号面板。
+# 数字键盘 · 标准模式。最下面一行由程序生成，和字母键盘底行同样位置：
+# ABC（回到字母，和 !#1 同一个位置）· 符号 · 逗号 · 空格 · 句号 · 回车
 id: num
 label: 数字
 engine: direct
 rows:
-  - ["1", "2", "3", {fn: backspace}]
-  - ["4", "5", "6", {fn: space, label: 空格}]
-  - ["7", "8", "9", {fn: enter}]
-  - [{fn: abc, label: ABC}, "0|%", {key: ".", style: soft, up: ",", down: ":", left: "-", right: "/"}, {fn: more_symbols, label: 符号}]
+  - [{key: "+", style: soft, w: 0.9}, {key: "1", w: 1.2}, {key: "2", w: 1.2}, {key: "3", w: 1.2}, {fn: backspace, w: 1.1}]
+  - [{key: "−", style: soft, w: 0.9}, {key: "4", w: 1.2}, {key: "5", w: 1.2}, {key: "6", w: 1.2}, {key: "=", style: soft, w: 1.1}]
+  - [{key: "×", style: soft, w: 0.9}, {key: "7", w: 1.2}, {key: "8", w: 1.2}, {key: "9", w: 1.2}, {key: ".", style: soft, w: 1.1, up: ",", down: ":", left: "-", right: "/"}]
+  - [{key: "÷", style: soft, w: 0.9}, {key: "(", style: soft, w: 1.2}, {key: "0", w: 1.2}, {key: ")", style: soft, w: 1.2}, {key: "%", style: soft, w: 1.1, up: "‰"}]

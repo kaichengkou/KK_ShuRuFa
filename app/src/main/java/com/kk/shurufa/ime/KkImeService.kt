@@ -16,6 +16,8 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.WindowInsets
 import android.view.WindowInsetsController
+import android.view.Gravity
+import android.animation.ValueAnimator
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.ExtractedTextRequest
 import android.view.inputmethod.InputMethodManager
@@ -24,9 +26,10 @@ import android.widget.LinearLayout
 import android.widget.Toast
 import com.kk.shurufa.Prefs
 import com.kk.shurufa.keyboard.CandidateBar
-import com.kk.shurufa.keyboard.CardStackView
+import com.kk.shurufa.keyboard.ClipStrip
 import com.kk.shurufa.keyboard.Dir
-import com.kk.shurufa.keyboard.DpadView
+import com.kk.shurufa.keyboard.EditPanel
+import com.kk.shurufa.keyboard.FamilyRows
 import com.kk.shurufa.keyboard.GridPanel
 import com.kk.shurufa.keyboard.KbTheme
 import com.kk.shurufa.keyboard.Key
@@ -70,15 +73,10 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
     private lateinit var symRail: GridPanel
     private lateinit var symCells: GridPanel
     private lateinit var symBottom: KeyboardView
-    private lateinit var numPanel: LinearLayout
-    private lateinit var numStrip: GridPanel
-    private lateinit var numKeys: KeyboardView
-    private lateinit var cursorPanel: LinearLayout
-    private lateinit var dpad: DpadView
-    private lateinit var cursorKeys: KeyboardView
+    private lateinit var editPanel: EditPanel
     private lateinit var clipPanel: LinearLayout
-    private lateinit var clipStack: CardStackView
-    private lateinit var clipHeader: KeyboardView
+    private lateinit var clipStrip: ClipStrip
+    private lateinit var clipFavs: GridPanel
     private lateinit var quickPanel: QuickPanel
 
     enum class Panel { LETTERS, NUM, SYMBOLS, MATH, PHONE, CURSOR, CLIPBOARD, CANDIDATES, QUICK, EMOJI }
@@ -97,10 +95,9 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
     private var symbols: List<SymbolCategory> = emptyList()
     private var commonZh: List<Output> = emptyList()
     private var commonLatin: List<Output> = emptyList()
-    private var symCat = "common"
+    private var symCat = ""
     private var symLock = false
     private var symItems: List<Output> = emptyList()
-    private var numItems: List<String> = emptyList()
     private var recentSymbols = mutableListOf<String>()
 
     private var selStart = 0
@@ -108,13 +105,16 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
     private var selectMode = false
 
     private lateinit var clips: ClipHistory
-    private var clipItems: List<ClipHistory.Entry> = emptyList()
+    private var clipRecent: List<ClipHistory.Entry> = emptyList()
+    private var clipFavItems: List<ClipHistory.Entry> = emptyList()
+    private var heightAnim: ValueAnimator? = null
+    /** 拼音编辑: the bar shows the typed letters large, with a caret that can be placed precisely. */
+    private var pinyinEdit = false
     private var pendingClip: String? = null
     private var pendingClipAt = 0L
 
     private var predictions: List<String> = emptyList()
     private var predictionLabel = ""
-    private var clipTab = "recent"
     /** 临时拉高: the clipboard and the candidate grid can take more of the screen. */
     private var tall = false
     // 退格回退: the last word that came from Rime, with the pinyin that produced it
@@ -194,6 +194,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
         "sym_recent", Prefs.ZH_TRAD, Prefs.ZH_EMOJI, Prefs.ZH_PREDICT, Prefs.PINYIN_MODE, Prefs.MATH_FORMAT,
         Prefs.VIBRATE, Prefs.SOUND, Prefs.CLIP_KEEP, Prefs.CLIP_SUGGEST, Prefs.ZH_CORRECTION, Prefs.STRESS_MODE,
         Prefs.BACKSPACE_RESELECT, Prefs.NUM_MODE, Prefs.TYPO_MARK, Prefs.RARE_ANNOTATE, Prefs.PACK_POETRY, Prefs.SYMBOL_MEMORY,
+        Prefs.CLIP_MAX_CHARS, Prefs.CLIP_FRICTION,
     )
 
     override fun onSharedPreferenceChanged(sp: SharedPreferences?, key: String?) {
@@ -205,6 +206,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
             Prefs.PACK_POETRY -> { if (prefs.packPoetry) predictor.loadPoetry() else predictor.dropPoetry(); RimeEngine.redeploy(this) }
             Prefs.MATH_FORMAT -> if (::bar.isInitialized) syncBar()
             Prefs.STRESS_MODE -> if (::keyboard.isInitialized && panel == Panel.LETTERS) keyboard.setRows(lettersRows())
+            Prefs.CLIP_FRICTION, Prefs.CLIP_MAX_CHARS -> if (::clipFavs.isInitialized) { clipFavs.friction = prefs.clipFriction; refreshClips(keep = true) }
         }
         if (key in liveKeys) { if (panel == Panel.QUICK && ::quickPanel.isInitialized) refreshQuick(); return }
         layouts.clear(); math = null
@@ -226,12 +228,16 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
         val column = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         overlay = PopupOverlay(this, prefs).also { it.theme = theme; it.onTick = { haptics.play(HapticEvent.OPTION) } }
         bar = CandidateBar(this, prefs).also { it.theme = theme; it.listener = this; it.overlay = overlay }
+        // 按住工具栏拖动: with a resizable panel open, the toolbar works as its grab bar too
+        bar.onVerticalDrag = { phase, rawY, v ->
+            val h = when (panel) { Panel.CLIPBOARD -> clipHandle; else -> null }
+            if (h != null) when (phase) { 0 -> h.begin(rawY); 1 -> h.drag(rawY); else -> h.end(v) }
+        }
         content = FrameLayout(this)
         keyboard = newKeyboard()
         buildCandidatePanel()
         buildSymbolPanel()
-        buildNumPanel()
-        buildCursorPanel()
+        buildEditPanel()
         buildClipPanel()
         buildEmojiPanel()
         quickPanel = QuickPanel(this, prefs).also { it.theme = theme; it.onTile = { id -> onQuickTile(id) }; it.onPress = { haptics.play(HapticEvent.LETTER) } }
@@ -327,6 +333,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
         super.onUpdateSelection(oldSelStart, oldSelEnd, newSelStart, newSelEnd, candidatesStart, candidatesEnd)
         selStart = newSelStart
         selEnd = newSelEnd
+        if (::editPanel.isInitialized && panel == Panel.CURSOR) syncEditPanel()
     }
 
     private fun onRimeState(s: RimeEngine.State) {
@@ -356,6 +363,14 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
                 }
             }
         }
+        if (prefs.topRowScripts && base.isNotEmpty()) {
+            // 第一排左右滑: superscript and subscript digits
+            val sup = "¹²³⁴⁵⁶⁷⁸⁹⁰"; val sub = "₁₂₃₄₅₆₇₈₉₀"
+            base = listOf(base[0].mapIndexed { i, k ->
+                if (i < 10 && k.main != null) k.copy(flicks = k.flicks + mapOf(Dir.LEFT to Output.of(sup[i].toString()), Dir.RIGHT to Output.of(sub[i].toString())))
+                else k
+            }) + base.drop(1)
+        }
         if (!prefs.numberRow || base.isEmpty()) return base
         val digits = (1..10).map { Key(main = Output.of((it % 10).toString())) }
         return listOf(digits) + base
@@ -374,40 +389,58 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
         else -> null
     }
 
+    private val barH get() = dp(50f).toInt()
+    private val baseH get() = kbHeight(lettersRows().size.coerceAtLeast(4))
+    /** 数字/学术/符号 share one height, a little taller than the letters, so they switch in place. */
+    private val familyH get() = (kbHeight(4) * 1.14f).toInt()
+    private fun inFamily(p: Panel) = p == Panel.NUM || p == Panel.MATH || p == Panel.SYMBOLS
+
     private fun showPanel(p: Panel) {
         val from = panel
         panel = p
+        if (p != Panel.LETTERS && p != Panel.CANDIDATES) pinyinEdit = false
+        val oldTotal = (if (bar.visibility == View.VISIBLE) bar.height else 0) + content.height
         content.removeAllViews()
-        val lp = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-        val base = kbHeight(lettersRows().size.coerceAtLeast(4))
-        val barH = dp(46f).toInt()
+        heightAnim?.cancel()
+        val base = baseH
         val tallH = maxOf(base + dp(40f).toInt(), (resources.displayMetrics.heightPixels * 0.56f).toInt() - barH)
         val canTall = p == Panel.CLIPBOARD || p == Panel.CANDIDATES
         if (from == Panel.SYMBOLS && p != Panel.SYMBOLS) lastSymbolsAt = SystemClock.uptimeMillis()
         listOf(clipHandle, candHandle).forEach { it.low = base; it.high = tallH; it.current = if (tall) tallH else base }
-        // the symbol panel hides the toolbar and uses its height for symbols
-        val noBar = p == Panel.SYMBOLS
+        // the symbol and edit panels hide the toolbar and use its height themselves
+        val noBar = p == Panel.SYMBOLS || p == Panel.CURSOR
         bar.visibility = if (noBar) View.GONE else View.VISIBLE
-        val fixed = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
-            when { noBar -> base + barH; canTall && tall -> tallH; else -> base })
+        val h = when {
+            p == Panel.SYMBOLS -> familyH + barH
+            inFamily(p) -> familyH
+            noBar -> base + barH
+            canTall && tall -> tallH
+            p == Panel.LETTERS || p == Panel.PHONE -> -1
+            else -> base
+        }
+        // children sit at the bottom: while the area grows or shrinks, the top edge moves
+        val fixed = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, if (h < 0) ViewGroup.LayoutParams.WRAP_CONTENT else h, Gravity.BOTTOM)
+        keyboard.translationX = 0f
         when (p) {
-            Panel.LETTERS -> { keyboard.setRows(lettersRows()); content.addView(keyboard, lp) }
-            Panel.PHONE -> { keyboard.setRows(layout("phone").rows); content.addView(keyboard, lp) }
+            Panel.LETTERS -> { keyboard.setRows(lettersRows()); content.addView(keyboard, fixed) }
+            Panel.PHONE -> { keyboard.setRows(layout("phone").rows); content.addView(keyboard, fixed) }
             Panel.MATH -> {
                 val m = math
                 if (m == null) { showPanel(Panel.LETTERS); return }
                 val tab = m.tabs.firstOrNull { it.id == mathTab } ?: m.tabs.first()
-                keyboard.setRows(tab.rows + listOf(m.bottom), math = true)
-                content.addView(keyboard, lp)
+                keyboard.setRows(tab.rows + listOf(FamilyRows.academic()), math = true)
+                content.addView(keyboard, fixed)
             }
-            Panel.NUM -> { refreshNum(); content.addView(numPanel, fixed); if (from != p) animateIn(numPanel) }
-            Panel.CURSOR -> { dpad.selecting = selectMode; content.addView(cursorPanel, fixed); if (from != p) animateIn(cursorPanel) }
-            Panel.SYMBOLS -> { refreshSymbols(); content.addView(symbolPanel, fixed); if (from != p) animateIn(symbolPanel) }
+            Panel.NUM -> { keyboard.setRows(layout("num").rows + listOf(FamilyRows.number(isZh))); content.addView(keyboard, fixed) }
+            Panel.CURSOR -> { syncEditPanel(); content.addView(editPanel, fixed); if (from != p) animateIn(editPanel) }
+            Panel.SYMBOLS -> { refreshSymbols(); content.addView(symbolPanel, fixed); if (from != p && !inFamily(from)) animateIn(symbolPanel) }
             Panel.CLIPBOARD -> { refreshClips(); content.addView(clipPanel, fixed); if (from != p) animateIn(clipPanel) }
             Panel.QUICK -> { refreshQuick(); content.addView(quickPanel, fixed); quickPanel.animateIn() }
             Panel.EMOJI -> { refreshEmoji(); content.addView(emojiPanel, fixed); if (from != p) animateIn(emojiPanel) }
             Panel.CANDIDATES -> {
-                candGrid.setItems(RimeBridge.candidates(300).toList())
+                val cands = RimeBridge.candidates(300).toList()
+                candGrid.notes = annotations(cands)
+                candGrid.setItems(cands)
                 content.addView(candPanel, fixed)
                 animateIn(candPanel)
             }
@@ -415,6 +448,27 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
         bar.expanded = p == Panel.CANDIDATES
         bar.activeTool = toolFor(p)
         syncBar()
+        animateHeight(oldTotal, if (noBar) 0 else barH)
+    }
+
+    /** Eases the keyboard's height from what it was to what the new panel needs. */
+    private fun animateHeight(oldTotal: Int, newBar: Int) {
+        if (!prefs.animations || oldTotal <= 0) return
+        content.measure(View.MeasureSpec.makeMeasureSpec(root.width.coerceAtLeast(1), View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
+        val target = content.measuredHeight
+        val start = oldTotal - newBar
+        if (start <= 0 || abs(start - target) < dp(2f)) return
+        heightAnim = ValueAnimator.ofInt(start, target).apply {
+            duration = (230 * prefs.animSpeed).toLong()
+            interpolator = android.view.animation.PathInterpolator(0.2f, 0f, 0f, 1f)
+            addUpdateListener { content.layoutParams = content.layoutParams.apply { height = it.animatedValue as Int }; content.requestLayout() }
+            addListener(object : android.animation.AnimatorListenerAdapter() {
+                override fun onAnimationEnd(a: android.animation.Animator) {
+                    content.layoutParams = content.layoutParams.apply { height = ViewGroup.LayoutParams.WRAP_CONTENT }; content.requestLayout()
+                }
+            })
+            start()
+        }
     }
 
     private fun animateIn(v: View) {
@@ -433,6 +487,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
             isZh && RimeEngine.state == RimeEngine.State.DEPLOYING && panel == Panel.LETTERS -> bar.showMessage("正在部署雾凇拼音词库，首次约需一分钟…")
             isZh && RimeEngine.state == RimeEngine.State.PREPARING && panel == Panel.LETTERS -> bar.showMessage("正在准备中文词库…")
             isZh && RimeEngine.state == RimeEngine.State.FAILED -> bar.showMessage("中文引擎启动失败：${RimeEngine.error ?: "未知错误"}")
+            composing && pinyinEdit -> bar.showEdit(RimeBridge.input(), RimeBridge.caretPos(), syllableGaps())
             composing -> {
                 trackSyllables()
                 val cands = RimeBridge.candidates(80).toList()
@@ -451,7 +506,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
     private fun buildCandidatePanel() {
         candPanel = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         candGrid = GridPanel(this, prefs).apply {
-            theme = this@KkImeService.theme; cellStyle = GridPanel.CellStyle.FLAT; columns = 4; rowHeightDp = 50f; textSp = 19f
+            theme = this@KkImeService.theme; cellStyle = GridPanel.CellStyle.FLAT; columns = 8; rowHeightDp = 50f; textSp = 19f
             highlightFirst = true; overlay = this@KkImeService.overlay
             onItem = { i -> onCandidate(i) }
             onFeedback = { k -> haptics.play(if (k == "popup") HapticEvent.POPUP else HapticEvent.LETTER) }
@@ -490,53 +545,22 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
         symbolPanel = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val top = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         symRail = GridPanel(this, prefs).apply {
-            theme = this@KkImeService.theme; columns = 1; rowHeightDp = 38f; textSp = 14f; cellStyle = GridPanel.CellStyle.RAIL
-            onItem = { i -> symCat = symbols[i].id; refreshSymbols(); bar.activeTool = toolFor(panel) }
+            theme = this@KkImeService.theme; columns = 1; rowHeightDp = 36f; textSp = 13.5f; cellStyle = GridPanel.CellStyle.RAIL
+            onItem = { i -> symCat = symCatIds().getOrElse(i) { "common" }; refreshSymbols() }
             onFeedback = { haptics.play(HapticEvent.FUNCTION) }
         }
         symCells = GridPanel(this, prefs).apply {
-            theme = this@KkImeService.theme; cellStyle = GridPanel.CellStyle.SOFT
+            theme = this@KkImeService.theme; cellStyle = GridPanel.CellStyle.SOFT; rowHeightDp = 42f
+            emptyText = "用过的符号会出现在这里"
             onItem = { i -> symItems.getOrNull(i)?.let { onSymbol(it) } }
             onFeedback = { haptics.play(HapticEvent.LETTER) }
         }
-        top.addView(symRail, LinearLayout.LayoutParams(dp(76f).toInt(), ViewGroup.LayoutParams.MATCH_PARENT))
+        top.addView(symRail, LinearLayout.LayoutParams(dp(60f).toInt(), ViewGroup.LayoutParams.MATCH_PARENT))
         top.addView(symCells, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
         symBottom = newKeyboard()
-        symBottom.setRows(listOf(listOf(
-            Key(fn = "abc", label = "返回", width = 1.4f), Key(fn = "num", label = "123", width = 1.2f), Key(fn = "math", label = "数学", width = 1.2f),
-            Key(fn = "lock"), Key(fn = "space", width = 2.6f), Key(fn = "backspace", width = 1.2f), Key(fn = "enter", width = 1.2f),
-        )))
+        symBottom.setRows(listOf(FamilyRows.symbols()))
         symbolPanel.addView(top, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         symbolPanel.addView(symBottom, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-    }
-
-    private fun buildNumPanel() {
-        numPanel = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        numStrip = GridPanel(this, prefs).apply {
-            theme = this@KkImeService.theme; columns = 1; rowHeightDp = 44f; textSp = 19f; cellStyle = GridPanel.CellStyle.SOFT
-            onItem = { i -> numItems.getOrNull(i)?.let { onNumStrip(it) } }
-            onFeedback = { haptics.play(HapticEvent.LETTER) }
-        }
-        numKeys = newKeyboard()
-        numPanel.addView(numStrip, LinearLayout.LayoutParams(dp(66f).toInt(), ViewGroup.LayoutParams.MATCH_PARENT))
-        numPanel.addView(numKeys, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
-    }
-
-    private fun refreshNum() {
-        val zh = isZh
-        // operators first (the simple calculator), then the punctuation of the current language
-        numItems = ("+ − × ÷ = ( ) % " + if (zh) "， 。 ？ ！ 、 ： ； @ # ~ ￥ …… “ ”"
-        else ", . ? ! : ; @ # ~ ₽ € $ \" '").split(' ')
-        numStrip.setItems(numItems)
-        numKeys.setRows(layout("num").rows)
-    }
-
-    private fun onNumStrip(sym: String) {
-        commitComposingFirst()
-        if (sym == "=") { commit("=", pairable = false); showCalcResult(); return }
-        commit(sym)
-        recordSymbol(sym)
-        bar.showResult(null)
     }
 
     /** 简易/科学: !#1 and number fields open the number keyboard in the mode used last. */
@@ -549,34 +573,64 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
         Calc.eval(line.substringAfterLast('='))?.let { bar.showResult(Calc.format(it)) }
     }
 
-    private fun buildCursorPanel() {
-        cursorPanel = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        dpad = DpadView(this, prefs).apply {
+    private fun buildEditPanel() {
+        editPanel = EditPanel(this, prefs).apply {
             theme = this@KkImeService.theme
-            onArrow = { d ->
-                haptics.play(HapticEvent.CURSOR)
-                sendKey(when (d) { Dir.UP -> KeyEvent.KEYCODE_DPAD_UP; Dir.DOWN -> KeyEvent.KEYCODE_DPAD_DOWN; Dir.LEFT -> KeyEvent.KEYCODE_DPAD_LEFT; Dir.RIGHT -> KeyEvent.KEYCODE_DPAD_RIGHT }, shiftMeta())
-            }
-            onCenter = { selectMode = !selectMode; selecting = selectMode; haptics.play(HapticEvent.FUNCTION) }
+            labels = prefs.cursorLabels
+            onFeedback = { k -> haptics.play(when (k) { "repeat" -> HapticEvent.REPEAT; "touch" -> HapticEvent.FUNCTION; else -> HapticEvent.CURSOR }) }
+            onAction = { id -> onEditAction(id) }
         }
-        cursorKeys = newKeyboard().apply { iconLabels = prefs.cursorLabels; setRows(layout("cursor").rows) }
-        cursorPanel.addView(dpad, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
-        cursorPanel.addView(cursorKeys, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1.1f))
     }
+
+    private fun syncEditPanel() {
+        editPanel.selecting = selectMode
+        editPanel.hasSelection = selStart != selEnd
+    }
+
+    private fun onEditAction(id: String) {
+        val ic = currentInputConnection
+        when (id) {
+            "back" -> { selectMode = false; showPanel(Panel.LETTERS); return }
+            "select" -> {
+                selectMode = !selectMode
+                // leaving selection mode drops the selection back to a caret at its end
+                if (!selectMode && selStart != selEnd) ic?.setSelection(selEnd, selEnd)
+            }
+            "up" -> sendKey(KeyEvent.KEYCODE_DPAD_UP, shiftMeta())
+            "down" -> sendKey(KeyEvent.KEYCODE_DPAD_DOWN, shiftMeta())
+            "left" -> sendKey(KeyEvent.KEYCODE_DPAD_LEFT, shiftMeta())
+            "right" -> sendKey(KeyEvent.KEYCODE_DPAD_RIGHT, shiftMeta())
+            "home" -> sendKey(KeyEvent.KEYCODE_MOVE_HOME, shiftMeta())
+            "end" -> sendKey(KeyEvent.KEYCODE_MOVE_END, shiftMeta())
+            "select_all" -> { ic?.performContextMenuAction(android.R.id.selectAll); selectMode = true }
+            "backspace" -> { haptics.play(HapticEvent.REPEAT); deleteBackward() }
+            "copy" -> { ic?.performContextMenuAction(android.R.id.copy); selectMode = false; ic?.setSelection(selEnd, selEnd) }
+            "cut" -> { ic?.performContextMenuAction(android.R.id.cut); selectMode = false }
+            "paste" -> { ic?.performContextMenuAction(android.R.id.paste); selectMode = false }
+        }
+        syncEditPanel()
+    }
+
+    private fun symCatIds() = listOf("recent") + symbols.map { it.id }
 
     private fun refreshSymbols() {
         if (symbols.isEmpty()) return
-        val idx = symbols.indexOfFirst { it.id == symCat }.coerceAtLeast(0)
-        val cat = symbols[idx]
-        symItems = if (cat.id == "common") {
-            val base = if (isZh) commonZh else commonLatin
-            (recentSymbols.map { Output.of(it) } + base).distinctBy { it.text }
-        } else cat.items
+        if (symCat.isEmpty()) symCat = if (recentSymbols.isNotEmpty()) "recent" else "common"
+        val ids = symCatIds()
+        val idx = ids.indexOf(symCat).coerceAtLeast(0)
+        val cat = symbols.getOrNull(idx - 1)
+        // 最近 holds only what was actually typed; 常用 is the fixed default set
+        symItems = when {
+            idx == 0 -> recentSymbols.map { Output.of(it) }
+            cat?.id == "common" -> if (isZh) commonZh else commonLatin
+            else -> cat?.items.orEmpty()
+        }
+        val wide = cat?.wide == true
         symRail.selectedIndex = idx
-        symRail.setItems(symbols.map { it.name }, resetScroll = false)
-        symCells.columns = if (cat.wide) 2 else 5
-        symCells.textSp = if (cat.wide) 15f else 19f
-        symCells.marks = if (cat.id == "common") recentSymbols.indices.toSet() else emptySet()
+        symRail.setItems(listOf("最近") + symbols.map { it.name }, resetScroll = false)
+        symCells.columns = if (wide) 3 else 6
+        symCells.textSp = if (wide) 14f else 18.5f
+        symCells.marks = emptySet()
         symCells.setItems(symItems.map { it.label })
         symBottom.lockOn = symLock
         symBottom.invalidate()
@@ -585,7 +639,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
     private fun recordSymbol(text: String) {
         recentSymbols.remove(text)
         recentSymbols.add(0, text)
-        while (recentSymbols.size > 12) recentSymbols.removeAt(recentSymbols.size - 1)
+        while (recentSymbols.size > 30) recentSymbols.removeAt(recentSymbols.size - 1)
         prefs.sp.edit().putString("sym_recent", recentSymbols.joinToString("\u0001")).apply()
     }
 
@@ -597,56 +651,69 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
         if (!symLock && prefs.symbolAutoReturn) showPanel(Panel.LETTERS)
     }
 
+    /**
+     * 剪贴板: 最近 on top as a sideways strip, 收藏 below as a vertical list. A tap pastes; everything
+     * else is in the long-press menu. The grab bar (or the toolbar above it) drags the panel taller.
+     */
     private fun buildClipPanel() {
         clipPanel = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        clipHeader = newKeyboard().apply { heightScale = 0.78f }
-        clipStack = CardStackView(this, prefs).apply {
-            theme = this@KkImeService.theme
-            onFeedback = { k -> haptics.play(when (k) { "popup" -> HapticEvent.POPUP; "tick" -> HapticEvent.OPTION; else -> HapticEvent.LETTER }) }
-            onTap = { i ->
-                clipShown().getOrNull(i)?.let { commit(it.text, pairable = false); history.push(EditHistory.Op.Insert(it.text)) }
-            }
-            onLong = { i ->
-                clipShown().getOrNull(i)?.let {
-                    clips.togglePin(it.text)
-                    Toast.makeText(this@KkImeService, if (it.pinned) "已从收藏移除" else "已收藏", Toast.LENGTH_SHORT).show()
-                }
-                refreshClips(keep = true)
-            }
-            onDismiss = { i ->
-                clipShown().getOrNull(i)?.let { e ->
-                    // in 收藏, swiping up only takes the card out of the favorites
-                    if (clipTab == "fav") clips.togglePin(e.text) else clips.remove(e.text)
-                }
-                haptics.play(HapticEvent.GESTURE)
-                refreshClips(keep = true)
-            }
+        val fb: (String) -> Unit = { k -> haptics.play(when (k) { "popup" -> HapticEvent.POPUP; "tick" -> HapticEvent.OPTION; else -> HapticEvent.LETTER }) }
+        clipStrip = ClipStrip(this, prefs).apply {
+            theme = this@KkImeService.theme; overlay = this@KkImeService.overlay
+            emptyText = "复制过的文字会出现在这里"
+            onFeedback = fb
+            onTap = { i -> clipRecent.getOrNull(i)?.let { pasteClip(it.text) } }
+            longOptions = { i -> clipRecent.getOrNull(i)?.let { e ->
+                listOf(Output("取消", "§cancel"), Output(if (e.pinned) "取消收藏" else "收藏", "§pin"), Output("删除", "§del"), Output("清空最近", "§clear"))
+            }.orEmpty() }
+            onLongOption = { i, o -> clipRecent.getOrNull(i)?.let { onClipOption(it, o.text) } }
         }
-        val bottom = newKeyboard()
-        bottom.setRows(listOf(listOf(
-            Key(fn = "abc", label = "返回", width = 1.4f), Key(fn = "space", width = 3f),
-            Key(fn = "backspace", width = 1.2f), Key(fn = "enter", width = 1.2f),
-        )))
+        clipFavs = GridPanel(this, prefs).apply {
+            theme = this@KkImeService.theme; overlay = this@KkImeService.overlay
+            cellStyle = GridPanel.CellStyle.CARD; columns = 2; rowHeightDp = 66f; textSp = 13.5f
+            friction = prefs.clipFriction
+            emptyText = "长按「最近」里的一条，把它收藏到这里"
+            onFeedback = fb
+            onItem = { i -> clipFavItems.getOrNull(i)?.let { pasteClip(it.text) } }
+            longOptions = { i -> if (i in clipFavItems.indices) listOf(Output("取消", "§cancel"), Output("取消收藏", "§pin"), Output("移到最前", "§top"), Output("删除", "§del")) else emptyList() }
+            onLongOption = { i, o -> clipFavItems.getOrNull(i)?.let { onClipOption(it, o.text) } }
+        }
         clipHandle = newHandle()
         clipPanel.addView(clipHandle, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-        clipPanel.addView(clipHeader, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-        clipPanel.addView(clipStack, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
-        clipPanel.addView(bottom, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        clipPanel.addView(clipStrip, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(118f).toInt()))
+        clipPanel.addView(clipFavs, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
     }
 
-    private fun clipShown(): List<ClipHistory.Entry> = if (clipTab == "fav") clips.favorites() else clips.entries()
+    private fun pasteClip(text: String) {
+        commitComposingFirst()
+        commit(text, pairable = false)
+        history.push(EditHistory.Op.Insert(text))
+    }
+
+    private fun onClipOption(e: ClipHistory.Entry, op: String) {
+        when (op) {
+            "§pin" -> clips.togglePin(e.text)
+            "§del" -> clips.remove(e.text)
+            "§clear" -> clips.clearUnpinned()
+            "§top" -> clips.moveToFront(e.text)
+            else -> return
+        }
+        haptics.play(HapticEvent.GESTURE)
+        refreshClips(keep = op != "§clear")
+    }
+
+    private fun clipShort(t: String): String {
+        val s = t.replace(Regex("\\s+"), " ").trim()
+        return if (s.length > prefs.clipMaxChars) s.take(prefs.clipMaxChars) + "…" else s
+    }
 
     private fun refreshClips(keep: Boolean = false) {
-        clipItems = clipShown()
-        val recentN = clips.entries().size
-        val favN = clips.favorites().size
-        clipHeader.setRows(listOf(listOf(
-            Key(fn = "clip_recent", label = "最近 $recentN", width = 1.6f, style = if (clipTab == "recent") KeyStyle.ACTION else KeyStyle.FUNC),
-            Key(fn = "clip_fav", label = "收藏 $favN", width = 1.6f, style = if (clipTab == "fav") KeyStyle.ACTION else KeyStyle.FUNC),
-            Key(fn = "clear_clips", label = "清空最近", width = 1.3f),
-        )))
-        clipStack.emptyText = if (clipTab == "fav") "还没有收藏。长按一张卡片把它加入收藏。" else "复制过的文字会出现在这里。"
-        clipStack.setCards(clipItems.map { CardStackView.Card(it.text, ClipHistory.kind(it.text), it.pinned) }, keep)
+        clipRecent = clips.entries()
+        clipFavItems = clips.favorites()
+        clipStrip.setCards(clipRecent.map { ClipStrip.Card(it.text, ClipHistory.kind(it.text), it.pinned) }, keep)
+        clipFavs.header = if (clipFavItems.isEmpty()) "收藏" else "收藏 ${clipFavItems.size}"
+        clipFavs.tags = clipFavItems.map { ClipHistory.kind(it.text) }
+        clipFavs.setItems(clipFavItems.map { clipShort(it.text) }, resetScroll = !keep)
     }
 
     private fun refreshQuick() {
@@ -664,7 +731,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
             QuickPanel.Tile("sound", "按键音", "", prefs.sound),
             QuickPanel.Tile("math", "数学键盘"),
             QuickPanel.Tile("symbols", "全部符号"),
-            QuickPanel.Tile("cursor", "光标"),
+            QuickPanel.Tile("cursor", "文字编辑"),
             QuickPanel.Tile("clipboard", "剪贴板"),
             QuickPanel.Tile("picker", "切换输入法"),
             QuickPanel.Tile("settings", "完整设置"),
@@ -684,7 +751,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
             "vibrate" -> prefs.put(Prefs.VIBRATE, !prefs.vibrate)
             "sound" -> prefs.put(Prefs.SOUND, !prefs.sound)
             "math" -> onFunction(Key(fn = "sci"))
-            "symbols" -> { symCat = "common"; showPanel(Panel.SYMBOLS) }
+            "symbols" -> showPanel(Panel.SYMBOLS)
             "cursor" -> showPanel(Panel.CURSOR)
             "clipboard" -> showPanel(Panel.CLIPBOARD)
             "picker" -> (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager).showInputMethodPicker()
@@ -729,10 +796,10 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
                 predictor.suggest(currentInputConnection?.getTextBeforeCursor(20, 0)?.toString() ?: out) else emptyList()
             predictionLabel = ""
         } else if (prefs.zhPreeditInline && RimeBridge.input().isEmpty()) currentInputConnection?.finishComposingText()
-        if (RimeBridge.input().isEmpty()) resetSyllables()
+        if (RimeBridge.input().isEmpty()) { resetSyllables(); pinyinEdit = false }
         syncBar()
         if (panel == Panel.CANDIDATES) {
-            if (composing) candGrid.setItems(RimeBridge.candidates(300).toList()) else showPanel(Panel.LETTERS)
+            if (composing) { val c = RimeBridge.candidates(300).toList(); candGrid.notes = annotations(c); candGrid.setItems(c) } else showPanel(Panel.LETTERS)
         }
     }
 
@@ -969,6 +1036,12 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
 
     override fun onOutput(key: Key, output: Output) {
         if (panel == Panel.MATH) { mathOut(output); return }
+        if (panel == Panel.NUM) {
+            commit(output.text, pairable = output.text.length > 1)
+            history.push(EditHistory.Op.Insert(output.text))
+            if (output.text == "=") showCalcResult() else bar.showResult(null)
+            return
+        }
         predictions = emptyList()
         deletedRun.clear()
         val t = output.text
@@ -1047,15 +1120,13 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
                 commitComposingFirst()
                 // back to the symbols if they were used a moment ago, otherwise the number keyboard
                 val recent = SystemClock.uptimeMillis() - lastSymbolsAt < prefs.symbolMemorySec * 1000L
-                if (recent) { symCat = symCat.ifEmpty { "common" }; showPanel(Panel.SYMBOLS) } else showPanel(numPanel())
+                if (recent) showPanel(Panel.SYMBOLS) else showPanel(numPanel())
             }
             "sci" -> { prefs.put(Prefs.NUM_MODE, "sci"); showPanel(Panel.MATH) }
             "simple" -> { prefs.put(Prefs.NUM_MODE, "simple"); showPanel(Panel.NUM) }
             "tall" -> { tall = !tall; showPanel(panel) }
-            "clip_recent" -> { clipTab = "recent"; refreshClips() }
-            "clip_fav" -> { clipTab = "fav"; refreshClips() }
-            "num" -> showPanel(Panel.NUM)
-            "more_symbols" -> { symCat = "common"; showPanel(Panel.SYMBOLS) }
+            "num" -> showPanel(numPanel())
+            "more_symbols" -> showPanel(Panel.SYMBOLS)
             "math" -> { commitComposingFirst(); showPanel(Panel.MATH) }
             "abc" -> { selectMode = false; showPanel(Panel.LETTERS) }
             "collapse" -> showPanel(Panel.LETTERS)
@@ -1072,8 +1143,8 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
             "home" -> sendKey(KeyEvent.KEYCODE_MOVE_HOME, shiftMeta())
             "end" -> sendKey(KeyEvent.KEYCODE_MOVE_END, shiftMeta())
             "select_all" -> ic?.performContextMenuAction(android.R.id.selectAll)
-            "copy" -> { ic?.performContextMenuAction(android.R.id.copy); selectMode = false; dpad.selecting = false }
-            "cut" -> { ic?.performContextMenuAction(android.R.id.cut); selectMode = false; dpad.selecting = false }
+            "copy" -> { ic?.performContextMenuAction(android.R.id.copy); selectMode = false }
+            "cut" -> { ic?.performContextMenuAction(android.R.id.cut); selectMode = false }
             "paste" -> ic?.performContextMenuAction(android.R.id.paste)
             "next_slot" -> nextSlot()
             "clear_clips" -> { clips.clearUnpinned(); refreshClips() }
@@ -1109,7 +1180,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
     private fun fnOptions(fn: String, key: Key): List<Output> = when (fn) {
         "language" -> prefs.languages.map { Output(layout(it).label, "§lang:$it") } +
             listOf(Output("系统切换", "§picker"), Output("设置", "§settings"))
-        "symbols" -> listOf(Output("全部符号", "§sym"), Output("数字·简易", "§num"), Output("数字·科学", "§科学"), Output("光标", "§cursor"), Output("剪贴板", "§clip"))
+        "symbols" -> listOf(Output("数字·标准", "§num"), Output("符号", "§sym"), Output("数字·学术", "§科学"), Output("文字编辑", "§cursor"), Output("剪贴板", "§clip"))
         "more_symbols" -> listOf(Output("全部符号", "§sym"), Output("数学", "§math"))
         "sci" -> listOf(Output("全部符号", "§sym"))
         "enter" -> listOf(Output("换行", "§newline"), Output(enterActionName(), "§action"))
@@ -1134,7 +1205,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
             t == "§picker" -> (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager).showInputMethodPicker()
             t == "§settings" -> openSettings()
             t == "§num" -> onFunction(Key(fn = "simple"))
-            t == "§sym" || t == "§全部符号" -> { symCat = "common"; showPanel(Panel.SYMBOLS) }
+            t == "§sym" || t == "§全部符号" -> showPanel(Panel.SYMBOLS)
             t == "§科学" -> onFunction(Key(fn = "sci"))
             t == "§math" || t == "§数学" -> showPanel(Panel.MATH)
             t == "§cursor" -> showPanel(Panel.CURSOR)
@@ -1300,7 +1371,32 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
         }
         RimeBridge.setCaretPos(j)
         haptics.play(HapticEvent.CURSOR)
-        syncBar()
+        pinyinEdit = true
+        if (panel == Panel.CANDIDATES) showPanel(Panel.LETTERS) else syncBar()
+    }
+
+    override fun onEditCaret(pos: Int) {
+        if (!composing) return
+        RimeBridge.setCaretPos(pos)
+        haptics.play(HapticEvent.CURSOR)
+    }
+
+    override fun onEditDone() { pinyinEdit = false; haptics.play(HapticEvent.FUNCTION); syncBar() }
+
+    /** Where syllables start in the typed letters, read from the pinyin part of the preedit. */
+    private fun syllableGaps(): Set<Int> {
+        val input = RimeBridge.input()
+        val tokens = RimeBridge.preedit().split(' ', '\'').filter { it.isNotEmpty() }
+        val syl = tokens.dropWhile { t -> t.any { isCjk(it) } }.map { it.filter { c -> !isCjk(c) } }
+        val gaps = mutableSetOf<Int>()
+        var p = input.length - syl.sumOf { it.length } - input.count { it == '\'' }
+        if (p < 0) return emptySet()
+        for (t in syl) {
+            if (p > 0) gaps += p
+            p += t.length
+            if (p < input.length && input[p] == '\'') p++
+        }
+        return gaps
     }
 
     /** Caret position in the preedit when it is not at the end, else -1. */
@@ -1357,6 +1453,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
         }
         emojiCells = GridPanel(this, prefs).apply {
             theme = this@KkImeService.theme; columns = 7; rowHeightDp = 46f; textSp = 25f; cellStyle = GridPanel.CellStyle.PLAIN
+            emptyText = "发过的表情会出现在这里"
             onItem = { i -> emojiShown.getOrNull(i)?.let { onEmoji(it) } }
             onFeedback = { haptics.play(HapticEvent.LETTER) }
         }
@@ -1373,7 +1470,6 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
 
     private fun refreshEmoji() {
         val names = listOf("最近") + emojiGroups.map { it.first }
-        if (emojiGroup == 0 && recentEmoji.isEmpty()) emojiGroup = 1
         emojiRail.selectedIndex = emojiGroup
         emojiRail.setItems(names, resetScroll = false)
         emojiShown = if (emojiGroup == 0) recentEmoji.toList() else emojiGroups.getOrNull(emojiGroup - 1)?.second.orEmpty()
@@ -1474,6 +1570,10 @@ class ClipHistory(private val file: File, private val keep: () -> Int) {
     }
 
     fun remove(text: String) { list.removeAll { it.text == text }; save() }
+    fun moveToFront(text: String) {
+        val i = list.indexOfFirst { it.text == text }
+        if (i > 0) { list.add(0, list.removeAt(i)); save() }
+    }
     fun clearUnpinned() { list.removeAll { !it.pinned }; save() }
     /** Everything, newest first; favorites stay where they were copied. */
     fun entries(): List<Entry> = list.toList()

@@ -116,7 +116,7 @@ class LayoutRepo(
                     }
                 })
         }
-        val bottom = (m["bottom"] as List<*>).map { parseKey(it, emptyMap()) }
+        val bottom = (m["bottom"] as? List<*>)?.map { parseKey(it, emptyMap()) } ?: emptyList()
         return MathLayout(tabs, bottom)
     }
 

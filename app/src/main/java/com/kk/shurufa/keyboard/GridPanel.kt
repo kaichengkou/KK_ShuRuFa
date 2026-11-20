@@ -46,6 +46,15 @@ class GridPanel(context: Context, private val prefs: Prefs) : View(context) {
     var onLongOption: ((Int, Output) -> Unit)? = null
     /** Touch feedback: "press" when a cell is touched, "popup" when its menu opens. */
     var onFeedback: ((String) -> Unit)? = null
+    /** Shown centered when there are no items. */
+    var emptyText = ""
+    /** Small section title drawn above the items (does not scroll). */
+    var header = ""
+    /** Small notes drawn above FLAT cells (typo marks, readings). */
+    var notes: List<String> = emptyList()
+    /** Fling friction multiplier (higher stops sooner). */
+    var friction = 1f
+        set(v) { field = v; scroller.setFriction(android.view.ViewConfiguration.getScrollFriction() * v) }
 
     enum class CellStyle { SOLID, SOFT, RAIL, FLAT, CARD, PLAIN }
 
@@ -92,9 +101,10 @@ class GridPanel(context: Context, private val prefs: Prefs) : View(context) {
             // least for words), rows are filled greedily, and the units left at the end of a row
             // are handed to its widest words, so every row is flush and cell edges line up.
             val unit = width.toFloat() / columns
-            val need = items.map { s ->
-                val n = ceil((tp.measureText(s) + dp(26f)) / unit).toInt()
-                n.coerceIn(if (s.codePointCount(0, s.length) >= 2) 2 else 1, columns)
+            val noteP = Paint(tp).apply { textSize = sp(9.5f) }
+            val need = items.mapIndexed { i, s ->
+                val w = max(tp.measureText(s), notes.getOrNull(i)?.let { noteP.measureText(it) } ?: 0f)
+                ceil((w + dp(16f)) / unit).toInt().coerceIn(1, columns)
             }
             var i = 0
             var row = 0
@@ -105,11 +115,11 @@ class GridPanel(context: Context, private val prefs: Prefs) : View(context) {
                 if (j == i) { used = need[i]; j = i + 1 }
                 val spans = need.subList(i, j).toMutableList()
                 var spare = columns - used
-                // only stretch rows that are not the last, so a short tail stays compact
-                if (j < items.size) {
+                // stretch only a little: at most one extra unit per cell, longest words first, so short
+                // words keep their size and rows stay dense; what is left stays at the end of the row
+                if (j < items.size && spare > 0) {
                     val order = spans.indices.sortedByDescending { spans[it] }
-                    var k = 0
-                    while (spare > 0 && order.isNotEmpty()) { spans[order[k % order.size]]++; spare--; k++ }
+                    for (k in order) { if (spare == 0) break; spans[k]++; spare-- }
                 }
                 var col = 0
                 for ((n, idx) in (i until j).withIndex()) {
@@ -119,15 +129,19 @@ class GridPanel(context: Context, private val prefs: Prefs) : View(context) {
                 row++
                 i = j
             }
-                } else {
+        } else {
             items.forEachIndexed { i, _ ->
                 val r = i / columns; val c = i % columns
                 val x = pad + c * (cw + g); val y = pad + r * (rh + g)
                 cells += RectF(x, y, x + cw, y + rh)
             }
         }
+        val top = headerH()
+        if (top > 0) cells.forEach { it.offset(0f, top) }
         contentH = (cells.maxOfOrNull { it.bottom } ?: 0f) + pad
     }
+
+    private fun headerH() = if (header.isNotEmpty()) dp(20f) else 0f
 
     private val maxScroll get() = max(0f, contentH - height)
 
@@ -153,6 +167,18 @@ class GridPanel(context: Context, private val prefs: Prefs) : View(context) {
             }
         }
         c.restore()
+        if (header.isNotEmpty()) {
+            bg.color = theme.background
+            c.drawRect(0f, 0f, width.toFloat(), headerH(), bg)
+            tp.textAlign = Paint.Align.LEFT; tp.textSize = sp(11f); tp.color = theme.hint; tp.isFakeBoldText = true
+            c.drawText(header, dp(12f), dp(14f), tp)
+            tp.isFakeBoldText = false; tp.textAlign = Paint.Align.CENTER
+        }
+        if (items.isEmpty() && emptyText.isNotEmpty()) {
+            tp.textSize = sp(13f); tp.color = theme.hint
+            val fm = tp.fontMetrics
+            c.drawText(emptyText, width / 2f, height / 2f - (fm.ascent + fm.descent) / 2, tp)
+        }
     }
 
     private fun blendRail(): Int = theme.background
@@ -196,7 +222,13 @@ class GridPanel(context: Context, private val prefs: Prefs) : View(context) {
         bg.color = theme.divider
         c.drawRect(r.left + dp(6f), r.bottom - dp(0.7f), r.right - dp(6f), r.bottom, bg)
         if (r.right < width - 1) c.drawRect(r.right - dp(0.7f), r.top + dp(14f), r.right, r.bottom - dp(14f), bg)
-        label(c, s, r, sp(textSp), if (highlightFirst && i == 0) theme.accent else theme.ink, a)
+        val note = notes.getOrNull(i).orEmpty()
+        if (note.isNotEmpty()) {
+            tp.textSize = sp(9.5f); tp.color = if (note.contains('→') || note.contains('⇄')) theme.accent else theme.hint
+            tp.alpha = (255 * a).toInt()
+            c.drawText(note, r.centerX(), r.top + dp(12f), tp)
+            label(c, s, RectF(r.left, r.top + dp(6f), r.right, r.bottom), sp(textSp), if (highlightFirst && i == 0) theme.accent else theme.ink, a)
+        } else label(c, s, r, sp(textSp), if (highlightFirst && i == 0) theme.accent else theme.ink, a)
     }
 
     private fun drawCard(c: Canvas, i: Int, s: String, r: RectF, a: Float) {

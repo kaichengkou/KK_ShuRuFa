@@ -430,6 +430,7 @@ private fun GesturesPage(prefs: Prefs) {
         Toggle(prefs, Prefs.LP_HINTS, "长按包含滑动字符", "角标上的符号排在最前面", true)
         Toggle(prefs, Prefs.LP_CASE, "长按包含大写和小写", null, true)
         Toggle(prefs, Prefs.LP_DIGITS, "第一排长按包含数字", null, true)
+        Toggle(prefs, Prefs.TOP_ROW_SCRIPTS, "第一排左右滑输入上下角标数字", "左滑 ¹²³，右滑 ₁₂₃", false)
     }
     Group("空格") {
         Choice(prefs, Prefs.SPACE_SWIPE, "左右滑", listOf("language" to "切换语言", "cursor" to "移动光标", "none" to "无"))
@@ -520,7 +521,14 @@ private fun SymbolsPage(prefs: Prefs) {
 private fun ClipboardPage(prefs: Prefs) {
     Group {
         Toggle(prefs, Prefs.CLIP_SUGGEST, "复制后在候选栏提示粘贴", "一分半钟内点一下就能粘贴", true)
-        IntSlider(prefs, Prefs.CLIP_KEEP, "保留的条数", 40, 10..200, "条", "固定的条目不算在内")
+        IntSlider(prefs, Prefs.CLIP_KEEP, "保留的条数", 40, 10..200, "条", "收藏的条目不算在内")
+    }
+    Group("面板") {
+        IntSlider(prefs, Prefs.CLIP_MAX_CHARS, "每条最多显示", 80, 20..300, "字", "更长的内容截断显示，粘贴时仍是完整的")
+        FloatSlider(prefs, Prefs.CLIP_FRICTION, "滑动阻尼", 1f, 0.4f..2.5f, "×", "越大越“沉”，甩一下滑过的条数越少")
+        Note("最近：横向滑动，停下时总有一条对齐左边。收藏：竖向滑动。点按粘贴，其余操作在长按菜单里。拖动工具栏或顶部横条可以拉高面板。")
+    }
+    Group {
         Note("标记为敏感内容的复制（比如密码管理器）不会被记录。")
     }
 }

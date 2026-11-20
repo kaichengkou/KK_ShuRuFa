@@ -59,7 +59,8 @@ with open(out, "w", encoding="utf-8", newline="\n") as f:
         f.write(key + "\t" + " ".join(c for c, _ in conts) + "\n")
 print(f"{len(keys)} keys from {len(weights)} words -> {out}")
 
-# The 3500 most frequent characters count as common; anything else gets 生僻字注音 when enabled.
+# The 6500 most frequent characters (about the first two levels of 通用规范汉字表) count as common;
+# anything else gets 生僻字注音 when enabled.
 chars = sorted(((w, c) for c, w in weights.items() if len(c) == 1), reverse=True)
 with open(os.path.join(os.path.dirname(out), "common_chars.txt"), "w", encoding="utf-8") as f:
-    f.write("".join(c for _, c in chars[:3500]))
+    f.write("".join(c for _, c in chars[:6500]))

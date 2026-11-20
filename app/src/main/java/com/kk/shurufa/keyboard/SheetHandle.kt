@@ -56,39 +56,49 @@ class SheetHandle(context: Context, private val prefs: Prefs) : View(context) {
         if (vt == null) vt = VelocityTracker.obtain()
         vt?.addMovement(e)
         when (e.actionMasked) {
-            MotionEvent.ACTION_DOWN -> {
-                anim?.cancel()
-                downY = e.rawY; startH = current; active = true; crossed = startH > (low + high) / 2
-                onFeedback?.invoke("press")
-                invalidate()
-            }
-            MotionEvent.ACTION_MOVE -> {
-                val raw = startH - (e.rawY - downY)
-                // beyond the detents the sheet stretches only a little
-                val h = when {
-                    raw > high -> high + (raw - high) * 0.25f
-                    raw < low -> low - (low - raw) * 0.25f
-                    else -> raw
-                }.toInt()
-                val nowCrossed = h > (low + high) / 2
-                if (nowCrossed != crossed) { crossed = nowCrossed; onFeedback?.invoke("press") }
-                current = h
-                onHeight?.invoke(h)
-            }
+            MotionEvent.ACTION_DOWN -> begin(e.rawY)
+            MotionEvent.ACTION_MOVE -> drag(e.rawY)
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 vt?.computeCurrentVelocity(1000)
-                val v = vt?.yVelocity ?: 0f
-                val tall = when {
-                    abs(v) > dp(600f) -> v < 0
-                    else -> current > (low + high) / 2
-                }
-                settle(tall)
+                end(vt?.yVelocity ?: 0f)
                 vt?.recycle(); vt = null
-                active = false
-                invalidate()
             }
         }
         return true
+    }
+
+    /** Drags can also start elsewhere (the toolbar above the panel); they go through these. */
+    fun begin(rawY: Float) {
+        anim?.cancel()
+        downY = rawY; startH = current; active = true; crossed = startH > (low + high) / 2
+        onFeedback?.invoke("press")
+        invalidate()
+    }
+
+    fun drag(rawY: Float) {
+        val raw = startH - (rawY - downY)
+        // beyond the detents the sheet stretches only a little, and less the further it goes
+        val h = when {
+            raw > high -> high + rubber(raw - high)
+            raw < low -> low - rubber(low - raw)
+            else -> raw
+        }.toInt()
+        val nowCrossed = h > (low + high) / 2
+        if (nowCrossed != crossed) { crossed = nowCrossed; onFeedback?.invoke("press") }
+        current = h
+        onHeight?.invoke(h)
+    }
+
+    private fun rubber(over: Float): Float { val lim = dp(48f); return lim * (1f - 1f / (over / lim * 0.6f + 1f)) }
+
+    fun end(velocityY: Float) {
+        val tall = when {
+            abs(velocityY) > dp(600f) -> velocityY < 0
+            else -> current > (low + high) / 2
+        }
+        settle(tall)
+        active = false
+        invalidate()
     }
 
     fun settle(tall: Boolean) {

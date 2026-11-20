@@ -81,6 +81,9 @@ class Prefs(context: Context) {
     val rareAnnotate get() = b(RARE_ANNOTATE, true)
     val packPoetry get() = b(PACK_POETRY, true)
     val symbolMemorySec get() = i(SYMBOL_MEMORY, 7)
+    val topRowScripts get() = b(TOP_ROW_SCRIPTS, false)
+    val clipMaxChars get() = i(CLIP_MAX_CHARS, 80)
+    val clipFriction get() = f(CLIP_FRICTION, 1f)
 
     // Symbols
     val autoPair get() = b(AUTO_PAIR, true)
@@ -164,6 +167,9 @@ class Prefs(context: Context) {
         const val RARE_ANNOTATE = "rare_annotate"
         const val PACK_POETRY = "pack_poetry"
         const val SYMBOL_MEMORY = "symbol_memory"
+        const val TOP_ROW_SCRIPTS = "top_row_scripts"
+        const val CLIP_MAX_CHARS = "clip_max_chars"
+        const val CLIP_FRICTION = "clip_friction"
         const val ACCENT = "accent"
         const val AUTO_PAIR = "auto_pair"
         const val SYMBOL_RETURN = "symbol_return"
