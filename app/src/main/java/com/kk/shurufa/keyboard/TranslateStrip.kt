@@ -5,23 +5,21 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.RectF
+import android.os.SystemClock
 import android.text.Layout
 import android.text.StaticLayout
 import android.text.TextPaint
 import android.text.TextUtils
-import android.util.TypedValue
 import android.view.MotionEvent
-import android.view.View
 import com.kk.shurufa.Prefs
 
 /**
- * 翻译, opened above the toolbar: the language pair (tap either side to pick, ⇄ to swap), the
- * engine, the text being translated (typed with the keyboard below, or the selection), and the
- * translation with 上屏 / 替换.
+ * 翻译, opened above the toolbar: the language pair (tap either side to pick, swap between them),
+ * the engine, the text being translated (typed with the keyboard below, or the selection), and
+ * the translation with 上屏 / 替换.
  */
 @SuppressLint("ViewConstructor")
-class TranslateStrip(context: Context, private val prefs: Prefs) : View(context) {
-    var theme: KbTheme = KbTheme.resolve(context, prefs)
+class TranslateStrip(context: Context, prefs: Prefs) : KbView(context, prefs) {
     var onPick: ((which: String, lang: String) -> Unit)? = null
     var onSwap: (() -> Unit)? = null
     var onEngine: (() -> Unit)? = null
@@ -46,13 +44,11 @@ class TranslateStrip(context: Context, private val prefs: Prefs) : View(context)
     var engine: String
         get() = pick.current
         set(v) { pick.current = v }
-    private val pick = PickList(this).apply { rowDp = 34f }
+    private val pick = PickList(this).apply { rowDp = 36f }
     private var picking: String? = null   // "from" | "to" | "engine"
 
-    fun refresh() { srcLayout = null; resLayout = null; invalidate() }
-
-    private fun dp(v: Float) = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, resources.displayMetrics)
-    private fun sp(v: Float) = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, v, resources.displayMetrics)
+    /** The texts changed: lay them out again. */
+    fun refresh() { srcLayout = null; resLayout = null; caretSince = SystemClock.uptimeMillis(); invalidate() }
 
     private val bg = Paint(Paint.ANTI_ALIAS_FLAG)
     private val tp = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER }
@@ -60,130 +56,117 @@ class TranslateStrip(context: Context, private val prefs: Prefs) : View(context)
     private val body = TextPaint(Paint.ANTI_ALIAS_FLAG)
     private var srcLayout: StaticLayout? = null
     private var resLayout: StaticLayout? = null
-    private val hits = mutableListOf<Pair<RectF, String>>()
+    private val hits = Hits()
     private var pressed: String? = null
-    private val caret = Tween(1f)
+    private val r = RectF()
+    private val area = RectF()
+    /** The caret blinks from the last change: two redraws a second, none while hidden. */
+    private var caretSince = 0L
+
+    override fun onThemeChanged() { srcLayout = null; resLayout = null }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-        setMeasuredDimension(MeasureSpec.getSize(widthMeasureSpec), dp(132f).toInt())
+        setMeasuredDimension(MeasureSpec.getSize(widthMeasureSpec), dp(136f).toInt())
     }
 
     override fun onDraw(c: Canvas) {
-        c.drawColor(theme.background)
+        val t = theme
+        c.drawColor(t.background)
         hits.clear()
-        val pad = dp(10f)
+        val pad = dp(Ui.EDGE)
         val rad = Ui.radiusLarge(dp(prefs.keyRadiusDp), dp(1f))
-        val card = RectF(pad, dp(6f), width - pad, height - dp(4f))
-        bg.color = theme.surface
+        val card = area.apply { set(pad, dp(6f), width - pad, height - dp(4f)) }
+        bg.color = t.surface
         c.drawRoundRect(card, rad, rad, bg)
-        // header: from ⇄ to · engine · close
-        val hy = card.top + dp(6f); val hh = dp(30f)
-        tp.textSize = sp(Ui.SMALL)
-        var x = card.left + dp(8f)
-        x = pill(c, "from", fromName + " ▾", x, hy, hh, picking == "from") + dp(2f)
-        val sw = RectF(x, hy, x + hh, hy + hh)
-        if (pressed == "swap") { bg.color = theme.soft; c.drawRoundRect(sw, hh / 2, hh / 2, bg) }
-        tp.color = theme.inkSoft; text(c, "⇄", sw.centerX(), sw.centerY())
-        hits += sw to "swap"
-        x = sw.right + dp(2f)
-        pill(c, "to", toName + " ▾", x, hy, hh, picking == "to")
-        val cl = RectF(card.right - dp(8f) - hh, hy, card.right - dp(8f), hy + hh)
-        if (pressed == "close") { bg.color = theme.soft; c.drawRoundRect(cl, hh / 2, hh / 2, bg) }
-        ip.color = theme.inkSoft; Icons.draw(c, "close", cl.centerX(), cl.centerY(), dp(15f), ip)
-        hits += cl to "close"
-        tp.textSize = sp(Ui.CAPTION + 0.5f)
-        val ew = tp.measureText("$engineName ▾") + dp(18f)
-        val er = RectF(cl.left - dp(4f) - ew, hy + dp(4f), cl.left - dp(4f), hy + hh - dp(4f))
-        bg.color = if (picking == "engine") theme.accentSoft else if (pressed == "engine") theme.softPressed else theme.soft
-        c.drawRoundRect(er, er.height() / 2, er.height() / 2, bg)
-        tp.color = if (picking == "engine") theme.accent else theme.inkSoft; text(c, "$engineName ▾", er.centerX(), er.centerY())
-        hits += er to "engine"
-        val inner = RectF(card.left + dp(12f), hy + hh + dp(4f), card.right - dp(12f), card.bottom - dp(8f))
+        val cardL = card.left; val cardR = card.right; val cardT = card.top; val cardB = card.bottom
+        // header: from ⇄ to … engine ×
+        val hy = cardT + dp(8f); val hh = dp(30f)
+        var x = cardL + dp(8f)
+        x = chip(c, "from", fromName, x, hy, hh, if (picking == "from") ChipStyle.ACTIVE else ChipStyle.SOFT, chevron = true)
+        r.set(x + dp(2f), hy, x + dp(2f) + hh + dp(6f), hy + hh)
+        drawChip(c, r, "", ChipStyle.GHOST, pressed = pressed == "swap", icon = "swap")
+        hits.add("swap", r, slop = dp(4f))
+        x = r.right + dp(2f)
+        chip(c, "to", toName, x, hy, hh, if (picking == "to") ChipStyle.ACTIVE else ChipStyle.SOFT, chevron = true)
+        r.set(cardR - dp(6f) - hh - dp(6f), hy, cardR - dp(6f), hy + hh)
+        drawChip(c, r, "", ChipStyle.GHOST, pressed = pressed == "close", icon = "close")
+        hits.add("close", r, slop = dp(4f))
+        val ew = chipWidth(engineName, chevron = true, textSp = Ui.SMALL)
+        r.set(r.left - dp(4f) - ew, hy + dp(2f), r.left - dp(4f), hy + hh - dp(2f))
+        drawChip(c, r, engineName, if (picking == "engine") ChipStyle.ACTIVE else ChipStyle.SOFT, pressed = pressed == "engine", chevron = true, textSp = Ui.SMALL)
+        hits.add("engine", r, slop = dp(4f))
+        val innerL = cardL + dp(14f); val innerR = cardR - dp(14f)
+        val innerT = hy + hh + dp(4f); val innerB = cardB - dp(8f)
         if (picking == "engine") {
-            if (pick.draw(c, RectF(card.left + dp(4f), hy + hh + dp(2f), card.right - dp(4f), card.bottom - dp(4f)), theme, rad)) postInvalidateOnAnimation()
+            if (pick.draw(c, r.apply { set(cardL + dp(4f), hy + hh + dp(2f), cardR - dp(4f), cardB - dp(4f)) }, t, rad)) postInvalidateOnAnimation()
             return
         }
-        if (picking != null) { drawPicker(c, inner); return }
+        if (picking != null) { drawPicker(c, innerL, innerT, innerR, innerB); return }
         // the text and its translation
-        val btnW = dp(58f); val btnH = dp(32f)
-        val textW = (inner.width() - btnW - dp(10f)).toInt().coerceAtLeast(1)
-        val half = inner.height() / 2
+        val btnW = chipWidth("替换", textSp = Ui.SMALL + 1f); val btnH = dp(Ui.CHIP_H)
+        val textW = (innerR - innerL - btnW - dp(10f)).toInt().coerceAtLeast(1)
+        val half = (innerB - innerT) / 2
         body.textSize = sp(Ui.BODY)
         val src = source.ifEmpty { "输入要翻译的文字" }
-        val sl = srcLayout ?: layout(src, textW, if (source.isEmpty()) theme.hint else theme.inkSoft, 2, TextUtils.TruncateAt.START).also { srcLayout = it }
-        c.save(); c.translate(inner.left, inner.top + (half - sl.height) / 2); sl.draw(c); c.restore()
-        if (!sourceIsSelection && source.isNotEmpty()) {
-            // a caret after the typed text
-            if (!caret.running) { caret.set(0f); caret.animateTo(1f, 1000, android.view.animation.LinearInterpolator()) }
-            postInvalidateDelayed(120)
-            if (caret.value < 0.55f) {
+        val sl = srcLayout ?: layout(src, textW, if (source.isEmpty()) t.hint else t.inkSoft, TextUtils.TruncateAt.START).also { srcLayout = it }
+        val srcTop = innerT + (half - sl.height) / 2
+        // the placeholder sits just after the caret, not under it
+        val srcX = innerL + if (source.isEmpty() && !sourceIsSelection) dp(5f) else 0f
+        c.save(); c.translate(srcX, srcTop); sl.draw(c); c.restore()
+        if (!sourceIsSelection) {
+            // a caret after the typed text, blinking at half a second
+            val since = SystemClock.uptimeMillis() - caretSince
+            val on = (since / 530) % 2 == 0L
+            postInvalidateDelayed(530 - since % 530)
+            if (on) {
                 val line = sl.lineCount - 1
-                val cx = inner.left + sl.getLineRight(line) + dp(1.5f)
-                val top = inner.top + (half - sl.height) / 2 + sl.getLineTop(line)
-                bg.color = theme.accent
-                c.drawRect(cx, top + dp(2f), cx + dp(1.6f), top + sl.getLineBottom(line) - sl.getLineTop(line) - dp(2f), bg)
+                val cx = innerL + (if (source.isEmpty()) 0f else sl.getLineRight(line) + dp(1.5f))
+                val top = srcTop + sl.getLineTop(line)
+                bg.color = t.accent
+                c.drawRect(cx, top + dp(2f), cx + dp(1.6f), srcTop + sl.getLineBottom(line) - dp(2f), bg)
             }
         }
-        bg.color = theme.divider
-        c.drawRect(inner.left, inner.top + half, inner.right, inner.top + half + dp(0.8f), bg)
+        bg.color = t.divider
+        c.drawRect(innerL, innerT + half, innerR, innerT + half + dp(0.8f), bg)
         val res = when { result.isNotEmpty() -> result; busy -> "翻译中…"; else -> status }
-        val rl = resLayout ?: layout(res, textW, if (result.isNotEmpty()) theme.ink else theme.hint, 2, TextUtils.TruncateAt.END, medium = result.isNotEmpty()).also { resLayout = it }
-        c.save(); c.translate(inner.left, inner.top + half + (half - rl.height) / 2); rl.draw(c); c.restore()
+        val rl = resLayout ?: layout(res, textW, if (result.isNotEmpty()) t.ink else t.hint, TextUtils.TruncateAt.END, medium = result.isNotEmpty()).also { resLayout = it }
+        c.save(); c.translate(innerL, innerT + half + (half - rl.height) / 2); rl.draw(c); c.restore()
         if (result.isNotEmpty()) {
-            val b = RectF(inner.right - btnW, inner.top + half + (half - btnH) / 2, inner.right, inner.top + half + (half + btnH) / 2)
-            bg.color = if (pressed == "commit") theme.accentPressed else theme.accent
-            c.drawRoundRect(b, btnH / 2, btnH / 2, bg)
-            tp.textSize = sp(Ui.SMALL); tp.typeface = Ui.medium; tp.color = theme.onAccent
-            text(c, if (sourceIsSelection) "替换" else "上屏", b.centerX(), b.centerY())
-            tp.typeface = Ui.regular
-            hits += b to "commit"
+            r.set(innerR - btnW, innerT + half + (half - btnH) / 2, innerR, innerT + half + (half + btnH) / 2)
+            drawChip(c, r, if (sourceIsSelection) "替换" else "上屏", ChipStyle.PRIMARY, pressed = pressed == "commit", textSp = Ui.SMALL + 1f)
+            hits.add("commit", r, slop = dp(6f))
         }
     }
 
-    private fun drawPicker(c: Canvas, area: RectF) {
+    private fun drawPicker(c: Canvas, l: Float, top: Float, right: Float, bottom: Float) {
         val list = when (picking) { "from" -> listOf("auto" to "自动识别") + languages; else -> languages }
         val cur = when (picking) { "from" -> from; else -> to }
-        tp.textSize = sp(Ui.SMALL)
         val h = dp(30f); val gap = dp(6f)
-        var x = area.left; var y = area.top + dp(2f)
+        var x = l; var y = top + dp(2f)
         for ((id, name) in list) {
-            val w = tp.measureText(name) + dp(24f)
-            if (x + w > area.right) { x = area.left; y += h + gap }
-            if (y + h > area.bottom + dp(4f)) break
-            val r = RectF(x, y, x + w, y + h)
-            bg.color = if (id == cur) theme.accentSoft else if (pressed == "lang:$id") theme.softPressed else theme.soft
-            c.drawRoundRect(r, h / 2, h / 2, bg)
-            tp.color = if (id == cur) theme.accent else theme.ink
-            tp.typeface = if (id == cur) Ui.medium else Ui.regular
-            text(c, name, r.centerX(), r.centerY())
-            hits += r to "lang:$id"
+            val w = chipWidth(name, textSp = Ui.SMALL + 1f)
+            if (x + w > right) { x = l; y += h + gap }
+            if (y + h > bottom + dp(4f)) break
+            r.set(x, y, x + w, y + h)
+            drawChip(c, r, name, if (id == cur) ChipStyle.ACTIVE else ChipStyle.SOFT, pressed = pressed == "lang:$id", textSp = Ui.SMALL + 1f)
+            hits.add("lang:$id", r)
             x += w + gap
         }
-        tp.typeface = Ui.regular
     }
 
-    private fun pill(c: Canvas, id: String, label: String, x: Float, y: Float, h: Float, on: Boolean): Float {
-        tp.textSize = sp(Ui.SMALL)
-        val w = tp.measureText(label) + dp(22f)
-        val r = RectF(x, y, x + w, y + h)
-        bg.color = if (on) theme.accentSoft else if (pressed == id) theme.softPressed else theme.soft
-        c.drawRoundRect(r, h / 2, h / 2, bg)
-        tp.color = if (on) theme.accent else theme.ink; tp.typeface = Ui.medium
-        text(c, label, r.centerX(), r.centerY())
-        tp.typeface = Ui.regular
-        hits += r to id
+    /** A header chip at [x]; returns its right edge. */
+    private fun chip(c: Canvas, id: String, label: String, x: Float, y: Float, h: Float, style: ChipStyle, chevron: Boolean): Float {
+        val w = chipWidth(label, chevron = chevron, textSp = Ui.SMALL + 1f)
+        r.set(x, y, x + w, y + h)
+        drawChip(c, r, label, style, pressed = pressed == id, chevron = chevron, textSp = Ui.SMALL + 1f)
+        hits.add(id, r, slop = dp(4f))
         return r.right
     }
 
-    private fun layout(s: String, w: Int, color: Int, lines: Int, cut: TextUtils.TruncateAt, medium: Boolean = false): StaticLayout {
+    private fun layout(s: String, w: Int, color: Int, cut: TextUtils.TruncateAt, medium: Boolean = false): StaticLayout {
         body.color = color; body.typeface = if (medium) Ui.medium else Ui.regular
-        return StaticLayout.Builder.obtain(s, 0, s.length, body, w).setMaxLines(lines).setEllipsize(cut)
+        return StaticLayout.Builder.obtain(s, 0, s.length, body, w).setMaxLines(2).setEllipsize(cut)
             .setAlignment(Layout.Alignment.ALIGN_NORMAL).setLineSpacing(0f, 1.05f).build()
-    }
-
-    private fun text(c: Canvas, s: String, x: Float, y: Float) {
-        val fm = tp.fontMetrics
-        c.drawText(s, x, y - (fm.ascent + fm.descent) / 2, tp)
     }
 
     @SuppressLint("ClickableViewAccessibility")
@@ -196,7 +179,7 @@ class TranslateStrip(context: Context, private val prefs: Prefs) : View(context)
         }
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                pressed = hits.lastOrNull { it.first.contains(e.x, e.y) }?.second
+                pressed = hits.at(e.x, e.y)
                 if (pressed != null) onFeedback?.invoke()
                 invalidate()
             }

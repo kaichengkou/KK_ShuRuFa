@@ -95,6 +95,20 @@ class VoiceEngine(private val context: Context, private val prefs: Prefs) {
         main.post { state = State.IDLE; listener?.onState(State.IDLE) }
     }
 
+    /**
+     * Frees the recognizer models (hundreds of MB); they load again on the next start. Does
+     * nothing while listening.
+     */
+    fun releaseModels() {
+        if (state == State.LISTENING || state == State.LOADING) return
+        decode.post {
+            if (running) return@post
+            sense?.close(); sense = null
+            vad?.close(); vad = null
+            if (whisper != 0L) { WhisperBridge.free(whisper); whisper = 0L; whisperModel = "" }
+        }
+    }
+
     fun release() {
         cancel()
         decode.post {
@@ -158,7 +172,6 @@ class VoiceEngine(private val context: Context, private val prefs: Prefs) {
         val chunk = FloatArray(SileroVad.CHUNK)
         // Whisper and AI services are too slow to re-run every half second: each utterance shows when done
         val whisperMode = usesWhisper(lang) || remoteTarget != null
-        // Whisper is too slow to re-run every half second: it shows each sentence when done
         val seg = Segmenter({ v.probability(it) }, prefs.voicePauseMs, prefs.voiceCommitPauseMs, prefs.voiceAutoStopSec * 1000L,
             partialEveryChunks = if (whisperMode) Int.MAX_VALUE else 16)
         rec.startRecording()

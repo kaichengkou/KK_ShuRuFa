@@ -40,7 +40,7 @@ class LayoutTest {
     }
 
     @Test fun otherLayoutsParse() {
-        listOf("en", "phone", "cursor").forEach { assertTrue(repo.keyboard(it).rows.isNotEmpty()) }
+        listOf("en", "phone", "ru", "num").forEach { assertTrue(repo.keyboard(it).rows.isNotEmpty()) }
         val phone = repo.keyboard("phone")
         assertEquals("1", phone.rows[0][0].main!!.text)
         assertEquals("0", phone.rows[3][2].main!!.text)

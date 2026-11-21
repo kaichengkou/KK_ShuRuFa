@@ -7,9 +7,7 @@ import android.graphics.Paint
 import android.graphics.RectF
 import android.os.Handler
 import android.os.Looper
-import android.util.TypedValue
 import android.view.MotionEvent
-import android.view.View
 import com.kk.shurufa.Prefs
 
 /**
@@ -19,20 +17,15 @@ import com.kk.shurufa.Prefs
  * sector keeps going in the new direction). 复制 and 剪切 are dimmed while nothing is selected.
  */
 @SuppressLint("ViewConstructor")
-class EditPanel(context: Context, private val prefs: Prefs) : View(context) {
-    var theme: KbTheme = KbTheme.resolve(context, prefs)
+class EditPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
     var onAction: ((String) -> Unit)? = null
     var onFeedback: ((String) -> Unit)? = null
     var selecting = false
-        set(v) { if (field != v) { field = v; selAnim.animateTo(if (v) 1f else 0f, dur(180)) }; invalidate() }
+        set(v) { if (field != v) { field = v; selAnim.animateTo(if (v) 1f else 0f, dur(180), Motion.MOVE) }; invalidate() }
     var hasSelection = false
         set(v) { field = v; invalidate() }
     /** "icon", "both" or "text" (光标面板标签). */
     var labels = "both"
-
-    private fun dp(v: Float) = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, resources.displayMetrics)
-    private fun sp(v: Float) = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, v, resources.displayMetrics)
-    private fun dur(ms: Long) = if (prefs.animations) (ms * prefs.animSpeed).toLong() else 0L
 
     private val bg = Paint(Paint.ANTI_ALIAS_FLAG)
     private val tp = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER }
@@ -63,6 +56,13 @@ class EditPanel(context: Context, private val prefs: Prefs) : View(context) {
     private val tmp = RectF()
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) = layoutButtons()
+
+    override fun onDetachedFromWindow() {
+        super.onDetachedFromWindow()
+        handler.removeCallbacks(repeatRunnable)
+        pressed?.press?.set(0f)
+        pressed = null
+    }
 
     private fun layoutButtons() {
         // the keyboard's own margins, so the edges line up with the letters
@@ -213,16 +213,9 @@ class EditPanel(context: Context, private val prefs: Prefs) : View(context) {
         }
     }
 
-    private fun text(c: Canvas, s: String, x: Float, y: Float) {
-        val fm = tp.fontMetrics
-        c.drawText(s, x, y - (fm.ascent + fm.descent) / 2, tp)
-    }
+    private fun text(c: Canvas, s: String, x: Float, y: Float) = drawText(c, s, x, y, tp)
 
-    private fun blend(a: Int, b: Int, t: Float): Int {
-        val u = t.coerceIn(0f, 1f)
-        fun ch(s: Int) = (((a shr s) and 0xFF) * (1 - u) + ((b shr s) and 0xFF) * u).toInt() shl s
-        return ch(24) or ch(16) or ch(8) or ch(0)
-    }
+    private fun blend(a: Int, b: Int, t: Float) = Colors.blend(a, b, t)
 
     // ---- touch ----
     private var repeats = 0
@@ -243,7 +236,7 @@ class EditPanel(context: Context, private val prefs: Prefs) : View(context) {
     }
 
     private fun release(b: Btn?) {
-        b?.press?.animateTo(0f, dur(140)); invalidate()
+        b?.press?.animateTo(0f, dur(Motion.RELEASE), Motion.ENTER); invalidate()
     }
 
     @SuppressLint("ClickableViewAccessibility")
@@ -253,7 +246,7 @@ class EditPanel(context: Context, private val prefs: Prefs) : View(context) {
                 val half = dp(prefs.keyGapDp) / 2
                 val b = dialAt(e.x, e.y) ?: buttons.firstOrNull { RectF(it.r).apply { inset(-half, -half) }.contains(e.x, e.y) } ?: return true
                 pressed = b; repeats = 0
-                b.press.animateTo(1f, dur(70))
+                b.press.animateTo(1f, dur(Motion.PRESS))
                 if (b.repeat) { fire(b); handler.postDelayed(repeatRunnable, 380) }
                 else onFeedback?.invoke("touch")
                 invalidate()
@@ -264,7 +257,7 @@ class EditPanel(context: Context, private val prefs: Prefs) : View(context) {
                     // sliding round the dial turns the repeat to the new direction
                     val n = dialAt(e.x, e.y)
                     if (n != null && n !== b && n.kind == Kind.ARROW) {
-                        b.press.animateTo(0f, dur(120)); n.press.animateTo(1f, dur(70))
+                        b.press.animateTo(0f, dur(120)); n.press.animateTo(1f, dur(Motion.PRESS))
                         pressed = n; fire(n); invalidate()
                     } else if (n == null) { handler.removeCallbacks(repeatRunnable); pressed = null; release(b) }
                     return true

@@ -5,22 +5,22 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.RectF
+import android.os.Handler
+import android.os.Looper
 import android.text.TextPaint
 import android.text.TextUtils
-import android.util.TypedValue
 import android.view.MotionEvent
-import android.view.View
 import com.kk.shurufa.Prefs
 import kotlin.math.min
 
 /**
- * 语音输入. One big round button (tap to start, tap again to finish), a ring that follows the
- * voice level, the sentence being heard under it, and four small controls: the language
- * (top left), 转文字 / 翻译 (top right), 取消 and 撤回上一句 (bottom).
+ * 语音输入. One big round button (tap to start, tap again to finish) with rings that follow the
+ * voice, one line under it (the sentence being heard, or what is going on), and the controls in
+ * the corners: language and recognizer top left, 转文字 / 翻译 top right, 取消 bottom left,
+ * 撤回上一句 and delete bottom right.
  */
 @SuppressLint("ViewConstructor")
-class VoicePanel(context: Context, private val prefs: Prefs) : View(context) {
-    var theme: KbTheme = KbTheme.resolve(context, prefs)
+class VoicePanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
     var onMic: (() -> Unit)? = null
     var onCancel: (() -> Unit)? = null
     var onLanguage: (() -> Unit)? = null
@@ -44,7 +44,12 @@ class VoicePanel(context: Context, private val prefs: Prefs) : View(context) {
 
     enum class Look { READY, LOADING, LISTENING, WORKING, NEED_MODEL }
     var look = Look.READY
-        set(v) { field = v; if (v != Look.LISTENING) level.animateTo(0f, 200); invalidate() }
+        set(v) {
+            if (field != v) lit.animateTo(if (v == Look.LISTENING) 1f else 0f, dur(Motion.SWAP + 60))
+            field = v
+            if (v != Look.LISTENING) level.animateTo(0f, dur(200))
+            invalidate()
+        }
     var status = ""
         set(v) { field = v; invalidate() }
     var partial = ""
@@ -58,21 +63,23 @@ class VoicePanel(context: Context, private val prefs: Prefs) : View(context) {
     var canUndo = false
         set(v) { field = v; invalidate() }
 
-    private fun dp(v: Float) = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, resources.displayMetrics)
-    private fun sp(v: Float) = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, v, resources.displayMetrics)
-
     private val bg = Paint(Paint.ANTI_ALIAS_FLAG)
     private val tp = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER }
+    private val ellipsizer = TextPaint(Paint.ANTI_ALIAS_FLAG)
     private val ip = Paint(Paint.ANTI_ALIAS_FLAG)
     private val level = Tween(0f)
+    /** 0 idle, 1 listening: the button fills with the accent. */
+    private val lit = Tween(0f)
     private val spin = Tween(0f)
-    private val hits = mutableListOf<Pair<RectF, String>>()
+    private val hits = Hits()
     private var pressed: String? = null
     private val arc = RectF()
+    private val chipRect = RectF()
 
-    fun setLevel(v: Float) { level.animateTo(v, 90); invalidate() }
+    /** The voice level, 0..1, about thirty times a second while listening. */
+    fun setLevel(v: Float) { level.animateTo(v, if (prefs.animations) 90 else 0); invalidate() }
 
-    private val handler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val handler = Handler(Looper.getMainLooper())
     private var repeats = 0
     private val repeat = object : Runnable {
         override fun run() {
@@ -85,97 +92,81 @@ class VoicePanel(context: Context, private val prefs: Prefs) : View(context) {
     override fun onDetachedFromWindow() { super.onDetachedFromWindow(); handler.removeCallbacks(repeat); pressed = null }
 
     override fun onDraw(c: Canvas) {
-        c.drawColor(theme.background)
+        val t = theme
+        c.drawColor(t.background)
         hits.clear()
+        val m = dp(12f)
+        val ch = dp(Ui.CHIP_H)
+        val busy = look == Look.LISTENING || look == Look.WORKING || look == Look.LOADING
+        // corners first: the middle takes the room they leave
+        var x = m
+        x = chip(c, "lang", language, ChipStyle.SOFT, x, m, icon = "language") + dp(Ui.CHIP_GAP)
+        chip(c, "engine", engineName, if (picking) ChipStyle.ACTIVE else ChipStyle.SOFT, x, m, chevron = true)
+        chip(c, "mode", mode, if (translating) ChipStyle.ACTIVE else ChipStyle.SOFT, width - m, m, alignRight = true, icon = if (translating) "translate" else null)
+        val bottomY = height - m - ch
+        if (busy) chip(c, "cancel", "取消", ChipStyle.GHOST, m, bottomY)
+        val del = chip(c, "delete", "", ChipStyle.SOFT, width - m, bottomY, alignRight = true, icon = "backspace")
+        if (canUndo) chip(c, "undo", "撤回上一句", ChipStyle.SOFT, del - dp(Ui.CHIP_GAP), bottomY, alignRight = true, icon = "undo")
+
+        // the button, and the line under it
+        val lineY = bottomY - dp(16f)
+        val top = m + ch
+        val cy = (top + lineY - dp(12f)) / 2
+        val room = min(cy - top - dp(4f), lineY - dp(12f) - cy)
+        val r = (room / 1.38f).coerceIn(dp(20f), min(width, height) * 0.17f)
         val cx = width / 2f
-        // three bands: status under the top chips, the sentence above the bottom chips, the
-        // button centered between them and sized to the room left
-        val statusY = dp(62f)
-        val partialY = height - dp(64f)
-        val cy = (statusY + partialY) / 2
-        val r = ((partialY - statusY) / 2 - dp(14f)).coerceIn(dp(18f), min(width, height) * 0.16f)
-        var again = level.running
-        if (look == Look.LISTENING) {
+        var again = level.running || lit.running
+        val l = lit.value
+        if (l > 0.01f) {
             val lv = level.value
-            bg.color = theme.accentSoft
-            c.drawCircle(cx, cy, r * (1.15f + 0.35f * lv), bg)
-            c.drawCircle(cx, cy, r * (1.06f + 0.16f * lv), bg)
+            bg.color = Colors.fade(t.accentSoft, l)
+            c.drawCircle(cx, cy, r * (1.12f + 0.26f * lv), bg)
+            c.drawCircle(cx, cy, r * (1.04f + 0.1f * lv), bg)
         }
-        bg.color = when (look) {
-            Look.LISTENING -> if (pressed == "mic") theme.accentPressed else theme.accent
-            else -> if (pressed == "mic") theme.softPressed else theme.soft
-        }
+        val idle = if (pressed == "mic") t.softPressed else t.soft
+        val on = if (pressed == "mic") t.accentPressed else t.accent
+        bg.color = Colors.blend(idle, on, l)
         c.drawCircle(cx, cy, r, bg)
-        hits += RectF(cx - r - dp(12f), cy - r - dp(12f), cx + r + dp(12f), cy + r + dp(12f)) to "mic"
+        hits.add("mic", cx - r, cy - r, cx + r, cy + r, slop = dp(12f))
         if (look == Look.WORKING || look == Look.LOADING) {
-            if (!spin.running) { spin.set(0f); spin.animateTo(1f, 900, android.view.animation.LinearInterpolator()) }
+            if (!spin.running) { spin.set(0f); spin.animateTo(1f, 900, Motion.LINEAR) }
             again = true
-            ip.color = theme.accent; ip.style = Paint.Style.STROKE; ip.strokeWidth = dp(3f); ip.strokeCap = Paint.Cap.ROUND
+            ip.color = t.accent; ip.style = Paint.Style.STROKE; ip.strokeWidth = dp(3f); ip.strokeCap = Paint.Cap.ROUND
             arc.set(cx - r - dp(6f), cy - r - dp(6f), cx + r + dp(6f), cy + r + dp(6f))
             c.drawArc(arc, spin.value * 360f - 90f, 70f, false, ip)
             ip.style = Paint.Style.FILL
         }
-        ip.color = if (look == Look.LISTENING) theme.onAccent else theme.ink
+        ip.color = Colors.blend(t.ink, t.onAccent, l)
         Icons.draw(c, "mic", cx, cy, r * 0.9f, ip)
-        // status above the button, the sentence being heard below it
-        tp.typeface = Ui.medium; tp.textSize = sp(Ui.BODY); tp.color = theme.inkSoft
-        text(c, status, cx, statusY)
-        tp.typeface = Ui.regular
+        // the sentence being heard, or else what is going on
         if (partial.isNotEmpty()) {
-            tp.textSize = sp(Ui.BODY + 1f); tp.color = if (translating) theme.accent else theme.ink
+            tp.typeface = Ui.regular; tp.textSize = sp(Ui.TITLE); tp.color = if (translating) t.accent else t.ink
             val avail = width - dp(40f)
-            val shown = if (tp.measureText(partial) <= avail) partial
-                else "…" + TextUtils.ellipsize(partial.reversed(), TextPaint(tp), avail - tp.measureText("…"), TextUtils.TruncateAt.END).toString().reversed().trimEnd('…')
-            text(c, shown, cx, partialY)
+            val shown = if (tp.measureText(partial) <= avail) partial else {
+                ellipsizer.set(tp)
+                "…" + TextUtils.ellipsize(partial.reversed(), ellipsizer, avail - tp.measureText("…"), TextUtils.TruncateAt.END).toString().reversed().trimEnd('…')
+            }
+            drawText(c, shown, cx, lineY, tp)
+        } else {
+            tp.typeface = Ui.regular; tp.textSize = sp(Ui.BODY); tp.color = t.inkSoft
+            drawText(c, status, cx, lineY, tp)
         }
-        // corners
-        val ph = dp(34f); val m = dp(12f)
-        val lr = chip(c, "lang", language, "language", m, m, ph, left = true)
-        chip(c, "engine", "$engineName ▾", null, lr.right + dp(8f), m, ph, left = true, on = picking)
-        chip(c, "mode", mode, if (translating) "translate" else null, width - m, m, ph, left = false, on = translating)
-        if (look == Look.LISTENING || look == Look.WORKING || look == Look.LOADING) chip(c, "cancel", "取消", null, m, height - m - ph, ph, left = true)
-        // bottom right: delete, and taking back the last sentence beside it
-        val del = chip(c, "delete", "", "backspace", width - m, height - m - ph, ph, left = false, iconOnly = true)
-        if (canUndo) chip(c, "undo", "撤回上一句", "undo", del.left - dp(8f), height - m - ph, ph, left = false)
         if (picking) {
             // the list of recognizers, over the middle of the panel
             val pad = dp(12f)
-            if (pick.draw(c, RectF(pad, m + ph + dp(8f), width - pad, height - pad), theme, Ui.radiusLarge(dp(prefs.keyRadiusDp), dp(1f)))) again = true
+            if (pick.draw(c, chipRect.apply { set(pad, m + ch + dp(8f), width - pad, height - pad) }, t, Ui.radiusLarge(dp(prefs.keyRadiusDp), dp(1f)))) again = true
         }
         if (again) postInvalidateOnAnimation()
     }
 
-    private fun chip(c: Canvas, id: String, label: String, icon: String?, x: Float, y: Float, h: Float, left: Boolean, on: Boolean = false, iconOnly: Boolean = false): RectF {
-        tp.textSize = sp(Ui.SMALL)
-        val w = if (iconOnly) dp(52f) else tp.measureText(label) + dp(if (icon != null) 40f else 26f)
-        val r = if (left) RectF(x, y, x + w, y + h) else RectF(x - w, y, x, y + h)
-        bg.color = when {
-            on -> theme.accentSoft
-            pressed == id -> theme.softPressed
-            else -> theme.soft
-        }
-        c.drawRoundRect(r, h / 2, h / 2, bg)
-        val ink = if (on) theme.accent else theme.inkSoft
-        var tx = r.centerX()
-        if (iconOnly && icon != null) {
-            ip.color = ink; Icons.draw(c, icon, r.centerX(), r.centerY(), dp(19f), ip)
-            hits += RectF(r).apply { inset(-dp(4f), -dp(6f)) } to id
-            return r
-        }
-        if (icon != null) {
-            ip.color = ink
-            Icons.draw(c, icon, r.left + dp(17f), r.centerY(), dp(15f), ip)
-            tx = r.left + dp(28f) + tp.measureText(label) / 2
-        }
-        tp.color = ink
-        text(c, label, tx, r.centerY())
-        hits += RectF(r).apply { inset(-dp(4f), -dp(6f)) } to id
-        return r
-    }
-
-    private fun text(c: Canvas, s: String, x: Float, y: Float) {
-        val fm = tp.fontMetrics
-        c.drawText(s, x, y - (fm.ascent + fm.descent) / 2, tp)
+    /** Draws a chip anchored at its left (or right) edge [x]; returns the opposite edge. */
+    private fun chip(c: Canvas, id: String, label: String, style: ChipStyle, x: Float, y: Float,
+                     alignRight: Boolean = false, icon: String? = null, chevron: Boolean = false): Float {
+        val w = chipWidth(label, icon, chevron)
+        val r = chipRect.apply { if (alignRight) set(x - w, y, x, y + dp(Ui.CHIP_H)) else set(x, y, x + w, y + dp(Ui.CHIP_H)) }
+        drawChip(c, r, label, style, pressed = pressed == id, icon = icon, chevron = chevron)
+        hits.add(id, r, slop = dp(5f))
+        return if (alignRight) r.left else r.right
     }
 
     @SuppressLint("ClickableViewAccessibility")
@@ -188,7 +179,7 @@ class VoicePanel(context: Context, private val prefs: Prefs) : View(context) {
         }
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                pressed = hits.lastOrNull { it.first.contains(e.x, e.y) }?.second
+                pressed = hits.at(e.x, e.y)
                 if (pressed == "delete") { onDelete?.invoke(false); repeats = 0; handler.postDelayed(repeat, 420) }
                 else if (pressed != null) onFeedback?.invoke()
                 invalidate()

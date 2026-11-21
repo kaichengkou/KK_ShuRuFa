@@ -107,6 +107,14 @@ object Icons {
     }
 
     private val check = p { moveTo(5f, 12.5f); lineTo(10f, 17.5f); lineTo(19.5f, 7f) }
+    /** The small chevron after a chip that opens a list. */
+    private val chevron = p { moveTo(7f, 10f); lineTo(12f, 15f); lineTo(17f, 10f) }
+    private val search = p { addCircle(10.5f, 10.5f, 6.5f, Path.Direction.CW); moveTo(15.4f, 15.4f); lineTo(20f, 20f) }
+    private val swap = p {
+        moveTo(4f, 8.5f); lineTo(19f, 8.5f); moveTo(15f, 4.5f); lineTo(19f, 8.5f); lineTo(15f, 12.5f)
+        moveTo(20f, 15.5f); lineTo(5f, 15.5f); moveTo(9f, 11.5f); lineTo(5f, 15.5f); lineTo(9f, 19.5f)
+    }
+    private val stop = p { addRoundRect(RectF(6.5f, 6.5f, 17.5f, 17.5f), 2.5f, 2.5f, Path.Direction.CW) }
     private val moon = p { moveTo(19f, 14.5f); quadTo(12.5f, 17f, 9f, 12.5f); quadTo(6.5f, 8.5f, 9.5f, 4.5f); quadTo(3.5f, 6.5f, 4f, 13f); quadTo(5f, 20f, 12f, 20f); quadTo(17f, 20f, 19f, 14.5f); close() }
     private val vibrate = p {
         addRoundRect(RectF(8f, 4f, 16f, 20f), 2f, 2f, Path.Direction.CW)
@@ -123,7 +131,7 @@ object Icons {
     }
 
     val all = mapOf(
-        "voice" to mic, "check" to check, "moon" to moon, "vibrate" to vibrate, "speaker" to speaker, "grid" to grid,
+        "voice" to mic, "check" to check, "chevron" to chevron, "search" to search, "swap" to swap, "stop" to stop, "moon" to moon, "vibrate" to vibrate, "speaker" to speaker, "grid" to grid,
         "select_all" to selectAll, "copy" to copy, "paste" to paste, "cut" to cut, "undo" to undo,
         "home" to lineStart, "end" to lineEnd, "abc" to keyboardIcon,
         "quick" to quick, "close" to close, "up" to up, "down" to down, "pin" to pin,

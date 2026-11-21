@@ -397,11 +397,9 @@ private fun LookPage(prefs: Prefs) {
         Text("主体色", modifier = Modifier.padding(top = 6.dp))
         Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), horizontalArrangement = Arrangement.SpaceBetween) {
             KbTheme.ACCENTS.forEach { (id, v) ->
-                val (name, colors) = v
+                val name = v.first
                 val dark = isSystemInDarkTheme()
-                val c = if (id == "system") {
-                    if (android.os.Build.VERSION.SDK_INT >= 31) Color(ctx.getColor(if (dark) android.R.color.system_accent1_200 else android.R.color.system_accent1_600)) else Color.Gray
-                } else Color(if (dark) colors.second else colors.first)
+                val c = if (id == "system" && android.os.Build.VERSION.SDK_INT < 31) Color.Gray else Color(KbTheme.accentFor(ctx, id, dark))
                 Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { accent = id; prefs.put(Prefs.ACCENT, id) }) {
                     Box(Modifier.size(36.dp).clip(CircleShape).background(c)
                         .then(if (accent == id) Modifier.border(3.dp, MaterialTheme.colorScheme.onSurface, CircleShape) else Modifier),
@@ -416,7 +414,7 @@ private fun LookPage(prefs: Prefs) {
     Group("按键") {
         IntSlider(prefs, Prefs.KEY_HEIGHT, "按键高度", 46, 36..64, "dp")
         FloatSlider(prefs, Prefs.KEY_GAP, "按键间距", 5f, 2f..10f, "dp")
-        FloatSlider(prefs, Prefs.KEY_RADIUS, "按键圆角", 7f, 0f..18f, "dp")
+        FloatSlider(prefs, Prefs.KEY_RADIUS, "按键圆角", 8f, 0f..18f, "dp")
         IntSlider(prefs, Prefs.BOTTOM_PADDING, "键盘底部留白", 4, 0..24, "dp")
         Toggle(prefs, Prefs.KEY_BORDERS, "实心键的投影", "字母、数字键下方的一道浅影", true)
         Toggle(prefs, Prefs.NUMBER_ROW, "常驻数字行", "字母键盘最上面加一排数字", false)
@@ -446,6 +444,7 @@ private fun MotionPage(prefs: Prefs) {
 private fun HapticsPage(prefs: Prefs) {
     val ctx = LocalContext.current
     val haptics = remember { Haptics(ctx, prefs) }
+    DisposableEffect(haptics) { onDispose { haptics.release() } }
     Group {
         Toggle(prefs, Prefs.VIBRATE, "振动", "总开关", true)
         Note("每类事件单独选效果。轻触、点击、重击、双击是系统内置的触感；自定义可以调强度和时长。")
@@ -601,8 +600,8 @@ private fun EmojiGroup(prefs: Prefs) {
                         r.onSuccess { v ->
                             if (v == null) status = "已是最新"
                             else { version = v; status = "已更新到 Emoji $v" }
-                            prefs.sp.edit().putLong(Prefs.EMOJI_CHECKED, System.currentTimeMillis())
-                                .putLong("seen_emoji_reload", System.currentTimeMillis()).apply()
+                            prefs.state.edit().putLong(Prefs.EMOJI_CHECKED, System.currentTimeMillis())
+                                .putLong(Prefs.EMOJI_RELOAD, System.currentTimeMillis()).apply()
                         }.onFailure { status = "检查失败：${it.message ?: "网络错误"}" }
                     }
                 }.start()
@@ -637,7 +636,7 @@ private fun FilesPage() {
         Note("所有键盘布局都是 YAML 文件。导出后可以用文本编辑器改键位、滑动字符、长按选项、符号分类和数学键盘；改完点“重新加载”。删掉某个文件就恢复默认。只想改几个键的话，用“键位编辑”更方便。")
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(vertical = 6.dp)) {
             FilledTonalButton(onClick = { path = LayoutRepo(ctx).exportDefaults().absolutePath }) { Text("导出布局文件") }
-            FilledTonalButton(onClick = { Prefs(ctx).put("layout_reload", System.currentTimeMillis().toString()) }) { Text("重新加载") }
+            FilledTonalButton(onClick = { Prefs(ctx).put(Prefs.LAYOUT_RELOAD, System.currentTimeMillis().toString()) }) { Text("重新加载") }
         }
         path?.let { Note("已导出到：$it") }
     }
@@ -1076,7 +1075,7 @@ private fun OnlinePage(prefs: Prefs) {
             PickRow("使用", cur?.let { com.kk.shurufa.online.Llm.targetLabel(prefs, it) } ?: "未选择") { pickAi = true }
             if (pickAi) PickerDialog("AI 改写使用", targets, cur, onPick = { prefs.put(Prefs.AI_PROVIDER, it); tick++ }, onClose = { pickAi = false })
         }
-        Note("工具栏的 ✦：润色、纠错、正式、口语、精简、扩写，翻译成英文 / 俄语 / 中文，以及“＋ 自定义”——直接打字说要怎么改，最近用过的指令会留在面板上。面板右上角可以临时换模型。")
+        Note("工具栏的 ✦：润色、纠错、正式、口语、精简、扩写，翻译成英文 / 俄语 / 中文，以及“输入指令”——直接用键盘打出想怎么改，回车执行。面板右上角可以临时换模型。")
     }
     Group("翻译") {
         val engines = listOf("auto" to "自动（有 AI 用 AI，否则离线）", "mlkit" to "离线（ML Kit）") + targets

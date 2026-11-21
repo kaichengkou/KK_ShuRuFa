@@ -8,21 +8,29 @@ import java.text.Normalizer
  * typed decide which reading of a polyphonic character is meant (行 xíng / háng).
  */
 class PinyinTones(private val context: Context) {
-    private var table: Map<Char, List<String>>? = null
+    @Volatile private var table: Map<Char, List<String>>? = null
 
-    private fun table(): Map<Char, List<String>> = table ?: run {
-        val m = HashMap<Char, List<String>>(48000)
-        context.assets.open("data/pinyin_tones.txt").bufferedReader().forEachLine { line ->
-            val tab = line.indexOf('\t')
-            if (tab == 1) m[line[0]] = line.substring(2).split(',')
+    /** Reads the table now (call it off the main thread, so the first conversion does not wait). */
+    fun preload() { table() }
+
+    private fun table(): Map<Char, List<String>> = table ?: synchronized(this) {
+        table ?: HashMap<Char, List<String>>(48000).also { m ->
+            context.assets.open("data/pinyin_tones.txt").bufferedReader().forEachLine { line ->
+                val tab = line.indexOf('\t')
+                if (tab == 1) m[line[0]] = line.substring(2).split(',')
+            }
+            table = m
         }
-        table = m
-        m
     }
 
-    /** Removes tone marks and normalizes ü to v, to compare with what was typed. */
+    /**
+     * Removes tone marks and writes ü as v, to compare with what was typed. ü is found after
+     * decomposition, so ǖ ǘ ǚ ǜ become v too.
+     */
     private fun plain(s: String): String = Normalizer.normalize(s, Normalizer.Form.NFD)
-        .replace(Regex("[\\u0300-\\u036f]"), "").replace("ü", "v").replace("ü", "v").lowercase()
+        .replace("u\u0308", "v").replace("U\u0308", "V").replace(MARKS, "").lowercase()
+
+    private companion object { val MARKS = Regex("[\\u0300-\\u036f]") }
 
     /** [syllables] are the typed syllables in order (may be shorter than the text). */
     fun convert(text: String, syllables: List<String>): String {

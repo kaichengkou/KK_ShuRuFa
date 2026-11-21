@@ -14,8 +14,7 @@ data class Output(val label: String, val text: String, val tex: String = text) {
     }
 }
 
-/** NORMAL: solid (letters, digits). FUNC/SOFT: translucent (functions, symbols). ACTION: accent (enter). */
-/** NORMAL solid, FUNC/SOFT translucent ink, ACTION accent, TINT translucent accent (a way to another panel). */
+/** NORMAL solid (letters, digits), FUNC/SOFT translucent ink (functions, symbols), ACTION accent (enter), TINT translucent accent (a way to another panel). */
 enum class KeyStyle { NORMAL, FUNC, SOFT, ACTION, TINT }
 
 private fun defaultStyle(fn: String?) = when (fn) {

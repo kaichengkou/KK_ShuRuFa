@@ -4,7 +4,6 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.util.TypedValue
 import android.view.ViewGroup
-import android.view.animation.PathInterpolator
 import android.widget.LinearLayout
 import com.kk.shurufa.Prefs
 
@@ -15,6 +14,9 @@ import com.kk.shurufa.Prefs
  */
 @SuppressLint("ViewConstructor")
 class MathPanel(context: Context, private val prefs: Prefs, newKeyboard: () -> KeyboardView) : LinearLayout(context) {
+    var theme: KbTheme
+        get() = tabs.theme
+        set(t) { tabs.theme = t; func.theme = t; pad.theme = t; bottom.theme = t }
     companion object {
         /** Key height of the academic rows, relative to the letters. */
         const val ROW = 0.9f
@@ -38,8 +40,6 @@ class MathPanel(context: Context, private val prefs: Prefs, newKeyboard: () -> K
         addView(bottom, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
     }
 
-    fun setTheme(t: KbTheme) { tabs.theme = t; func.theme = t; pad.theme = t; bottom.theme = t }
-
     /** Shows [tabId]; [slide] -1/1 brings the function block in from that side. */
     fun show(m: MathLayout, tabId: String, slide: Int = 0) {
         val tab = m.tabs.firstOrNull { it.id == tabId } ?: m.tabs.first()
@@ -49,8 +49,8 @@ class MathPanel(context: Context, private val prefs: Prefs, newKeyboard: () -> K
         if (slide != 0 && prefs.animations) {
             func.animate().cancel()
             func.translationX = slide * dp(28f); func.alpha = 0f
-            func.animate().translationX(0f).alpha(1f).setDuration((200 * prefs.animSpeed).toLong())
-                .setInterpolator(PathInterpolator(0.2f, 0f, 0f, 1f)).withLayer().start()
+            func.animate().translationX(0f).alpha(1f).setDuration(Motion.dur(prefs, 220))
+                .setInterpolator(Motion.ENTER).withLayer().start()
         }
     }
 }

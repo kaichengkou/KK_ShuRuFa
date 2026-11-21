@@ -1,7 +1,6 @@
 package com.kk.shurufa.ime
 
 import android.content.Context
-import java.util.concurrent.Executors
 
 /**
  * 词语联想: after a word is committed, suggests what usually follows it in the dictionary
@@ -10,15 +9,14 @@ import java.util.concurrent.Executors
 class Predictor(private val context: Context) {
     @Volatile private var data: ByteArray? = null
     @Volatile private var lines: IntArray? = null
-    private val exec = Executors.newSingleThreadExecutor()
 
     @Volatile private var poetry: Map<String, String>? = null
 
     /** 古诗文扩展包: line -> the line that follows it. */
     fun loadPoetry() {
         if (poetry != null) return
-        exec.execute {
-            if (poetry != null) return@execute
+        Background.run {
+            if (poetry != null) return@run
             val m = HashMap<String, String>(40000)
             context.assets.open("data/poetry_next.txt").bufferedReader().forEachLine { l ->
                 val t = l.indexOf('\t')
@@ -40,8 +38,8 @@ class Predictor(private val context: Context) {
 
     fun load() {
         if (data != null) return
-        exec.execute {
-            if (data != null) return@execute
+        Background.run {
+            if (data != null) return@run
             val bytes = context.assets.open("data/predict_zh.txt").use { it.readBytes() }
             var n = 0
             for (b in bytes) if (b == '\n'.code.toByte()) n++

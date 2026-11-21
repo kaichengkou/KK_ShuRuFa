@@ -92,10 +92,7 @@ class KeyboardRenderTest {
     }
 
     private fun keyCenter(pred: (Key) -> Boolean): Pair<Float, Float> {
-        val f = KeyboardView::class.java.getDeclaredField("rects").apply { isAccessible = true }
-        @Suppress("UNCHECKED_CAST")
-        val rects = f.get(kb) as List<Pair<Key, android.graphics.RectF>>
-        val r = rects.first { pred(it.first) }.second
+        val r = kb.keyRect(pred)!!
         return r.centerX() to r.centerY()
     }
 
@@ -187,7 +184,7 @@ class KeyboardRenderTest {
         bar.showToolbar()
         kb.setRows(repo.keyboard("en").rows); layoutRoot(); shot("en")
         val m = repo.math()
-        bar.showMath(m.tabs.map { it.id to it.name }, "basic", "uni")
+        bar.showMath("uni", simple = false)
         bar.showPredictions(listOf("人民", "经济", "政府", "市场", "企业", "特色"))
         kb.setRows(repo.keyboard("zh").rows, math = false); layoutRoot(); shot("zh_predictions")
         bar.showClip("https://github.com/kaichengkou/KK_ShuRuFa", "链接")
@@ -230,13 +227,13 @@ class KeyboardRenderTest {
             cellStyle = com.kk.shurufa.keyboard.GridPanel.CellStyle.SOFT; columns = 1; textSp = 20f; cellPadDp = 0f; cellGapDp = prefs.keyGapDp; scrollHint = true }
         val num = com.kk.shurufa.keyboard.NumPadView(ctx, KeyboardView(ctx, prefs).apply { listener = this@KeyboardRenderTest.listener; setRows(repo.keyboard("num").rows) }, opStrip)
         num.setItems(listOf("+", "−", "×", "÷", "=", "%", "(", ")", "/", ",", "±"))
-        panelShot("num", num, fam) { it.showMath(emptyList(), "", "uni", simple = true) }
+        panelShot("num", num, fam) { it.showMath("uni", simple = true) }
         // 数字·学术
         val m = repo.math()
         val sci = com.kk.shurufa.keyboard.MathPanel(ctx, prefs) { KeyboardView(ctx, prefs).apply { listener = this@KeyboardRenderTest.listener } }
         for ((i, t) in m.tabs.withIndex()) {
             sci.show(m, t.id)
-            panelShotWrap("sci_${i}_${t.id}", sci) { it.showMath(emptyList(), t.id, if (t.id == "lin") "tex" else "uni", simple = false) }
+            panelShotWrap("sci_${i}_${t.id}", sci) { it.showMath(if (t.id == "lin") "tex" else "uni", simple = false) }
         }
         // symbols: no toolbar, so the panel takes its height
         val sym = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
@@ -311,7 +308,8 @@ class KeyboardRenderTest {
         emo.addView(erail, LinearLayout.LayoutParams((ctx.resources.displayMetrics.density * 64).toInt(), -1))
         emo.addView(ecells, LinearLayout.LayoutParams(0, -1, 1f))
         val groups = ctx.assets.open("data/emoji.txt").bufferedReader().readLines().map { it.substringBefore('\t') to it.substringAfter('\t').split(' ') }
-        erail.setItems(listOf("⌕ 查找", "最近") + groups.map { it.first } + "颜文字")
+        erail.railIcons = listOf("search")
+        erail.setItems(listOf("查找", "最近") + groups.map { it.first } + "颜文字")
         erail.selectedIndex = 2
         ecells.setItems(groups[1].second)
         val vmap = com.kk.shurufa.ime.EmojiData(ctx).apply { load() }.variants

@@ -5,129 +5,131 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.RectF
-import android.util.TypedValue
 import android.view.MotionEvent
 import android.view.VelocityTracker
-import android.view.View
 import android.view.ViewConfiguration
 import com.kk.shurufa.Prefs
 import kotlin.math.abs
+import kotlin.math.floor
 import kotlin.math.roundToInt
 
 /**
- * 快捷面板: pages of eight tiles (swipe sideways for the next page). Every tile is the same
- * card: an icon in a disc, a name, and for switches a small toggle in the corner.
+ * 快捷面板: pages of eight buttons (swipe sideways for the next page). Each is a round button
+ * with its name under it; a switch that is on fills with the accent, everything else stays a
+ * soft disc. No cards, no separate toggles: the disc is the state.
  */
 @SuppressLint("ViewConstructor")
-class QuickPanel(context: Context, private val prefs: Prefs) : View(context) {
+class QuickPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
     /** [on] is null for shortcuts (open a panel or a page) and true/false for switches. */
     data class Tile(val id: String, val title: String, val sub: String = "", val on: Boolean? = null)
 
-    var theme: KbTheme = KbTheme.resolve(context, prefs)
     var onTile: ((String) -> Unit)? = null
     var onPress: (() -> Unit)? = null
     var tiles: List<Tile> = emptyList()
-        set(v) { field = v; page.set(page.value.coerceIn(0f, (pages - 1).toFloat())); invalidate() }
-
-    private fun dp(v: Float) = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, resources.displayMetrics)
-    private fun sp(v: Float) = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, v, resources.displayMetrics)
+        set(v) {
+            // a switch that changes fades into its new state instead of jumping
+            v.forEachIndexed { i, t -> fills.getOrPut(t.id) { Tween(if (t.on == true) 1f else 0f) }.animateTo(if (t.on == true) 1f else 0f, dur(Motion.SWAP + 60)) }
+            field = v
+            page.snap(page.value.coerceIn(0f, (pages - 1).toFloat()))
+            invalidate()
+        }
 
     private val bg = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val tp = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val tp = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER }
     private val ip = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val hits = mutableListOf<Pair<RectF, Int>>()
+    private val hits = Hits()
+    private val fills = HashMap<String, Tween>()
     private var pressed = -1
+    private val press = Tween(0f)
     private val appear = Tween(1f)
-    private val page = Tween(0f)
+    private val page = Spring(0f, stiffness = 420f, dampingRatio = 0.9f)
     private val cols = 4
     private val rows = 2
     private val perPage get() = cols * rows
     private val pages get() = ((tiles.size + perPage - 1) / perPage).coerceAtLeast(1)
 
-    fun animateIn() { if (prefs.animations) { appear.set(0f); appear.animateTo(1f, (220 * prefs.animSpeed).toLong()) }; invalidate() }
+    fun animateIn() {
+        if (prefs.animations) { appear.set(0f); appear.animateTo(1f, dur(Motion.PANEL), Motion.ENTER) }
+        invalidate()
+    }
 
     override fun onDraw(c: Canvas) {
-        c.drawColor(theme.background)
+        val t = theme
+        c.drawColor(t.background)
         hits.clear()
-        val pad = dp(10f); val g = dp(8f)
-        val dotsH = if (pages > 1) dp(18f) else dp(4f)
-        val w = (width - 2 * pad - g * (cols - 1)) / cols
-        val h = (height - 2 * pad - dotsH - g * (rows - 1)) / rows
+        if (page.running) page.step()
+        val padX = dp(8f)
+        val padTop = dp(10f)
+        val dotsH = if (pages > 1) dp(20f) else dp(6f)
+        val w = (width - 2 * padX) / cols
+        val h = (height - padTop - dotsH) / rows
         val a = appear.value
         val p0 = page.value + dragOffset
-        if (appear.running || page.running) postInvalidateOnAnimation()
-        tiles.forEachIndexed { i, t ->
+        val discR = minOf(dp(23f), h * 0.29f)
+        var again = appear.running || page.running || press.running
+        tiles.forEachIndexed { i, tile ->
             val pg = i / perPage; val k = i % perPage
             val col = k % cols; val row = k / cols
             val shift = (pg - p0) * width
             if (abs(shift) >= width) return@forEachIndexed
-            val delay = (k * 0.04f).coerceAtMost(0.35f)
+            // the buttons rise into place one after another
+            val delay = (k * 0.045f).coerceAtMost(0.35f)
             val pa = ((a - delay) / (1 - delay)).coerceIn(0f, 1f)
-            val x = pad + col * (w + g) + shift
-            val y = pad + row * (h + g) + (1 - pa) * dp(8f)
-            val r = RectF(x, y, x + w, y + h)
-            hits += r to i
-            drawTile(c, t, r, i == pressed, pa)
+            val x = padX + col * w + shift
+            val y = padTop + row * h + (1 - pa) * dp(10f)
+            hits.add(i.toString(), x, y, x + w, y + h)
+            val fill = fills[tile.id]
+            if (fill?.running == true) again = true
+            drawTile(c, tile, x, y, w, h, discR, if (i == pressed) press.value else 0f, fill?.value ?: 0f, pa)
         }
         if (pages > 1) {
-            // page dots
-            val cy = height - pad / 2 - dotsH / 2
+            // page dots: the current one is a short pill that slides with the pages
+            val cy = height - dotsH / 2 - dp(2f)
+            val gap = dp(14f)
+            val pos = p0.coerceIn(0f, (pages - 1).toFloat())
             for (i in 0 until pages) {
-                val on = (p0.roundToInt() == i)
-                bg.color = if (on) theme.accent else theme.divider
-                val cx = width / 2f + (i - (pages - 1) / 2f) * dp(14f)
-                c.drawRoundRect(cx - (if (on) dp(7f) else dp(3f)), cy - dp(3f), cx + (if (on) dp(7f) else dp(3f)), cy + dp(3f), dp(3f), dp(3f), bg)
+                val near = (1f - abs(pos - i)).coerceIn(0f, 1f)
+                bg.color = Colors.blend(t.divider, t.accent, near)
+                val cx = width / 2f + (i - (pages - 1) / 2f) * gap
+                val half = dp(3f) + dp(4f) * near
+                c.drawRoundRect(cx - half, cy - dp(3f), cx + half, cy + dp(3f), dp(3f), dp(3f), bg)
             }
         }
+        if (again) postInvalidateOnAnimation()
     }
 
-    private fun drawTile(c: Canvas, t: Tile, r: RectF, isPressed: Boolean, alpha: Float) {
-        val rad = Ui.radiusLarge(dp(prefs.keyRadiusDp), dp(1f))
-        val on = t.on == true
-        bg.color = if (isPressed) theme.surfacePressed else theme.surface
-        bg.alpha = (bg.alpha * alpha).toInt()
-        c.drawRoundRect(r, rad, rad, bg)
-        // icon disc
-        val dr = dp(16f)
-        val dcx = r.left + dp(12f) + dr; val dcy = r.top + dp(12f) + dr
-        // soft and divider colors are translucent: scale their own alpha, do not replace it
-        bg.color = if (on) theme.accent else theme.soft
-        bg.alpha = (bg.alpha * alpha).toInt()
-        c.drawCircle(dcx, dcy, dr, bg)
-        val glyph = GLYPHS[t.id] ?: GLYPHS[t.id.removePrefix("tool:")]
-        val ink = if (on) theme.onAccent else theme.accent
+    private fun drawTile(c: Canvas, tile: Tile, x: Float, y: Float, w: Float, h: Float, r: Float, pv: Float, on: Float, alpha: Float) {
+        val t = theme
+        val cx = x + w / 2
+        val cy = y + h * 0.42f
+        val rr = r * (1f - 0.06f * pv)
+        // off and shortcuts: a soft disc; on: the accent
+        val off = Colors.blend(t.soft, t.softPressed, pv)
+        val lit = Colors.blend(t.accent, t.accentPressed, pv)
+        bg.color = Colors.fade(Colors.blend(off, lit, on), alpha)
+        c.drawCircle(cx, cy, rr, bg)
+        val ink = Colors.blend(t.inkSoft, t.onAccent, on)
+        val glyph = GLYPHS[tile.id] ?: GLYPHS[tile.id.removePrefix("tool:")]
         if (glyph != null) {
             if (Icons.all.containsKey(glyph)) {
-                ip.color = ink; ip.alpha = (255 * alpha).toInt()
-                Icons.draw(c, glyph, dcx, dcy, dp(18f), ip, filled = glyph == "ai" && on)
+                ip.color = Colors.fade(ink, alpha)
+                Icons.draw(c, glyph, cx, cy, r * 0.9f, ip, filled = glyph == "ai" && on > 0.5f)
             } else {
-                tp.textAlign = Paint.Align.CENTER; tp.typeface = Ui.medium; tp.textSize = sp(Ui.BODY + 1f)
-                tp.color = ink; tp.alpha = (255 * alpha).toInt()
-                text(c, glyph, dcx, dcy)
+                tp.typeface = Ui.medium; tp.textSize = sp(Ui.TITLE + 1f)
+                tp.color = Colors.fade(ink, alpha)
+                drawText(c, glyph, cx, cy, tp)
             }
         }
-        // a small toggle for switches
-        if (t.on != null) {
-            val tw = dp(24f); val th = dp(14f)
-            val tr = RectF(r.right - dp(10f) - tw, dcy - th / 2, r.right - dp(10f), dcy + th / 2)
-            bg.color = if (on) theme.accent else theme.hint; bg.alpha = (bg.alpha * alpha * (if (on) 1f else 0.45f)).toInt()
-            c.drawRoundRect(tr, th / 2, th / 2, bg)
-            bg.color = theme.surface; bg.alpha = (255 * alpha).toInt()
-            c.drawCircle(if (on) tr.right - th / 2 else tr.left + th / 2, tr.centerY(), th / 2 - dp(2f), bg)
-        }
-        tp.textAlign = Paint.Align.LEFT; tp.typeface = Ui.medium; tp.textSize = sp(Ui.SMALL + 0.5f)
-        tp.color = theme.ink; tp.alpha = (255 * alpha).toInt()
-        val title = if (t.sub.isNotEmpty()) "${t.title} ${t.sub}" else t.title
-        c.drawText(title, r.left + dp(12f), r.bottom - dp(12f), tp)
-        tp.typeface = Ui.regular
+        tp.typeface = Ui.regular; tp.textSize = sp(Ui.SMALL + 0.5f)
+        tp.color = Colors.fade(t.ink, alpha)
+        val title = if (tile.sub.isNotEmpty()) "${tile.title} · ${tile.sub}" else tile.title
+        val maxW = w - dp(6f)
+        val tw = tp.measureText(title)
+        if (tw > maxW) tp.textSize *= maxW / tw
+        drawText(c, title, cx, cy + r + dp(14f), tp)
     }
 
-    private fun text(c: Canvas, s: String, x: Float, y: Float) {
-        val fm = tp.fontMetrics
-        c.drawText(s, x, y - (fm.ascent + fm.descent) / 2, tp)
-    }
-
-    // ---- touch: tap a tile, swipe for pages ----
+    // ---- touch: tap a button, swipe for pages ----
     private var downX = 0f
     private var dragOffset = 0f
     private var swiping = false
@@ -141,8 +143,9 @@ class QuickPanel(context: Context, private val prefs: Prefs) : View(context) {
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 downX = e.x; swiping = false; dragOffset = 0f
-                pressed = hits.firstOrNull { it.first.contains(e.x, e.y) }?.second ?: -1
-                if (pressed >= 0) onPress?.invoke()
+                page.snap(page.value)
+                pressed = hits.at(e.x, e.y)?.toInt() ?: -1
+                if (pressed >= 0) { onPress?.invoke(); press.set(0f); press.animateTo(1f, dur(Motion.PRESS)) }
                 invalidate()
             }
             MotionEvent.ACTION_MOVE -> {
@@ -160,16 +163,19 @@ class QuickPanel(context: Context, private val prefs: Prefs) : View(context) {
                     val v = vt?.xVelocity ?: 0f
                     val cur = page.value + dragOffset
                     var to = cur.roundToInt()
-                    if (abs(v) > dp(400f)) to = if (v < 0) cur.toInt() + 1 else cur.toInt()
+                    if (abs(v) > dp(400f)) to = if (v < 0) floor(cur).toInt() + 1 else floor(cur).toInt()
                     to = to.coerceIn(0, pages - 1)
-                    page.set(cur); dragOffset = 0f
-                    page.animateTo(to.toFloat(), if (prefs.animations) (240 * prefs.animSpeed).toLong() else 0L)
+                    page.snap(cur); dragOffset = 0f
+                    page.enabled = prefs.animations
+                    page.animateTo(to.toFloat(), -v / width)
                 } else {
-                    val i = hits.firstOrNull { it.first.contains(e.x, e.y) }?.second ?: -1
+                    val i = hits.at(e.x, e.y)?.toInt() ?: -1
                     if (i >= 0 && i == pressed) onTile?.invoke(tiles[i].id)
+                    press.animateTo(0f, dur(Motion.RELEASE))
                 }
-                pressed = -1; swiping = false
+                swiping = false
                 vt?.recycle(); vt = null
+                postDelayed({ pressed = -1; invalidate() }, dur(Motion.RELEASE))
                 invalidate()
             }
             MotionEvent.ACTION_CANCEL -> { pressed = -1; swiping = false; dragOffset = 0f; vt?.recycle(); vt = null; invalidate() }

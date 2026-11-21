@@ -6,12 +6,10 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Rect
 import android.graphics.RectF
-import android.graphics.Typeface
 import android.os.Handler
 import android.os.Looper
-import android.util.TypedValue
+import android.os.SystemClock
 import android.view.MotionEvent
-import android.view.View
 import com.kk.shurufa.Prefs
 import kotlin.math.abs
 import kotlin.math.hypot
@@ -49,15 +47,16 @@ interface KeyboardListener {
  * the whole input view so they can rise above the top row.
  */
 @SuppressLint("ViewConstructor")
-class KeyboardView(context: Context, private val prefs: Prefs) : View(context) {
+class KeyboardView(context: Context, prefs: Prefs) : KbView(context, prefs) {
 
     var listener: KeyboardListener? = null
     var overlay: PopupOverlay? = null
-    var theme: KbTheme = KbTheme.resolve(context, prefs)
     /** Math keys show four-direction hints and use a math font. */
     var mathMode = false
+        private set
     /** State of the symbol panel's lock key. */
     var lockOn = false
+        set(v) { if (field != v) { field = v; invalidate() } }
     /** Height of one key, as a fraction of the configured height (smaller grids use less). */
     var heightScale = 1f
     /** Space above the first row and below the last; stacked keyboards use less. */
@@ -65,19 +64,17 @@ class KeyboardView(context: Context, private val prefs: Prefs) : View(context) {
     var padBottom = true
     /** Overrides the space swipe setting for this keyboard ("cursor" on the academic panel). */
     var spaceSwipeOverride: String? = null
-    /** How labeled function keys show: "text", "icon" (when an icon exists) or "both". */
-    var iconLabels = "text"
 
     private var rows: List<List<Key>> = emptyList()
     /** Where the spacer keys are (space left for another view, like the number pad's operator strip). */
     val spacerRects = mutableListOf<RectF>()
     var onLaidOut: (() -> Unit)? = null
-    private val rects = mutableListOf<Pair<Key, RectF>>()
-    private val pressAnim = HashMap<Key, Tween>()
+    private val keys = mutableListOf<Key>()
+    private val rects = mutableListOf<RectF>()
 
-    private fun dp(v: Float) = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, resources.displayMetrics)
-    private fun sp(v: Float) = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, v, resources.displayMetrics)
-    private fun dur(ms: Long) = if (prefs.animations) (ms * prefs.animSpeed).toLong() else 0L
+    /** Where the first key matching [pred] is laid out, if any. */
+    fun keyRect(pred: (Key) -> Boolean): RectF? = keys.indexOfFirst(pred).takeIf { it >= 0 }?.let { rects[it] }
+    private val pressAnim = HashMap<Key, Tween>()
 
     private val keyPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER }
@@ -94,9 +91,10 @@ class KeyboardView(context: Context, private val prefs: Prefs) : View(context) {
         mathMode = math
         pressAnim.clear()
         requestLayout()
-        if (changed && prefs.animations && isAttachedToWindow) {
-            alpha = 0.6f
-            animate().alpha(1f).setDuration(dur(150)).withLayer().start()
+        if (changed && isAttachedToWindow && prefs.animations) {
+            // a new set of keys: the labels arrive, the key shapes stay where they are
+            labelsAlpha.set(0.35f)
+            labelsAlpha.animateTo(1f, dur(Motion.SWAP), Motion.ENTER)
         }
         invalidate()
     }
@@ -115,25 +113,25 @@ class KeyboardView(context: Context, private val prefs: Prefs) : View(context) {
     }
 
     override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
-        rects.clear()
-        spacerRects.clear()
+        keys.clear(); rects.clear(); spacerRects.clear()
         val side = dp(4f)
         val avail = width - 2 * side
         val n = rows.size
+        val g = gap
         // keys fill the height the parent gives: taller than natural stretches them, shorter (five
         // number rows in the letters' height) makes them a little shorter instead of cutting a row off
-        val kh = if (n > 0 && height > 0) ((height - padTop - padBottomPx - (n - 1) * gap) / n).coerceAtLeast(dp(24f)) else keyH
+        val kh = if (n > 0 && height > 0) ((height - padTop - padBottomPx - (n - 1) * g) / n).coerceAtLeast(dp(24f)) else keyH
         var y = padTop
         for (row in rows) {
             val total = row.sumOf { it.width.toDouble() }.toFloat()
-            val unit = (avail - gap * (row.size - 1)) / total
+            val unit = (avail - g * (row.size - 1)) / total
             var x = side
             for (k in row) {
                 val w = unit * k.width
-                if (!k.spacer) rects += k to RectF(x, y, x + w, y + kh) else spacerRects += RectF(x, y, x + w, y + kh)
-                x += w + gap
+                if (!k.spacer) { keys += k; rects += RectF(x, y, x + w, y + kh) } else spacerRects += RectF(x, y, x + w, y + kh)
+                x += w + g
             }
-            y += kh + gap
+            y += kh + g
         }
         onLaidOut?.invoke()
     }
@@ -141,56 +139,61 @@ class KeyboardView(context: Context, private val prefs: Prefs) : View(context) {
     // ---- drawing ------------------------------------------------------------------------
 
     private val labelsAlpha = Tween(1f)
-    private val spaceOffset = Tween(0f)
+    /** 0 normally, 1 while space works as a trackpad: every key turns into one quiet surface. */
+    private val trackpad = Tween(0f)
+    private val spaceOffset = Spring(0f, stiffness = 900f, dampingRatio = 0.8f)
     private var oldSpaceLabel: String? = null
     private var spaceSwapDir = 0
     private val spaceSwap = Tween(1f)
     private var bsArmed: String? = null   // "clear" | "undo" while the backspace gesture is armed
-
     private val tmpRect = RectF()
+    private val bounds = Rect()
 
     override fun onDraw(c: Canvas) {
-        c.drawColor(theme.background)
+        val t = theme
+        c.drawColor(t.background)
         val r = dp(prefs.keyRadiusDp)
-        var animating = labelsAlpha.running || spaceOffset.running || spaceSwap.running
-        val la = labelsAlpha.value
-        for ((k, rect) in rects) {
+        val borders = prefs.keyBorders
+        val shadowDy = dp(1.2f)
+        val pressInset = dp(1.6f)
+        val tp = trackpad.value
+        val la = labelsAlpha.value * (1f - 0.88f * tp)
+        var animating = labelsAlpha.running || trackpad.running || spaceSwap.running
+        if (spaceOffset.running) { spaceOffset.step(); animating = true }
+        for (i in keys.indices) {
+            val k = keys[i]
+            val rect = rects[i]
             val press = pressAnim[k]
             val pv = press?.value ?: 0f
             if (press?.running == true) animating = true
             val armed = k.fn == "backspace" && bsArmed != null
             val style = if (armed) KeyStyle.ACTION else k.style
-            val inset = dp(1.6f) * pv
+            val inset = pressInset * pv
             val kr = tmpRect.apply { set(rect.left + inset, rect.top + inset, rect.right - inset, rect.bottom - inset) }
-            when (style) {
-                KeyStyle.NORMAL -> {
-                    if (prefs.keyBorders) {
-                        keyPaint.color = theme.shadow
-                        c.drawRoundRect(kr.left, kr.top + dp(1.2f), kr.right, kr.bottom + dp(1.2f), r, r, keyPaint)
-                    }
-                    keyPaint.color = blend(theme.surface, theme.surfacePressed, pv)
-                }
-                KeyStyle.FUNC, KeyStyle.SOFT -> keyPaint.color = blend(theme.soft, theme.softPressed, pv)
-                KeyStyle.ACTION -> keyPaint.color = blend(theme.accent, theme.accentPressed, pv)
-                KeyStyle.TINT -> keyPaint.color = blend(theme.accentSoft, theme.accent, pv * 0.3f)
+            var fill = when (style) {
+                KeyStyle.NORMAL -> Colors.blend(t.surface, t.surfacePressed, pv)
+                KeyStyle.FUNC, KeyStyle.SOFT -> Colors.blend(t.soft, t.softPressed, pv)
+                KeyStyle.ACTION -> Colors.blend(t.accent, t.accentPressed, pv)
+                KeyStyle.TINT -> Colors.blend(t.accentSoft, t.accent, pv * 0.3f)
             }
+            // the trackpad: every key but space melts into the same soft surface
+            val isSpace = k.fn == "space"
+            if (tp > 0f && !isSpace) fill = Colors.blend(fill, t.soft, tp)
+            if (style == KeyStyle.NORMAL && borders && (tp < 1f || isSpace)) {
+                keyPaint.color = Colors.fade(t.shadow, if (isSpace) 1f else 1f - tp)
+                c.drawRoundRect(kr.left, kr.top + shadowDy, kr.right, kr.bottom + shadowDy, r, r, keyPaint)
+            }
+            keyPaint.color = fill
             c.drawRoundRect(kr, r, r, keyPaint)
             val ink = when (style) {
-                KeyStyle.ACTION -> theme.onAccent
-                KeyStyle.TINT -> theme.accent
-                KeyStyle.FUNC -> theme.inkSoft
-                else -> theme.ink
+                KeyStyle.ACTION -> t.onAccent
+                KeyStyle.TINT -> t.accent
+                KeyStyle.FUNC -> t.inkSoft
+                else -> t.ink
             }
-            drawKeyContent(c, k, kr, la, ink)
+            if (isSpace) drawSpace(c, kr, k.label, tp) else drawKeyContent(c, k, kr, la, ink)
         }
         if (animating) postInvalidateOnAnimation()
-    }
-
-    private fun blend(a: Int, b: Int, t: Float): Int {
-        if (t <= 0f) return a
-        if (t >= 1f) return b
-        fun ch(s: Int) = ((a shr s and 0xff) + ((b shr s and 0xff) - (a shr s and 0xff)) * t).toInt() shl s
-        return ch(24) or ch(16) or ch(8) or ch(0)
     }
 
     private fun shiftOn() = (listener?.shiftState() ?: 0) > 0
@@ -204,51 +207,45 @@ class KeyboardView(context: Context, private val prefs: Prefs) : View(context) {
     private fun drawKeyContent(c: Canvas, k: Key, rect: RectF, labelAlpha: Float, ink: Int) {
         val cx = rect.centerX()
         val cy = rect.centerY()
-        val a = (255 * (if (k.fn == "space") 1f else labelAlpha)).toInt()
+        val a = (255 * labelAlpha).toInt()
         textPaint.color = ink
         textPaint.alpha = a
         iconPaint.color = ink
         iconPaint.alpha = a
-        if (k.fn != null) {
+        val fn = k.fn
+        if (fn != null) {
             when {
-                k.fn == "space" -> drawSpace(c, rect, k.label)
-                k.fn == "backspace" && bsArmed != null -> {
-                    textPaint.textSize = sp(14f)
+                fn == "backspace" && bsArmed != null -> {
+                    textPaint.textSize = sp(Ui.KEY_WORD)
                     textPaint.typeface = Ui.medium
-                    drawCentered(c, if (bsArmed == "clear") "清空" else "撤销", cx, cy, textPaint)
-                    textPaint.typeface = Ui.regular
+                    drawText(c, if (bsArmed == "clear") "清空" else "撤销", cx, cy, textPaint)
                 }
-                k.fn == "shift" -> {
+                fn == "shift" -> {
                     val st = listener?.shiftState() ?: 0
-                    if (st > 0) iconPaint.color = theme.accent
-                    Icons.draw(c, "shift", cx, cy, dp(21f), iconPaint, filled = st > 0)
+                    if (st > 0) { iconPaint.color = theme.accent; iconPaint.alpha = a }
+                    Icons.draw(c, "shift", cx, cy, dp(Ui.KEY_ICON), iconPaint, filled = st > 0)
+                    // caps lock: a bar under the arrow
                     if (st == 2) c.drawRoundRect(cx - dp(6f), cy + dp(12f), cx + dp(6f), cy + dp(13.6f), dp(1f), dp(1f), iconPaint)
                 }
-                k.fn == "lock" -> Icons.draw(c, if (lockOn) "lock" else "unlock", cx, cy, dp(21f), iconPaint)
-                k.label != null && iconLabels != "text" && Icons.all.containsKey(k.fn) -> {
-                    if (iconLabels == "both") {
-                        Icons.draw(c, k.fn, cx, cy - dp(7f), dp(20f), iconPaint)
-                        textPaint.textSize = sp(10.5f)
-                        textPaint.typeface = Ui.regular
-                        drawCentered(c, k.label, cx, cy + dp(13f), textPaint)
-                    } else Icons.draw(c, k.fn, cx, cy, dp(22f), iconPaint)
+                fn == "lock" -> {
+                    if (lockOn) { iconPaint.color = theme.accent; iconPaint.alpha = a }
+                    Icons.draw(c, if (lockOn) "lock" else "unlock", cx, cy, dp(Ui.KEY_ICON), iconPaint)
                 }
-                k.label != null || !Icons.all.containsKey(k.fn) -> {
+                k.label != null || !Icons.all.containsKey(fn) -> {
                     val tint = k.style == KeyStyle.TINT
-                    textPaint.textSize = sp((if (tint) 15.5f else 14.5f) * prefs.labelScale)
+                    textPaint.textSize = sp(Ui.KEY_WORD * prefs.labelScale)
                     textPaint.typeface = if (tint) Ui.medium else Ui.regular
-                    val label = k.label ?: k.fn
-                    val maxW = rect.width() - dp(6f)
-                    val tw = textPaint.measureText(label)
-                    if (tw > maxW) textPaint.textSize *= maxW / tw
-                    drawCentered(c, label, cx, cy, textPaint)
+                    val label = k.label ?: fn
+                    fitText(label, rect.width() - dp(8f), textPaint)
+                    drawText(c, label, cx, cy, textPaint)
                 }
-                else -> Icons.draw(c, k.fn, cx, cy, dp(21f), iconPaint)
+                else -> Icons.draw(c, fn, cx, cy, dp(Ui.KEY_ICON), iconPaint)
             }
             return
         }
         val label = displayLabel(k)
         val single = label.codePointCount(0, label.length) <= 1
+        val hints = prefs.showHints
         textPaint.typeface = Ui.regular
         textPaint.textSize = sp(
             when {
@@ -256,106 +253,112 @@ class KeyboardView(context: Context, private val prefs: Prefs) : View(context) {
                 mathMode && label.length > 2 -> 15f
                 mathMode && label.singleOrNull()?.isDigit() == true -> 21f
                 mathMode -> 18f
-                single -> 22f
+                single -> Ui.KEY
                 else -> 16f
             } * prefs.labelScale
         )
-        val maxW = rect.width() - dp(6f)
-        val tw = textPaint.measureText(label)
-        if (tw > maxW) textPaint.textSize *= maxW / tw
+        fitText(label, rect.width() - dp(6f), textPaint)
         if (!mathMode && single && label.isNotEmpty() && !label[0].isLetterOrDigit()) drawByBounds(c, label, cx, cy, textPaint)
-        else drawCentered(c, label, cx, cy + if (!prefs.showHints || k.flicks[Dir.UP] == null) 0f else dp(2f), textPaint)
+        else drawText(c, label, cx, cy + if (!hints || k.flicks[Dir.UP] == null) 0f else dp(2f), textPaint)
 
-        if (!prefs.showHints) return
+        if (!hints) return
         hintPaint.color = if (k.style == KeyStyle.ACTION) theme.onAccent else theme.hint
-        hintPaint.alpha = (255 * labelAlpha).toInt()
-        hintPaint.textSize = sp(Ui.CAPTION * 1.05f * prefs.hintScale)
+        hintPaint.alpha = a
+        hintPaint.textSize = sp(Ui.HINT * prefs.hintScale)
         hintPaint.typeface = Ui.regular
         val fl = k.flicks
         if (prefs.showAllHints) {
-            fl[Dir.UP]?.let { drawCentered(c, hintLabel(it.label), cx, rect.top + hintPaint.textSize * 0.75f, hintPaint) }
-            fl[Dir.DOWN]?.let { drawCentered(c, hintLabel(it.label), cx, rect.bottom - hintPaint.textSize * 0.45f, hintPaint) }
-            fl[Dir.LEFT]?.let { drawCentered(c, hintLabel(it.label), rect.left + hintPaint.measureText(it.label) / 2 + dp(3f), cy, hintPaint) }
-            fl[Dir.RIGHT]?.let { drawCentered(c, hintLabel(it.label), rect.right - hintPaint.measureText(it.label) / 2 - dp(3f), cy, hintPaint) }
-        } else {
-            fl[Dir.UP]?.let {
-                val h = hintLabel(it.label)
-                if (h.codePointCount(0, h.length) == 1 && !h[0].isLetterOrDigit()) {
-                    // punctuation: center the ink, not the glyph box (、 and ， sit low in theirs)
-                    hintPaint.getTextBounds(h, 0, h.length, bounds)
-                    val ink = max(bounds.width().toFloat(), hintPaint.textSize * 0.45f)
-                    drawByBounds(c, h, rect.right - ink / 2 - dp(6f), rect.top + dp(4f) + hintPaint.textSize * 0.5f, hintPaint)
-                } else {
-                    val w = hintPaint.measureText(h)
-                    if (w > rect.width() * 0.5f) {
-                        // too long for the corner (arcsin over sin): a dot says there is more
-                        c.drawCircle(rect.right - dp(7f), rect.top + dp(7f), dp(1.8f), hintPaint)
-                    } else drawCentered(c, h, rect.right - w / 2 - dp(6f), rect.top + dp(4f) + hintPaint.textSize * 0.5f, hintPaint)
-                }
+            fl[Dir.UP]?.let { drawText(c, hintLabel(it.label), cx, rect.top + hintPaint.textSize * 0.75f, hintPaint) }
+            fl[Dir.DOWN]?.let { drawText(c, hintLabel(it.label), cx, rect.bottom - hintPaint.textSize * 0.75f, hintPaint) }
+            fl[Dir.LEFT]?.let { drawText(c, hintLabel(it.label), rect.left + hintPaint.measureText(it.label) / 2 + dp(4f), cy, hintPaint) }
+            fl[Dir.RIGHT]?.let { drawText(c, hintLabel(it.label), rect.right - hintPaint.measureText(it.label) / 2 - dp(4f), cy, hintPaint) }
+        } else fl[Dir.UP]?.let {
+            val h = hintLabel(it.label)
+            val top = rect.top + dp(4f) + hintPaint.textSize * 0.5f
+            if (h.codePointCount(0, h.length) == 1 && !h[0].isLetterOrDigit()) {
+                // punctuation: center the ink, not the glyph box (、 and ， sit low in theirs)
+                hintPaint.getTextBounds(h, 0, h.length, bounds)
+                val ink = max(bounds.width().toFloat(), hintPaint.textSize * 0.45f)
+                drawByBounds(c, h, rect.right - ink / 2 - dp(6f), top, hintPaint)
+            } else {
+                val w = hintPaint.measureText(h)
+                // too long for the corner (arcsin over sin): a dot says there is more
+                if (w > rect.width() * 0.5f) c.drawCircle(rect.right - dp(7f), rect.top + dp(7f), dp(1.8f), hintPaint)
+                else drawText(c, h, rect.right - w / 2 - dp(6f), top, hintPaint)
             }
         }
+    }
+
+    /** Shrinks [p]'s text size so [s] fits in [maxW]. */
+    private fun fitText(s: String, maxW: Float, p: Paint) {
+        val tw = p.measureText(s)
+        if (tw > maxW && tw > 0f) p.textSize *= maxW / tw
     }
 
     /** Short form of a hint so it stays in the key's corner (—— is shown as one dash). */
     private fun hintLabel(s: String) = if (s == "——") "—" else s
 
-    private val bounds = Rect()
+    /** Centers the ink of [s] (not its glyph box) on (x, y): punctuation sits off-center in its box. */
     private fun drawByBounds(c: Canvas, s: String, x: Float, y: Float, p: Paint) {
         p.getTextBounds(s, 0, s.length, bounds)
         // paint is center-aligned, bounds are relative to a left-aligned origin
         c.drawText(s, x + p.measureText(s) / 2 - bounds.exactCenterX(), y - bounds.exactCenterY(), p)
     }
 
-    private fun drawSpace(c: Canvas, rect: RectF, fixedLabel: String?) {
-        textPaint.textSize = sp(13f * prefs.labelScale)
-        textPaint.color = theme.hint
+    private fun drawSpace(c: Canvas, rect: RectF, fixedLabel: String?, tp: Float) {
+        textPaint.textSize = sp(13.5f * prefs.labelScale)
         textPaint.typeface = Ui.regular
         c.save()
         c.clipRect(rect)
-        if (cursorMode) {
+        val cx = rect.centerX(); val cy = rect.centerY()
+        if (tp > 0f) {
+            // the trackpad: where the caret goes, said once, quietly
             textPaint.color = theme.accent
-            textPaint.alpha = 255
-            drawCentered(c, "◂   拖动移动光标   ▸", rect.centerX(), rect.centerY(), textPaint)
-        } else {
+            textPaint.alpha = (255 * tp).toInt()
+            iconPaint.color = theme.accent
+            iconPaint.alpha = textPaint.alpha
+            val label = "拖动移动光标"
+            val half = textPaint.measureText(label) / 2
+            drawText(c, label, cx, cy, textPaint)
+            Icons.draw(c, "left", cx - half - dp(14f), cy, dp(16f), iconPaint)
+            Icons.draw(c, "right", cx + half + dp(14f), cy, dp(16f), iconPaint)
+        }
+        if (tp < 1f) {
+            val fade = 1f - tp
+            textPaint.color = theme.hint
             val label = fixedLabel ?: listener?.spaceLabel() ?: ""
             val off = spaceOffset.value
             val p = spaceSwap.value
             val old = oldSpaceLabel
             if (old != null && p < 1f) {
-                textPaint.alpha = (255 * (1 - p)).toInt()
-                drawCentered(c, old, rect.centerX() + spaceSwapDir * p * rect.width() * 0.5f, rect.centerY(), textPaint)
-                textPaint.alpha = (255 * p).toInt()
-                drawCentered(c, label, rect.centerX() - spaceSwapDir * (1 - p) * rect.width() * 0.5f, rect.centerY(), textPaint)
+                textPaint.alpha = (255 * (1 - p) * fade).toInt()
+                drawText(c, old, cx + spaceSwapDir * p * rect.width() * 0.5f, cy, textPaint)
+                textPaint.alpha = (255 * p * fade).toInt()
+                drawText(c, label, cx - spaceSwapDir * (1 - p) * rect.width() * 0.5f, cy, textPaint)
             } else {
-                textPaint.alpha = (255 * (1 - min(1f, abs(off) / rect.width()) * 0.5f)).toInt()
-                drawCentered(c, label, rect.centerX() + off, rect.centerY(), textPaint)
+                textPaint.alpha = (255 * fade * (1 - min(1f, abs(off) / rect.width()) * 0.5f)).toInt()
+                drawText(c, label, cx + off, cy, textPaint)
                 if (abs(off) > dp(8f)) {
-                    hintPaint.color = theme.accent
-                    hintPaint.alpha = (255 * min(1f, abs(off) / dp(40f))).toInt()
-                    hintPaint.textSize = sp(15f)
-                    drawCentered(c, if (off > 0) "‹" else "›", if (off > 0) rect.left + dp(16f) else rect.right - dp(16f), rect.centerY(), hintPaint)
+                    // which way the language list turns
+                    iconPaint.color = theme.accent
+                    iconPaint.alpha = (255 * fade * min(1f, abs(off) / dp(40f))).toInt()
+                    Icons.draw(c, if (off > 0) "left" else "right", if (off > 0) rect.left + dp(18f) else rect.right - dp(18f), cy, dp(16f), iconPaint)
                 }
             }
         }
         c.restore()
     }
 
-    private fun drawCentered(c: Canvas, s: String, x: Float, y: Float, p: Paint) {
-        val fm = p.fontMetrics
-        c.drawText(s, x, y - (fm.ascent + fm.descent) / 2, p)
-    }
-
     // ---- touch --------------------------------------------------------------------------
 
     private enum class Mode { NONE, PRESS, POPUP, CURSOR, SPACE_SWIPE, BS_GESTURE, BS_REPEAT, CANCELLED }
-
-    private var downTime = 0L
 
     private companion object {
         /** A drag that takes longer than this to go far is a change of mind, not a flick. */
         const val SLOW_DRAG_MS = 450L
     }
 
+    private var downTime = 0L
     private var mode = Mode.NONE
     private var active: Key? = null
     private var activeRect: RectF? = null
@@ -380,14 +383,19 @@ class KeyboardView(context: Context, private val prefs: Prefs) : View(context) {
         }
     }
 
-    private fun keyAt(x: Float, y: Float): Pair<Key, RectF>? {
-        rects.firstOrNull { it.second.contains(x, y) }?.let { return it }
+    private fun keyAt(x: Float, y: Float): Int {
+        for (i in rects.indices) if (rects[i].contains(x, y)) return i
         // fall back to the nearest key so taps in the gaps still count
-        return rects.minByOrNull { (_, r) ->
+        var best = -1
+        var bd = Float.MAX_VALUE
+        for (i in rects.indices) {
+            val r = rects[i]
             val dx = max(0f, max(r.left - x, x - r.right))
             val dy = max(0f, max(r.top - y, y - r.bottom))
-            dx * dx + dy * dy
-        }?.takeIf { (_, r) -> abs(r.centerY() - y) < keyH }
+            val d = dx * dx + dy * dy
+            if (d < bd) { bd = d; best = i }
+        }
+        return if (best >= 0 && abs(rects[best].centerY() - y) < keyH) best else -1
     }
 
     @SuppressLint("ClickableViewAccessibility")
@@ -413,38 +421,31 @@ class KeyboardView(context: Context, private val prefs: Prefs) : View(context) {
     private fun start(e: MotionEvent, index: Int) {
         val x = e.getX(index)
         val y = e.getY(index)
-        val hit = keyAt(x, y) ?: return
+        val hit = keyAt(x, y)
+        if (hit < 0) return
+        val k = keys[hit]
         pointerId = e.getPointerId(index)
-        active = hit.first
-        activeRect = hit.second
+        active = k
+        activeRect = rects[hit]
         downX = x; downY = y; lastX = x; lastY = y
-        downTime = android.os.SystemClock.uptimeMillis()
+        downTime = SystemClock.uptimeMillis()
         flick = null
         mode = Mode.PRESS
-        val k = hit.first
-        pressAnim.getOrPut(k) { Tween() }.animateTo(1f, dur(50))
+        pressAnim.getOrPut(k) { Tween() }.animateTo(1f, dur(Motion.PRESS))
         invalidate()
         listener?.onPress(k)
-        if (k.main != null && prefs.keyPreview) overlay?.showPreview(previewRect(hit.second), displayLabel(k), null, mathMode)
+        if (k.main != null && prefs.keyPreview) overlay?.showPreview(previewRect(rects[hit]), displayLabel(k), null)
         val delay = if (k.fn == "backspace") 420L else prefs.longPressMs.toLong()
         handler.postDelayed(longPressRunnable, delay)
     }
 
     private fun previewRect(r: RectF): RectF {
-        val loc = overlayOffset()
+        locateIn(overlay)
         val w = max(r.width() * 1.12f, dp(48f))
         val h = keyH * 1.15f
-        val cx = r.centerX() + loc.first
-        val top = r.top + loc.second - h - dp(6f)
+        val cx = r.centerX() + layerOffset[0]
+        val top = r.top + layerOffset[1] - h - dp(6f)
         return RectF(cx - w / 2, top, cx + w / 2, top + h)
-    }
-
-    /** Position of this view inside the overlay. */
-    private fun overlayOffset(): Pair<Float, Float> {
-        val o = overlay ?: return 0f to 0f
-        val a = IntArray(2); val b = IntArray(2)
-        getLocationInWindow(a); o.getLocationInWindow(b)
-        return (a[0] - b[0]).toFloat() to (a[1] - b[1]).toFloat()
     }
 
     private fun move(x: Float, y: Float) {
@@ -454,8 +455,8 @@ class KeyboardView(context: Context, private val prefs: Prefs) : View(context) {
         val threshold = dp(prefs.flickDp)
         when (mode) {
             Mode.POPUP -> {
-                val o = overlayOffset()
-                overlay?.moveSelection(x + o.first, y + o.second)
+                locateIn(overlay)
+                overlay?.moveSelection(x + layerOffset[0], y + layerOffset[1])
             }
             Mode.CURSOR -> {
                 val step = dp(prefs.cursorStepDp)
@@ -474,7 +475,7 @@ class KeyboardView(context: Context, private val prefs: Prefs) : View(context) {
                 val prev = spaceOffset.value
                 val next = (dx * 0.7f).coerceIn(-w * 0.45f, w * 0.45f)
                 if (abs(prev) < dp(24f) && abs(next) >= dp(24f)) listener?.onFeedback("gesture")
-                spaceOffset.set(next)
+                spaceOffset.drag(next)
                 invalidate()
             }
             Mode.BS_GESTURE -> {
@@ -489,18 +490,18 @@ class KeyboardView(context: Context, private val prefs: Prefs) : View(context) {
                     invalidate()
                 }
             }
-            Mode.BS_REPEAT, Mode.CANCELLED -> {}
+            Mode.BS_REPEAT, Mode.CANCELLED, Mode.NONE -> {}
             Mode.PRESS -> {
                 // 误触: a flick is quick, however long it is. Only a slow drag far away (the finger
                 // wandering off to say "never mind") cancels the key.
                 val w = activeRect?.width() ?: threshold
-                val held = android.os.SystemClock.uptimeMillis() - downTime
+                val held = SystemClock.uptimeMillis() - downTime
                 if (prefs.dragCancel && k.fn != "space" && k.fn != "backspace" && held > SLOW_DRAG_MS &&
                     hypot(dx, dy) > max(threshold * 4f, w * 2.2f)) {
                     mode = Mode.CANCELLED
                     flick = null
                     overlay?.hidePreview()
-                    pressAnim[k]?.animateTo(0f, dur(150))
+                    pressAnim[k]?.animateTo(0f, dur(Motion.RELEASE))
                     listener?.onFeedback("cancel")
                     invalidate()
                     return
@@ -508,7 +509,7 @@ class KeyboardView(context: Context, private val prefs: Prefs) : View(context) {
                 if (hypot(dx, dy) < threshold) {
                     if (flick != null) {
                         flick = null
-                        if (k.main != null && prefs.keyPreview) overlay?.showPreview(previewRect(activeRect!!), displayLabel(k), null, mathMode)
+                        if (k.main != null && prefs.keyPreview) overlay?.showPreview(previewRect(activeRect!!), displayLabel(k), null)
                     }
                 } else {
                     handler.removeCallbacks(longPressRunnable)
@@ -523,13 +524,12 @@ class KeyboardView(context: Context, private val prefs: Prefs) : View(context) {
                             if (d != flick) {
                                 flick = d
                                 val out = k.flicks[d]
-                                if (prefs.keyPreview) overlay?.showPreview(previewRect(activeRect!!), out?.label ?: displayLabel(k), if (out != null) d else null, mathMode)
+                                if (prefs.keyPreview) overlay?.showPreview(previewRect(activeRect!!), out?.label ?: displayLabel(k), if (out != null) d else null)
                             }
                         }
                     }
                 }
             }
-            Mode.NONE -> {}
         }
         lastX = x; lastY = y
     }
@@ -539,7 +539,7 @@ class KeyboardView(context: Context, private val prefs: Prefs) : View(context) {
         cursorMode = true
         cursorAccX = 0f; cursorAccY = 0f
         overlay?.hidePreview()
-        labelsAlpha.animateTo(0.2f, dur(180))
+        trackpad.animateTo(1f, dur(Motion.SWAP), Motion.ENTER)
         listener?.onCursorMode(true)
         invalidate()
     }
@@ -559,9 +559,8 @@ class KeyboardView(context: Context, private val prefs: Prefs) : View(context) {
                 if (opts.isEmpty()) return
                 mode = Mode.POPUP
                 overlay?.hidePreview()
-                val o = overlayOffset()
-                val r = RectF(activeRect).apply { offset(o.first, o.second) }
-                overlay?.showOptionRows(r, keyH, opts, lastX + o.first)
+                locateIn(overlay)
+                overlay?.showOptionRows(onLayer(activeRect!!), keyH, opts, lastX + layerOffset[0])
                 listener?.onFeedback("popup")
             }
         }
@@ -571,43 +570,43 @@ class KeyboardView(context: Context, private val prefs: Prefs) : View(context) {
         handler.removeCallbacks(longPressRunnable)
         handler.removeCallbacks(repeatRunnable)
         val k = active
-        val r = activeRect
-        if (k != null) pressAnim[k]?.animateTo(0f, dur(180))
+        if (k != null) pressAnim[k]?.animateTo(0f, dur(Motion.RELEASE), Motion.ENTER)
         overlay?.hidePreview()
         // held much longer than a tap without anything to pick: treated as a change of mind
-        val heldTooLong = prefs.holdCancelMs > 0 && android.os.SystemClock.uptimeMillis() - downTime > prefs.holdCancelMs
+        val heldTooLong = prefs.holdCancelMs > 0 && SystemClock.uptimeMillis() - downTime > prefs.holdCancelMs
         if (k != null && commit) when (mode) {
             Mode.PRESS -> if (!heldTooLong || flick != null) {
                 val fl = flick
-                when {
-                    k.main != null -> listener?.onOutput(k, if (fl != null) k.flicks[fl] ?: k.main else k.main)
-                    else -> listener?.onFunction(k)
-                }
+                val main = k.main
+                if (main != null) listener?.onOutput(k, if (fl != null) k.flicks[fl] ?: main else main)
+                else listener?.onFunction(k)
             }
             Mode.POPUP -> overlay?.selected()?.let { listener?.onOption(k, it) }
             Mode.SPACE_SWIPE -> {
                 val off = spaceOffset.value
-                if (abs(off) > dp(24f) && r != null) {
+                if (abs(off) > dp(24f)) {
                     val dir = if (off < 0) 1 else -1
                     oldSpaceLabel = listener?.spaceLabel()
                     val nl = listener?.onSwitchLanguage(dir)
                     if (nl != null) {
                         spaceSwapDir = if (off < 0) -1 else 1
                         spaceSwap.set(0f)
-                        spaceSwap.animateTo(1f, dur(240), Tween.EASE_IN_OUT)
+                        spaceSwap.animateTo(1f, dur(240), Motion.MOVE)
+                        spaceOffset.snap(0f)
                     }
                 }
-                spaceOffset.animateTo(0f, dur(180))
             }
             Mode.BS_GESTURE -> bsArmed?.let { listener?.onBackspaceGesture(it) }
             else -> {}
         }
         bsArmed = null
         if (mode == Mode.POPUP) overlay?.hideOptions()
-        if (mode == Mode.SPACE_SWIPE && !commit) spaceOffset.animateTo(0f, dur(180))
+        // the label springs home from wherever the finger left it
+        spaceOffset.enabled = prefs.animations
+        if (spaceOffset.value != 0f) spaceOffset.animateTo(0f)
         if (cursorMode) {
             cursorMode = false
-            labelsAlpha.animateTo(1f, dur(220))
+            trackpad.animateTo(0f, dur(Motion.RELEASE), Motion.ENTER)
             listener?.onCursorMode(false)
         }
         mode = Mode.NONE

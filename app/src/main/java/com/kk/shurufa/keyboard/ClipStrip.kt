@@ -7,14 +7,14 @@ import android.graphics.Paint
 import android.graphics.RectF
 import android.os.Handler
 import android.os.Looper
+import android.graphics.LinearGradient
+import android.graphics.Shader
 import android.text.Layout
 import android.text.StaticLayout
 import android.text.TextPaint
 import android.text.TextUtils
-import android.util.TypedValue
 import android.view.MotionEvent
 import android.view.VelocityTracker
-import android.view.View
 import android.view.ViewConfiguration
 import android.widget.OverScroller
 import com.kk.shurufa.Prefs
@@ -29,10 +29,9 @@ import kotlin.math.roundToInt
  * read never stops half cut off. Tap pastes; long-press opens the menu.
  */
 @SuppressLint("ViewConstructor")
-class ClipStrip(context: Context, private val prefs: Prefs) : View(context) {
+class ClipStrip(context: Context, prefs: Prefs) : KbView(context, prefs) {
     data class Card(val text: String, val tag: String, val starred: Boolean)
 
-    var theme: KbTheme = KbTheme.resolve(context, prefs)
     var title = "最近"
     var emptyText = ""
     var overlay: PopupOverlay? = null
@@ -50,9 +49,6 @@ class ClipStrip(context: Context, private val prefs: Prefs) : View(context) {
     private var scrollPos = 0f
     private val appear = Tween(1f)
 
-    private fun dp(v: Float) = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, resources.displayMetrics)
-    private fun sp(v: Float) = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, v, resources.displayMetrics)
-
     private val bg = Paint(Paint.ANTI_ALIAS_FLAG)
     private val tp = Paint(Paint.ANTI_ALIAS_FLAG)
     private val body = TextPaint(Paint.ANTI_ALIAS_FLAG)
@@ -63,14 +59,13 @@ class ClipStrip(context: Context, private val prefs: Prefs) : View(context) {
         measureCards()
         if (!keepPosition) { scrollPos = 0f; scroller.forceFinished(true) }
         scrollPos = scrollPos.coerceIn(0f, maxScroll)
-        if (prefs.animations && !keepPosition) { appear.set(0f); appear.animateTo(1f, (200 * prefs.animSpeed).toLong()) }
+        if (prefs.animations && !keepPosition) { appear.set(0f); appear.animateTo(1f, dur(Motion.SWAP + 60), Motion.ENTER) }
         invalidate()
     }
 
     private val titleH get() = dp(20f)
     private val pad get() = dp(10f)
     private val gap get() = dp(8f)
-    /** Wide enough for a dozen characters a line; on wide screens two and a half cards show. */
     /** The widest a card gets: room for a dozen characters a line, two and a half cards on screen. */
     private val cardW get() = min(max(dp(132f), (width - pad) / 2.45f), dp(220f))
     private val minW get() = dp(68f)
@@ -80,7 +75,9 @@ class ClipStrip(context: Context, private val prefs: Prefs) : View(context) {
     private val step get() = cardW + gap
     private val maxScroll get() = if (cards.isEmpty()) 0f else max(0f, lefts.last() + widths.last() + pad - width)
 
-    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) { layouts.clear(); measureCards() }
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) { layouts.clear(); measureCards(); fadeL = null; fadeR = null }
+
+    override fun onThemeChanged() { layouts.clear(); fadeL = null; fadeR = null }
 
     private fun shown(t: String) = t.replace(Regex("\\s+"), " ").trim().let { if (it.length > prefs.clipMaxChars) it.take(prefs.clipMaxChars) + "…" else it }
 
@@ -100,9 +97,11 @@ class ClipStrip(context: Context, private val prefs: Prefs) : View(context) {
         }
     }
 
+    private val cardRect = RectF()
+    /** Card [i] as it sits on screen now (one shared rect: copy it to keep it). */
     private fun rectOf(i: Int): RectF {
         val x = lefts[i] - scrollPos
-        return RectF(x, titleH, x + widths[i], height - dp(6f))
+        return cardRect.apply { set(x, titleH, x + widths[i], height - dp(6f)) }
     }
 
     /** The card whose left edge is nearest to scroll position [p]. */
@@ -118,12 +117,11 @@ class ClipStrip(context: Context, private val prefs: Prefs) : View(context) {
         val a = appear.value
         if (appear.running) postInvalidateOnAnimation()
         tp.textAlign = Paint.Align.LEFT; tp.textSize = sp(Ui.SMALL); tp.color = theme.hint; tp.typeface = Ui.medium
-        c.drawText(if (cards.isEmpty()) title else "$title ${cards.size}", pad + dp(2f), dp(14f), tp)
+        c.drawText(if (cards.isEmpty()) title else "$title ${cards.size}", pad + dp(2f), dp(15f), tp)
         tp.typeface = Ui.regular
         if (cards.isEmpty()) {
             tp.textAlign = Paint.Align.CENTER; tp.textSize = sp(Ui.BODY)
-            val fm = tp.fontMetrics
-            c.drawText(emptyText, width / 2f, (titleH + height) / 2f - (fm.ascent + fm.descent) / 2, tp)
+            drawText(c, emptyText, width / 2f, (titleH + height) / 2f, tp)
             return
         }
         c.save()
@@ -139,10 +137,13 @@ class ClipStrip(context: Context, private val prefs: Prefs) : View(context) {
         if (scrollPos < maxScroll - 1f) fade(c, width - dp(14f), width.toFloat(), false)
     }
 
+    private var fadeL: LinearGradient? = null
+    private var fadeR: LinearGradient? = null
+
     private fun fade(c: Canvas, l: Float, r: Float, left: Boolean) {
-        val shader = android.graphics.LinearGradient(l, 0f, r, 0f,
-            if (left) theme.background else (theme.background and 0x00FFFFFF),
-            if (left) (theme.background and 0x00FFFFFF) else theme.background, android.graphics.Shader.TileMode.CLAMP)
+        val clear = Colors.alpha(theme.background, 0)
+        val shader = if (left) fadeL ?: LinearGradient(l, 0f, r, 0f, theme.background, clear, Shader.TileMode.CLAMP).also { fadeL = it }
+            else fadeR ?: LinearGradient(l, 0f, r, 0f, clear, theme.background, Shader.TileMode.CLAMP).also { fadeR = it }
         bg.shader = shader
         c.drawRect(l, titleH, r, height.toFloat(), bg)
         bg.shader = null
@@ -151,8 +152,7 @@ class ClipStrip(context: Context, private val prefs: Prefs) : View(context) {
     private fun drawCard(c: Canvas, i: Int, r: RectF, a: Float) {
         val card = cards[i]
         val rad = Ui.radiusLarge(dp(prefs.keyRadiusDp), dp(1f))
-        bg.color = if (i == pressed) theme.surfacePressed else theme.surface
-        bg.alpha = (255 * a).toInt()
+        bg.color = Colors.fade(if (i == pressed) theme.surfacePressed else theme.surface, a)
         c.drawRoundRect(r, rad, rad, bg)
         val inner = dp(10f)
         var top = r.top + inner
@@ -196,13 +196,14 @@ class ClipStrip(context: Context, private val prefs: Prefs) : View(context) {
     private val slop = ViewConfiguration.get(context).scaledTouchSlop
     private val handler = Handler(Looper.getMainLooper())
 
-    private fun hit(x: Float, y: Float) = cards.indices.firstOrNull { rectOf(it).contains(x, y) } ?: -1
+    override fun onDetachedFromWindow() {
+        super.onDetachedFromWindow()
+        handler.removeCallbacks(longRunnable)
+    }
 
-    private fun overlayOffset(): Pair<Float, Float> {
-        val o = overlay ?: return 0f to 0f
-        val a = IntArray(2); val b = IntArray(2)
-        getLocationInWindow(a); o.getLocationInWindow(b)
-        return (a[0] - b[0]).toFloat() to (a[1] - b[1]).toFloat()
+    private fun hit(x: Float, y: Float): Int {
+        for (i in cards.indices) if (rectOf(i).contains(x, y)) return i
+        return -1
     }
 
     private val longRunnable = Runnable {
@@ -210,9 +211,9 @@ class ClipStrip(context: Context, private val prefs: Prefs) : View(context) {
         if (i < 0 || dragging) return@Runnable
         val opts = longOptions?.invoke(i).orEmpty()
         if (opts.isEmpty()) return@Runnable
-        val (ox, oy) = overlayOffset()
-        val r = rectOf(i).apply { offset(ox, oy) }
-        overlay?.showOptions(RectF(r.left, r.top, r.right, r.top + dp(44f)), dp(44f), opts, downX + ox, false)
+        locateIn(overlay)
+        val r = onLayer(rectOf(i))
+        overlay?.showOptions(RectF(r.left, r.top, r.right, r.top + dp(44f)), dp(44f), opts, downX + layerOffset[0])
         menuFor = i
         onFeedback?.invoke("popup")
         invalidate()
@@ -243,8 +244,8 @@ class ClipStrip(context: Context, private val prefs: Prefs) : View(context) {
             }
             MotionEvent.ACTION_MOVE -> {
                 if (menuFor >= 0) {
-                    val (ox, oy) = overlayOffset()
-                    overlay?.moveSelection(e.x + ox, e.y + oy)
+                    locateIn(overlay)
+                    overlay?.moveSelection(e.x + layerOffset[0], e.y + layerOffset[1])
                     return true
                 }
                 if (vDrag) { onVerticalDrag?.invoke(1, e.rawY, 0f); return true }

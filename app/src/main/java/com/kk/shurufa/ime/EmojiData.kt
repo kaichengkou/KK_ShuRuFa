@@ -39,7 +39,18 @@ class EmojiData(private val context: Context) {
             val p = l.split('\t')
             if (p.size < 3) null else Item(p[0], p[1].split('|').filter { it.isNotEmpty() }, p[2].split('|').filter { it.isNotEmpty() })
         }.associateBy { it.emoji }
+        // what 查找 compares against, prepared once: lowercased keywords, the panel's order
+        index = names.values.map { it.emoji to (it.zh + it.en).map { w -> w.lowercase() }.toTypedArray() }
+        own = names.values.associate { it.emoji to setOfNotNull(it.zh.firstOrNull()?.lowercase(), it.en.firstOrNull()?.lowercase()) }
+        val o = HashMap<String, Int>()
+        var n = 0
+        for ((_, list) in groups) for (e in list) o[e] = n++
+        order = o
     }
+
+    private var index: List<Pair<String, Array<String>>> = emptyList()
+    private var own: Map<String, Set<String>> = emptyMap()
+    private var order: Map<String, Int> = emptyMap()
 
     private fun asset(name: String) = context.assets.open("data/$name").bufferedReader().readText()
 
@@ -51,16 +62,15 @@ class EmojiData(private val context: Context) {
     fun search(query: String, limit: Int = 80): List<String> {
         val q = query.trim().lowercase()
         if (q.isEmpty()) return emptyList()
-        val order = HashMap<String, Int>()
-        var n = 0
-        for ((_, list) in groups) for (e in list) order[e] = n++
+        val negated = NEGATIONS.map { it + q }
+        val qNegative = NEGATIONS.any { q.startsWith(it) }
         val scored = ArrayList<Pair<String, Int>>()
-        for (it in names.values) {
+        for ((emoji, words) in index) {
             var best = 0
-            for (w in it.zh + it.en) {
-                val k = w.lowercase()
+            val names = own[emoji].orEmpty()
+            for (k in words) {
                 // 不开心 is not a match for 开心
-                if (NEGATIONS.any { k.contains(it + q) } && !NEGATIONS.any { q.startsWith(it) }) continue
+                if (!qNegative && negated.any { k.contains(it) }) continue
                 val s = when {
                     k == q -> 100
                     k.startsWith(q) -> 60
@@ -69,11 +79,10 @@ class EmojiData(private val context: Context) {
                     else -> 0
                 }
                 // the first keyword is the emoji's own name: an exact name beats an exact keyword
-                val own = w === it.zh.firstOrNull() || w === it.en.firstOrNull()
-                val v = if (!own || s == 0) s else if (s == 100) 130 else s + 5
+                val v = if (s == 0 || k !in names) s else if (s == 100) 130 else s + 5
                 if (v > best) best = v
             }
-            if (best > 0) scored += it.emoji to best
+            if (best > 0) scored += emoji to best
         }
         return scored.sortedWith(compareByDescending<Pair<String, Int>> { it.second }.thenBy { order[it.first] ?: Int.MAX_VALUE })
             .take(limit).map { it.first }

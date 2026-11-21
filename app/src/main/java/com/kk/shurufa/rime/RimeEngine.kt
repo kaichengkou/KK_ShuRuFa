@@ -5,8 +5,8 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import com.kk.shurufa.BuildConfig
+import com.kk.shurufa.ime.Background
 import java.io.File
-import java.util.concurrent.Executors
 
 /**
  * Owns the Rime runtime: copies the bundled schema data on first run (or after an update),
@@ -20,7 +20,8 @@ object RimeEngine {
     var error: String? = null
         private set
 
-    private val exec = Executors.newSingleThreadExecutor()
+    /** Deployment and shutdown, one after another; the thread goes away when idle. */
+    private val exec = Background.serial("kk-rime")
     private val main = Handler(Looper.getMainLooper())
     private val listeners = mutableListOf<(State) -> Unit>()
 

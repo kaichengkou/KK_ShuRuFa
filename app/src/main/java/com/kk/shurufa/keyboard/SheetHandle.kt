@@ -1,26 +1,22 @@
 package com.kk.shurufa.keyboard
 
-import android.animation.ValueAnimator
+import android.animation.TimeAnimator
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Paint
-import android.util.TypedValue
 import android.view.MotionEvent
 import android.view.VelocityTracker
-import android.view.View
-import android.view.animation.OvershootInterpolator
 import com.kk.shurufa.Prefs
 import kotlin.math.abs
 
 /**
  * Grab bar at the top of a panel. Dragging it changes the panel's height between two detents
- * (the keyboard's height and a tall one); on release it snaps to the nearer detent, or to the
- * one the fling points at, with a slight overshoot.
+ * (the keyboard's height and a tall one); on release a spring carries the panel to the nearer
+ * detent, or to the one the fling points at, at the speed the finger left it.
  */
 @SuppressLint("ViewConstructor")
-class SheetHandle(context: Context, private val prefs: Prefs) : View(context) {
-    var theme: KbTheme = KbTheme.resolve(context, prefs)
+class SheetHandle(context: Context, prefs: Prefs) : KbView(context, prefs) {
     var low = 0
     var high = 0
     /** Current panel height; set by the owner, changed live while dragging. */
@@ -31,16 +27,24 @@ class SheetHandle(context: Context, private val prefs: Prefs) : View(context) {
     /** After a drag, once the sheet has come to rest at a detent. */
     var onRest: (() -> Unit)? = null
     /** Being dragged or still settling: the app below should not be resized meanwhile. */
-    val moving get() = active || anim?.isRunning == true
+    val moving get() = active || ticker.isStarted
 
-    private fun dp(v: Float) = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, resources.displayMetrics)
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private var downY = 0f
     private var startH = 0
     private var active = false
     private var crossed = false
     private var vt: VelocityTracker? = null
-    private var anim: ValueAnimator? = null
+    private val grip = Tween(0f)
+    private val spring = Spring(0f, stiffness = 520f, dampingRatio = 0.78f)
+    private val ticker = TimeAnimator().apply {
+        setTimeListener { a, _, _ ->
+            val h = spring.step()
+            current = h.toInt()
+            onHeight?.invoke(current)
+            if (!spring.running) { a.end(); onRest?.invoke() }
+        }
+    }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         setMeasuredDimension(MeasureSpec.getSize(widthMeasureSpec), dp(18f).toInt())
@@ -48,9 +52,11 @@ class SheetHandle(context: Context, private val prefs: Prefs) : View(context) {
 
     override fun onDraw(c: Canvas) {
         c.drawColor(theme.background)
-        paint.color = if (active) theme.accent else theme.hint
-        paint.alpha = if (active) 255 else 150
-        val w = if (active) dp(46f) else dp(36f)
+        val g = grip.value
+        if (grip.running) postInvalidateOnAnimation()
+        // the grip widens and takes the accent while it is held
+        paint.color = Colors.blend(Colors.alpha(theme.hint, 150), theme.accent, g)
+        val w = dp(36f) + dp(12f) * g
         val h = dp(4f)
         c.drawRoundRect(width / 2f - w / 2, height / 2f - h / 2, width / 2f + w / 2, height / 2f + h / 2, h / 2, h / 2, paint)
     }
@@ -73,8 +79,9 @@ class SheetHandle(context: Context, private val prefs: Prefs) : View(context) {
 
     /** Drags can also start elsewhere (the toolbar above the panel); they go through these. */
     fun begin(rawY: Float) {
-        anim?.cancel()
+        ticker.cancel()
         downY = rawY; startH = current; active = true; crossed = startH > (low + high) / 2
+        grip.animateTo(1f, dur(Motion.PRESS + 60))
         onFeedback?.invoke("press")
         invalidate()
     }
@@ -100,24 +107,26 @@ class SheetHandle(context: Context, private val prefs: Prefs) : View(context) {
             abs(velocityY) > dp(600f) -> velocityY < 0
             else -> current > (low + high) / 2
         }
-        settle(tall)
+        settle(tall, -velocityY)
         active = false
+        grip.animateTo(0f, dur(Motion.RELEASE))
         invalidate()
     }
 
-    fun settle(tall: Boolean) {
-        val target = if (tall) high else low
-        anim?.cancel()
-        anim = ValueAnimator.ofInt(current, target).apply {
-            duration = if (prefs.animations) (300 * prefs.animSpeed).toLong() else 0L
-            interpolator = OvershootInterpolator(0.9f)
-            addUpdateListener { current = it.animatedValue as Int; onHeight?.invoke(current) }
-            addListener(object : android.animation.AnimatorListenerAdapter() {
-                override fun onAnimationEnd(a: android.animation.Animator) { onRest?.invoke() }
-            })
-            start()
-        }
+    /** Carries the sheet to a detent; [velocity] is the height's speed in px/s when the finger let go. */
+    fun settle(tall: Boolean, velocity: Float = 0f) {
+        val target = (if (tall) high else low).toFloat()
+        ticker.cancel()
+        spring.snap(current.toFloat())
+        spring.enabled = prefs.animations
+        spring.animateTo(target, velocity.coerceIn(-dp(4000f), dp(4000f)))
+        if (spring.running) ticker.start() else { current = target.toInt(); onHeight?.invoke(current); onRest?.invoke() }
         onFeedback?.invoke("gesture")
         onSettled?.invoke(tall)
+    }
+
+    override fun onDetachedFromWindow() {
+        super.onDetachedFromWindow()
+        if (ticker.isStarted) { ticker.end(); onRest?.invoke() }
     }
 }

@@ -41,7 +41,6 @@ class MenuTest {
             override fun onTool(id: String) {}
             override fun onCandidate(index: Int) { events += "cand:$index" }
             override fun onExpand() {}
-            override fun onMathTab(id: String) {}
             override fun onMathFormat(format: String) {}
             override fun onResultChip(text: String) {}
             override fun candidateOptions(index: Int) = listOf(Output("取消", "§cancel"), Output("删除学习记录", "§forget"))

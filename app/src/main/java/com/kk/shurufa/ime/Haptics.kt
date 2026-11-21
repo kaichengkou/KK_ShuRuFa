@@ -1,11 +1,15 @@
 package com.kk.shurufa.ime
 
 import android.content.Context
+import android.media.AudioManager
 import android.os.Build
+import android.os.Handler
+import android.os.HandlerThread
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
 import com.kk.shurufa.Prefs
+import java.util.concurrent.ConcurrentHashMap
 
 /** Every moment the keyboard can vibrate for; each one has its own effect, strength and length. */
 enum class HapticEvent(val id: String, val title: String, val defType: String, val defAmp: Int, val defMs: Int) {
@@ -25,21 +29,24 @@ enum class HapticEvent(val id: String, val title: String, val defType: String, v
     }
 }
 
+/**
+ * Vibration and key sounds. Both are binder calls that can take milliseconds on some phones, so
+ * they run on a thread of their own and a slide that ticks on every step never waits for them.
+ */
 class Haptics(context: Context, private val prefs: Prefs) {
     private val vib: Vibrator = if (Build.VERSION.SDK_INT >= 31)
         (context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager).defaultVibrator
     else @Suppress("DEPRECATION") context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+    private val audio = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
     fun type(e: HapticEvent) = prefs.sp.getString("hap_${e.id}_type", e.defType) ?: e.defType
     fun amp(e: HapticEvent) = prefs.sp.getInt("hap_${e.id}_amp", e.defAmp)
     fun ms(e: HapticEvent) = prefs.sp.getInt("hap_${e.id}_ms", e.defMs)
 
-    // Vibrator calls are binder transactions; on some phones they take milliseconds. They run on
-    // their own thread so a slide that ticks on every step never waits for them.
-    private val thread = android.os.HandlerThread("kk-haptics").apply { start() }
-    val worker = android.os.Handler(thread.looper)
-    private val effects = java.util.concurrent.ConcurrentHashMap<HapticEvent, Any>()
-    private val NONE = Any()
+    private val thread = HandlerThread("kk-feedback").apply { start() }
+    private val worker = Handler(thread.looper)
+    private val effects = ConcurrentHashMap<HapticEvent, Any>()
+    private val none = Any()
 
     /** Settings changed: build the effects again on next use. */
     fun invalidate() = effects.clear()
@@ -47,10 +54,26 @@ class Haptics(context: Context, private val prefs: Prefs) {
     fun play(e: HapticEvent) {
         if (!prefs.vibrate) return
         worker.post {
-            val effect = effects.getOrPut(e) { build(e) ?: NONE }
+            val effect = effects.getOrPut(e) { build(e) ?: none }
             if (effect is VibrationEffect) runCatching { vib.vibrate(effect) }
         }
     }
+
+    /** The key sound for a key with function [fn] (null for characters), when 按键音 is on. */
+    fun click(fn: String?) {
+        if (!prefs.sound) return
+        val fx = when (fn) {
+            "backspace" -> AudioManager.FX_KEYPRESS_DELETE
+            "space" -> AudioManager.FX_KEYPRESS_SPACEBAR
+            "enter" -> AudioManager.FX_KEYPRESS_RETURN
+            else -> AudioManager.FX_KEYPRESS_STANDARD
+        }
+        val vol = prefs.soundVolume
+        worker.post { audio.playSoundEffect(fx, vol) }
+    }
+
+    /** The keyboard is going away: its thread with it. */
+    fun release() = thread.quitSafely()
 
     private fun build(e: HapticEvent): VibrationEffect? = when (type(e)) {
         "off" -> null

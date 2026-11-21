@@ -6,28 +6,20 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
-import android.graphics.Typeface
-import android.util.TypedValue
-import android.view.View
+import android.view.MotionEvent
 import com.kk.shurufa.Prefs
-import kotlin.math.ceil
+import kotlin.math.abs
 import kotlin.math.floor
 import kotlin.math.max
-import kotlin.math.min
 
 /**
  * Transparent layer above the whole input view. Draws the key preview bubble and the
  * long-press option popup, both animated.
  */
 @SuppressLint("ViewConstructor")
-class PopupOverlay(context: Context, private val prefs: Prefs) : View(context) {
-    var theme: KbTheme = KbTheme.resolve(context, prefs)
+class PopupOverlay(context: Context, prefs: Prefs) : KbView(context, prefs) {
     /** Called when the selection moves to another option (for haptics). */
     var onTick: (() -> Unit)? = null
-
-    private fun dp(v: Float) = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, resources.displayMetrics)
-    private fun sp(v: Float) = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, v, resources.displayMetrics)
-    private fun dur(ms: Long) = if (prefs.animations) (ms * prefs.animSpeed).toLong() else 0L
 
     private val bg = Paint(Paint.ANTI_ALIAS_FLAG)
     private val text = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER }
@@ -45,36 +37,39 @@ class PopupOverlay(context: Context, private val prefs: Prefs) : View(context) {
     }
 
     // ---- preview bubble ----
-    private var pvRect = RectF()
+    private val pvRect = RectF()
     private var pvLabel = ""
     private var pvOld: String? = null
     private var pvDir: Dir? = null
-    private var pvMath = false
-    private val pvShow = Tween(0f)
+    private val pvAlpha = Tween(0f)
+    /** The bubble grows out of the key with a little spring in it. */
+    private val pvScale = Spring(0f, stiffness = 1500f, dampingRatio = 0.6f)
     private val pvSwap = Tween(1f)
 
-    fun showPreview(r: RectF, label: String, dir: Dir?, math: Boolean) {
-        val wasVisible = pvShow.target > 0.5f
+    fun showPreview(r: RectF, label: String, dir: Dir?) {
+        val wasVisible = pvAlpha.target > 0.5f
         if (wasVisible && label != pvLabel) {
             pvOld = pvLabel
             pvSwap.set(0f)
-            pvSwap.animateTo(1f, dur(110))
+            pvSwap.animateTo(1f, dur(110), Motion.MOVE)
         } else if (!wasVisible) {
             pvOld = null
             pvSwap.set(1f)
-            pvShow.set(0f)
+            pvAlpha.set(0f)
+            pvScale.snap(0.82f)
         }
-        pvRect = r
+        pvRect.set(r)
         pvLabel = label
         pvDir = dir
-        pvMath = math
-        pvShow.animateTo(1f, dur(110), Tween.POP)
+        pvAlpha.animateTo(1f, dur(70), Motion.ENTER)
+        pvScale.enabled = prefs.animations
+        pvScale.animateTo(1f)
         invalidate()
     }
 
     fun hidePreview() {
-        if (pvShow.target == 0f) return
-        pvShow.animateTo(0f, dur(90))
+        if (pvAlpha.target == 0f) return
+        pvAlpha.animateTo(0f, dur(Motion.POP_OUT), Motion.EXIT)
         invalidate()
     }
 
@@ -98,14 +93,11 @@ class PopupOverlay(context: Context, private val prefs: Prefs) : View(context) {
     private var selCol = 0
     private var keyBottom = 0f
     private val opShow = Tween(0f)
-    private val selX = Tween(0f)
-    private val selY = Tween(0f)
-    private val selW = Tween(0f)
+    // the highlight glides between options and keeps its momentum when the finger changes its mind
+    private val selX = Spring(0f, stiffness = 1100f, dampingRatio = 0.88f)
+    private val selY = Spring(0f, stiffness = 1100f, dampingRatio = 0.88f)
+    private val selW = Spring(0f, stiffness = 1100f, dampingRatio = 0.88f)
     private val pad get() = dp(5f)
-
-    fun showOptions(key: RectF, keyH: Float, options: List<Output>, fingerX: Float, math: Boolean, fingerY: Float? = null) {
-        showOptionRows(key, keyH, listOf(options), fingerX, fingerY)
-    }
 
     /** [fingerY]: where the finger really is, when the menu is not anchored on it (the candidate bar). */
     fun showOptionRows(key: RectF, keyH: Float, options: List<List<Output>>, fingerX: Float, fingerY: Float? = null) {
@@ -118,7 +110,7 @@ class PopupOverlay(context: Context, private val prefs: Prefs) : View(context) {
         val widths: List<List<Float>>
         if (words) {
             fontPx = sp(Ui.BODY); text.textSize = fontPx; text.typeface = Ui.regular
-            val padX = dp(15f)
+            val padX = dp(16f)
             // wrap each given row into lines that fit the screen
             val lines = mutableListOf<List<Output>>(); val lw = mutableListOf<List<Float>>()
             for (row in options) {
@@ -135,8 +127,7 @@ class PopupOverlay(context: Context, private val prefs: Prefs) : View(context) {
             fontPx = sp(22f); text.textSize = fontPx; text.typeface = Ui.regular
             val widest = all.maxOf { text.measureText(it.label) }
             var cw = max(max(key.width() * 0.92f, dp(40f)), widest + dp(16f))
-            val per0 = floor(avail / cw).toInt()
-            if (per0 < 1) cw = avail
+            if (floor(avail / cw).toInt() < 1) cw = avail
             if (widest + dp(16f) > cw) fontPx *= (cw - dp(16f)) / widest
             val per = max(1, floor(avail / cw).toInt())
             rows = options.flatMap { it.chunked(per) }.filter { it.isNotEmpty() }
@@ -167,16 +158,19 @@ class PopupOverlay(context: Context, private val prefs: Prefs) : View(context) {
         startY = fingerY ?: key.centerY()
         lastX = fingerX; lastY = startY
         moved = false
-        cells[0][0].let { selX.set(it.left); selY.set(it.top); selW.set(it.width()) }
+        cells[0][0].let { selX.snap(it.left); selY.snap(it.top); selW.snap(it.width()) }
+        for (s in arrayOf(selX, selY, selW)) s.enabled = prefs.animations
         opShow.set(0f)
-        opShow.animateTo(1f, dur(150), Tween.EASE_OUT)
+        opShow.animateTo(1f, dur(Motion.POP_IN), Motion.ENTER)
         invalidate()
     }
+
+    fun showOptions(key: RectF, keyH: Float, options: List<Output>, fingerX: Float, fingerY: Float? = null) =
+        showOptionRows(key, keyH, listOf(options), fingerX, fingerY)
 
     private var startX = 0f
     private var startY = 0f
     private var moved = false
-
     private var lastX = 0f
     private var lastY = 0f
 
@@ -191,15 +185,15 @@ class PopupOverlay(context: Context, private val prefs: Prefs) : View(context) {
 
     private fun moveSel(r: Int, c: Int, animate: Boolean) {
         val rect = cells[r][c]
-        if (animate) { selX.animateTo(rect.left, dur(110)); selY.animateTo(rect.top, dur(110)); selW.animateTo(rect.width(), dur(110)) }
-        else { selX.set(rect.left); selY.set(rect.top); selW.set(rect.width()) }
+        if (animate) { selX.animateTo(rect.left); selY.animateTo(rect.top); selW.animateTo(rect.width()) }
+        else { selX.snap(rect.left); selY.snap(rect.top); selW.snap(rect.width()) }
     }
 
     fun moveSelection(x: Float, y: Float) {
         if (rows.isEmpty()) return
         lastX = x; lastY = y
         if (!moved) {
-            if (kotlin.math.abs(x - startX) < minCellW * 0.6f && kotlin.math.abs(y - startY) < cellH * 0.6f) return
+            if (abs(x - startX) < minCellW * 0.6f && abs(y - startY) < cellH * 0.6f) return
             moved = true
         }
         var nr = -1; var nc = -1
@@ -208,8 +202,9 @@ class PopupOverlay(context: Context, private val prefs: Prefs) : View(context) {
             nc = colAt(nr, x)
         }
         if (nr != selRow || nc != selCol) {
+            val wasNone = selRow < 0
             selRow = nr; selCol = nc
-            if (nr >= 0) { moveSel(nr, nc, true); onTick?.invoke() }
+            if (nr >= 0) { moveSel(nr, nc, animate = !wasNone); onTick?.invoke() }
             invalidate()
         }
     }
@@ -234,7 +229,10 @@ class PopupOverlay(context: Context, private val prefs: Prefs) : View(context) {
     var onStickyChanged: ((Boolean) -> Unit)? = null
 
     /** True when the finger slid onto an option before lifting (classic drag-to-pick). */
-    fun pickedByDrag() = moved && selRow >= 0 && RectF(opRect).apply { inset(-dp(10f), -dp(10f)) }.contains(lastX, lastY)
+    fun pickedByDrag(): Boolean {
+        val m = dp(10f)
+        return moved && selRow >= 0 && lastX >= opRect.left - m && lastX <= opRect.right + m && lastY >= opRect.top - m && lastY <= opRect.bottom + m
+    }
 
     fun stick(choose: (Output?) -> Unit) {
         sticky = true; onChoose = choose
@@ -260,41 +258,44 @@ class PopupOverlay(context: Context, private val prefs: Prefs) : View(context) {
         cb?.invoke(pick)
     }
 
-    @android.annotation.SuppressLint("ClickableViewAccessibility")
-    override fun onTouchEvent(e: android.view.MotionEvent): Boolean {
+    @SuppressLint("ClickableViewAccessibility")
+    override fun onTouchEvent(e: MotionEvent): Boolean {
         if (!sticky) return false
         val hit = optionAt(e.x, e.y)
         when (e.actionMasked) {
-            android.view.MotionEvent.ACTION_DOWN, android.view.MotionEvent.ACTION_MOVE -> {
-                val (r, c) = hit ?: (-1 to -1)
+            MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> {
+                val r = hit?.first ?: -1
+                val c = hit?.second ?: -1
                 if (r != selRow || c != selCol) {
                     selRow = r; selCol = c
                     if (r >= 0) { moveSel(r, c, false); onTick?.invoke() }
                     invalidate()
                 }
             }
-            android.view.MotionEvent.ACTION_UP -> closeSticky(hit?.let { (r, c) -> rows[r][c] })
-            android.view.MotionEvent.ACTION_CANCEL -> closeSticky(null)
+            MotionEvent.ACTION_UP -> closeSticky(hit?.let { (r, c) -> rows[r][c] })
+            MotionEvent.ACTION_CANCEL -> closeSticky(null)
         }
         return true
     }
 
     fun hideOptions() {
-        opShow.animateTo(0f, dur(90))
+        opShow.animateTo(0f, dur(Motion.POP_OUT), Motion.EXIT)
         invalidate()
     }
 
     // ---- drawing ----
     override fun onDraw(c: Canvas) {
         var again = false
-        val ps = pvShow.value
-        if (ps > 0.01f && opShow.value < 0.5f) {
-            again = again || pvShow.running || pvSwap.running
-            drawPreview(c, ps)
+        val pa = pvAlpha.value
+        if (pa > 0.01f && opShow.value < 0.5f) {
+            if (pvScale.running) pvScale.step()
+            again = pvAlpha.running || pvSwap.running || pvScale.running
+            drawPreview(c, pa, pvScale.value)
         }
         val os = opShow.value
         if (os > 0.01f && rows.isNotEmpty()) {
-            again = again || opShow.running || selX.running || selY.running || selW.running
+            for (s in arrayOf(selX, selY, selW)) if (s.running) { s.step(); again = true }
+            again = again || opShow.running
             drawOptions(c, os)
         }
         if (again) postInvalidateOnAnimation()
@@ -303,50 +304,45 @@ class PopupOverlay(context: Context, private val prefs: Prefs) : View(context) {
     private fun bubble(c: Canvas, r: RectF, alpha: Float) {
         bg.color = theme.popup
         bg.alpha = (255 * alpha).toInt()
-        bg.setShadowLayer(dp(6f), 0f, dp(2f), (0x40 * alpha).toInt() shl 24)
-        c.drawRoundRect(r, Ui.radiusLarge(dp(prefs.keyRadiusDp), dp(1f)), Ui.radiusLarge(dp(prefs.keyRadiusDp), dp(1f)), bg)
+        bg.setShadowLayer(dp(8f), 0f, dp(2.5f), Colors.alpha(Color.BLACK, ((if (theme.dark) 0x66 else 0x30) * alpha).toInt()))
+        val rad = Ui.radiusLarge(dp(prefs.keyRadiusDp), dp(1f))
+        c.drawRoundRect(r, rad, rad, bg)
         bg.clearShadowLayer()
     }
 
-    private fun drawPreview(c: Canvas, show: Float) {
+    private fun drawPreview(c: Canvas, alpha: Float, scale: Float) {
         c.save()
-        val s = 0.85f + 0.15f * show
-        c.scale(s, s, pvRect.centerX(), pvRect.bottom)
-        val a = show.coerceIn(0f, 1f)
+        c.scale(scale, scale, pvRect.centerX(), pvRect.bottom)
+        val a = alpha.coerceIn(0f, 1f)
         bubble(c, pvRect, a)
-        text.typeface = Ui.regular
         val p = pvSwap.value
         val slide = dp(10f)
-        fun offs(d: Dir?, k: Float) = when (d) {
-            Dir.UP -> 0f to -k; Dir.DOWN -> 0f to k; Dir.LEFT -> -k to 0f; Dir.RIGHT -> k to 0f; null -> 0f to 0f
-        }
         c.save(); c.clipRect(pvRect)
         pvOld?.let { old ->
-            if (p < 1f) {
-                val (ox, oy) = offs(pvDir, slide * p)
-                drawLabel(c, old, pvRect.centerX() - ox, pvRect.centerY() - oy, (1 - p) * a, false)
-            }
+            if (p < 1f) drawLabel(c, old, pvRect.centerX() - dirX(pvDir) * slide * p, pvRect.centerY() - dirY(pvDir) * slide * p, (1 - p) * a, false)
         }
-        val (nx, ny) = offs(pvDir, slide * (1 - p))
-        drawLabel(c, pvLabel, pvRect.centerX() + nx, pvRect.centerY() + ny, p * a, pvDir != null)
+        drawLabel(c, pvLabel, pvRect.centerX() + dirX(pvDir) * slide * (1 - p), pvRect.centerY() + dirY(pvDir) * slide * (1 - p), p * a, pvDir != null)
         c.restore()
         c.restore()
     }
 
+    private fun dirX(d: Dir?) = when (d) { Dir.LEFT -> -1f; Dir.RIGHT -> 1f; else -> 0f }
+    private fun dirY(d: Dir?) = when (d) { Dir.UP -> -1f; Dir.DOWN -> 1f; else -> 0f }
+
     private fun drawLabel(c: Canvas, s: String, x: Float, y: Float, alpha: Float, accent: Boolean) {
+        text.typeface = Ui.regular
         text.color = if (accent) theme.accent else theme.ink
         text.alpha = (255 * alpha).toInt()
-        text.textSize = sp(if (s.codePointCount(0, s.length) <= 2) 26f else 17f)
+        text.textSize = sp(if (s.codePointCount(0, s.length) <= 2) Ui.PREVIEW else 17f)
         val maxW = pvRect.width() - dp(8f)
         val tw = text.measureText(s)
         if (tw > maxW) text.textSize *= maxW / tw
-        val fm = text.fontMetrics
-        c.drawText(s, x, y - (fm.ascent + fm.descent) / 2, text)
+        drawText(c, s, x, y, text)
     }
 
     private fun drawOptions(c: Canvas, show: Float) {
         c.save()
-        val s = 0.9f + 0.1f * show
+        val s = 0.92f + 0.08f * show
         c.scale(s, s, opRect.centerX(), opRect.bottom)
         bubble(c, opRect, show)
         val alpha = (255 * show).toInt()
@@ -354,7 +350,7 @@ class PopupOverlay(context: Context, private val prefs: Prefs) : View(context) {
         val rad = if (words) (cellH - 2 * inset) / 2 else dp(prefs.keyRadiusDp)
         // hairlines between word pills, except beside the highlighted one
         if (words) {
-            bg.color = theme.divider; bg.alpha = (Color.alpha(theme.divider) * 0.55f * show).toInt()
+            bg.color = Colors.fade(theme.divider, 0.55f * show)
             cells.forEachIndexed { r, line ->
                 for (i in 1 until line.size) {
                     if (r == selRow && (i == selCol || i - 1 == selCol)) continue
@@ -371,7 +367,6 @@ class PopupOverlay(context: Context, private val prefs: Prefs) : View(context) {
         }
         text.typeface = Ui.regular
         text.textSize = fontPx
-        val fm = text.fontMetrics
         rows.forEachIndexed { r, row ->
             row.forEachIndexed { i, o ->
                 val rect = cells[r][i]
@@ -379,7 +374,7 @@ class PopupOverlay(context: Context, private val prefs: Prefs) : View(context) {
                 // 取消 is the way out, not a choice: quieter
                 text.color = when { on -> theme.onAccent; o.text == "§cancel" -> theme.inkSoft; else -> theme.ink }
                 text.alpha = alpha
-                c.drawText(o.label, rect.centerX(), rect.centerY() - (fm.ascent + fm.descent) / 2, text)
+                drawText(c, o.label, rect.centerX(), rect.centerY(), text)
             }
         }
         c.restore()
