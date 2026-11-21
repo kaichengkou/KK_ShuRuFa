@@ -30,7 +30,8 @@ import kotlin.math.roundToInt
  */
 @SuppressLint("ViewConstructor")
 class ClipStrip(context: Context, prefs: Prefs) : KbView(context, prefs) {
-    data class Card(val text: String, val tag: String, val starred: Boolean)
+    /** A clip: its text, or a picture ([image] is its thumbnail; null while it loads). */
+    data class Card(val text: String, val tag: String, val starred: Boolean, val isImage: Boolean = false, val image: android.graphics.Bitmap? = null)
 
     var title = "最近"
     var emptyText = ""
@@ -55,7 +56,7 @@ class ClipStrip(context: Context, prefs: Prefs) : KbView(context, prefs) {
 
     fun setCards(list: List<Card>, keepPosition: Boolean) {
         cards = list
-        layouts.clear()
+        layouts.clear(); shaders.clear()
         measureCards()
         if (!keepPosition) { scrollPos = 0f; scroller.forceFinished(true) }
         scrollPos = scrollPos.coerceIn(0f, maxScroll)
@@ -87,7 +88,15 @@ class ClipStrip(context: Context, prefs: Prefs) : KbView(context, prefs) {
         tp.textSize = sp(Ui.CAPTION)
         val inner = dp(10f)
         var x = pad
+        val imageH = height - dp(6f) - titleH
         cards.forEachIndexed { i, card ->
+            if (card.isImage) {
+                // a picture keeps its shape, within the widths a text card can have
+                val b = card.image
+                widths[i] = (if (b == null) imageH else imageH * b.width / b.height.coerceAtLeast(1)).coerceIn(minW, cardW)
+                lefts[i] = x; x += widths[i] + gap
+                return@forEachIndexed
+            }
             val textW = body.measureText(shown(card.text))
             val tagW = tp.measureText(listOfNotNull(if (card.starred) "★" else null, card.tag.takeIf { it.isNotEmpty() }).joinToString(" "))
             widths[i] = (max(textW, tagW) + 2 * inner + dp(2f)).coerceIn(minW, cardW)
@@ -148,11 +157,15 @@ class ClipStrip(context: Context, prefs: Prefs) : KbView(context, prefs) {
         bg.shader = null
     }
 
+    private val imgMatrix = android.graphics.Matrix()
+    private val shaders = HashMap<android.graphics.Bitmap, android.graphics.BitmapShader>()
+
     private fun drawCard(c: Canvas, i: Int, r: RectF, a: Float) {
         val card = cards[i]
         val rad = Ui.radiusLarge(dp(prefs.keyRadiusDp), dp(1f))
         bg.color = Colors.fade(if (i == pressed) theme.surfacePressed else theme.surface, a)
         c.drawRoundRect(r, rad, rad, bg)
+        if (card.isImage) { drawImage(c, card, r, rad, a); return }
         val inner = dp(10f)
         var top = r.top + inner
         val tag = listOfNotNull(if (card.starred) "★" else null, card.tag.takeIf { it.isNotEmpty() }).joinToString(" ")
@@ -179,6 +192,31 @@ class ClipStrip(context: Context, prefs: Prefs) : KbView(context, prefs) {
         lay.paint.alpha = (255 * a).toInt()
         lay.draw(c)
         c.restore()
+    }
+
+    /** A picture card: the thumbnail filling it (cropped to its shape), dimmed while pressed. */
+    private fun drawImage(c: Canvas, card: Card, r: RectF, rad: Float, a: Float) {
+        val b = card.image
+        if (b == null) {
+            tp.textAlign = Paint.Align.CENTER; tp.textSize = sp(Ui.CAPTION); tp.color = theme.hint; tp.alpha = (255 * a).toInt()
+            drawText(c, "图片", r.centerX(), r.centerY(), tp)
+            return
+        }
+        val scale = max(r.width() / b.width, r.height() / b.height)
+        imgMatrix.setScale(scale, scale)
+        imgMatrix.postTranslate(r.centerX() - b.width * scale / 2, r.centerY() - b.height * scale / 2)
+        val shader = shaders.getOrPut(b) { android.graphics.BitmapShader(b, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP) }
+        shader.setLocalMatrix(imgMatrix)
+        bg.shader = shader; bg.alpha = (255 * a * if (cards.indexOf(card) == pressed) 0.8f else 1f).toInt()
+        c.drawRoundRect(r, rad, rad, bg)
+        bg.shader = null; bg.alpha = 255
+        if (card.starred) {
+            // the favorite's star on a small dark disc, readable over any picture
+            val cx = r.left + dp(14f); val cy = r.top + dp(14f)
+            bg.color = 0x66000000; c.drawCircle(cx, cy, dp(9f), bg)
+            tp.textAlign = Paint.Align.CENTER; tp.textSize = sp(Ui.CAPTION); tp.color = 0xFFFFFFFF.toInt()
+            drawText(c, "★", cx, cy, tp)
+        }
     }
 
     // ---- touch ----

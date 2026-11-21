@@ -1,7 +1,10 @@
 package com.kk.shurufa.ime
 
+import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.os.Build
 import android.os.SystemClock
 import android.view.View
@@ -40,18 +43,54 @@ class ClipboardFeature(private val host: Host) {
         val clip = manager.primaryClip ?: return
         val sensitive = Build.VERSION.SDK_INT >= 33 && clip.description.extras?.getBoolean("android.content.extra.IS_SENSITIVE") == true
         if (sensitive) return
-        val text = clip.getItemAt(0)?.coerceToText(ctx)?.toString() ?: return
+        val item = clip.getItemAt(0) ?: return
+        val uri = item.uri
+        if (uri != null && clip.description.hasMimeType("image/*")) {
+            // our own picture put back on the clipboard for the app's paste: already in the list
+            if (uri.authority == images.authority) return
+            val mime = (0 until clip.description.mimeTypeCount).map { clip.description.getMimeType(it) }.firstOrNull { it.startsWith("image/") } ?: "image/png"
+            Background.load({ images.save(uri, mime) }) { entry -> if (entry != null) added(entry) }
+            return
+        }
+        val text = item.coerceToText(ctx)?.toString() ?: return
         if (text.isBlank()) return
+        added(text)
+    }
+
+    private fun added(text: String) {
         clips.add(text)
+        images.prune(clips.entries().map { it.text })
         if (prefs.clipSuggest) { pending = text; pendingAt = SystemClock.uptimeMillis() }
         if (built && host.panel == Panel.CLIPBOARD) refresh()
         host.syncBar()
     }
 
+    /** Copied pictures, kept as files beside the history, with small thumbnails for the panel. */
+    private val images = ClipImages(ctx)
+
     /** The paste chip's text while it is fresh (a minute and a half after copying). */
     fun pendingChip(): String? = pending?.takeIf { SystemClock.uptimeMillis() - pendingAt < 90_000 }
 
     fun dismissChip() { pending = null }
+
+    /**
+     * What the paste chip shows (its text and kind) and pastes: for a message with a code in it,
+     * only the code — the chip of an SMS that just came in offers 482913, not the whole message.
+     */
+    fun chip(): Pair<String, String>? {
+        val t = pendingChip() ?: return null
+        val k = ClipHistory.classify(t)
+        return when (k?.name) {
+            "图片" -> "" to "图片"
+            "验证码" -> k.value to k.name
+            else -> t to k?.name.orEmpty()
+        }
+    }
+
+    fun pasteChip() {
+        val t = pendingChip() ?: return
+        paste(ClipHistory.classify(t)?.takeIf { it.name == "验证码" }?.value ?: t)
+    }
 
     // ---- the panel ----
     private var built = false
@@ -137,28 +176,53 @@ class ClipboardFeature(private val host: Host) {
         recent = all.filter(::shown)
         favItems = all.filter { it.pinned && shown(it) }
         strip.emptyText = if (filter.isEmpty()) "复制过的文字会出现在这里" else "最近没有复制过$filter"
-        strip.setCards(recent.map { ClipStrip.Card(text(it), kinds[it.text]?.name.orEmpty(), it.pinned) }, keep)
+        strip.setCards(recent.map { e ->
+            if (ClipImages.isImage(e.text)) ClipStrip.Card("", "图片", e.pinned, isImage = true, image = thumb(e.text))
+            else ClipStrip.Card(text(e), kinds[e.text]?.name.orEmpty(), e.pinned)
+        }, keep)
         favs.header = if (favItems.isEmpty()) "收藏" else "收藏 ${favItems.size}"
         favs.tags = favItems.map { kinds[it.text]?.name.orEmpty() }
         favs.setItems(favItems.map { short(text(it)) }, resetScroll = !keep)
     }
 
     private fun short(t: String): String {
+        if (ClipImages.isImage(t)) return "图片"
         val s = t.replace(SPACES, " ").trim()
         return if (s.length > prefs.clipMaxChars) s.take(prefs.clipMaxChars) + "…" else s
     }
 
     fun paste(text: String) {
         host.finishComposing()
-        host.editor.type(text, pairable = false)
         pending = null
+        val img = ClipImages.parse(text)
+        if (img == null) { host.editor.type(text, pairable = false); return }
+        val (file, mime) = img
+        val uri = images.uri(file) ?: return host.notice("图片已经不在了")
+        if (host.editor.commitImage(uri, mime)) return
+        // the field takes no pictures: put it on the clipboard for the app's own paste
+        runCatching { manager.setPrimaryClip(ClipData.newUri(ctx.contentResolver, "图片", uri)) }
+        host.notice("这里不能直接插入图片，已复制，长按输入框粘贴")
+    }
+
+    /** Thumbnails decoded so far, by clip; a missing one is decoded in the background. */
+    private val thumbs = HashMap<String, Bitmap?>()
+
+    private fun thumb(text: String): Bitmap? {
+        if (text in thumbs) return thumbs[text]
+        thumbs[text] = null
+        val (file, _) = ClipImages.parse(text) ?: return null
+        Background.load({ images.thumbnail(file, (120 * ctx.resources.displayMetrics.density).toInt()) }) { b ->
+            thumbs[text] = b
+            if (b != null && built) refresh(keep = true)
+        }
+        return null
     }
 
     private fun option(e: ClipHistory.Entry, op: String) {
         when (op) {
             "§pin" -> clips.togglePin(e.text)
-            "§del" -> clips.remove(e.text)
-            "§clear" -> clips.clearUnpinned()
+            "§del" -> { clips.remove(e.text); images.prune(clips.entries().map { it.text }) }
+            "§clear" -> { clips.clearUnpinned(); images.prune(clips.entries().map { it.text }) }
             "§top" -> clips.moveToFront(e.text)
             else -> return
         }
@@ -218,7 +282,7 @@ class ClipHistory(private val file: File, private val keep: () -> Int) {
 
     companion object {
         /** The kinds the panel can filter by, in the order its tabs show them. */
-        val KINDS = listOf("验证码", "链接", "号码", "邮箱", "公式")
+        val KINDS = listOf("图片", "验证码", "链接", "号码", "邮箱", "公式")
 
         private val LINK = Regex("(https?://|www\\.)[^\\s，。、；！？）)】」”\"'<>]+")
         private val MAIL = Regex("[\\w.+-]+@[\\w-]+(\\.[\\w-]+)+")
@@ -232,6 +296,7 @@ class ClipHistory(private val file: File, private val keep: () -> Int) {
 
         /** What [t] looks like, with the part of it worth pasting on its own; null for plain text. */
         fun classify(t: String): Kind? {
+            if (ClipImages.isImage(t)) return Kind("图片", t)
             val s = t.trim()
             if (s.isEmpty()) return null
             // a code: the whole clip, or a 4–8 digit run in a message that says it is one
@@ -248,5 +313,64 @@ class ClipHistory(private val file: File, private val keep: () -> Int) {
 
         /** A short tag for what a clip looks like. */
         fun kind(t: String): String = classify(t)?.name.orEmpty()
+    }
+}
+
+/**
+ * Pictures copied to the clipboard, as files in the app's storage. A picture stands in the
+ * history as a marker line naming its file and type; files no entry names any more are deleted.
+ * The keyboard hands them to apps through its own FileProvider.
+ */
+class ClipImages(private val ctx: Context) {
+    private val dir = File(ctx.filesDir, "clips")
+    val authority = ctx.packageName + ".clips"
+
+    /** Copies the picture at [uri] in; the history line for it, or null if it could not be read. */
+    fun save(uri: android.net.Uri, mime: String): String? = runCatching {
+        dir.mkdirs()
+        val ext = mime.substringAfter('/').substringBefore('+').ifEmpty { "png" }
+        val bytes = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return null
+        if (bytes.isEmpty() || bytes.size > MAX_BYTES) return null
+        // the same picture copied twice is one file
+        val name = java.security.MessageDigest.getInstance("SHA-1").digest(bytes).joinToString("") { "%02x".format(it) }.take(20) + "." + ext
+        val f = File(dir, name)
+        if (!f.exists()) f.writeBytes(bytes)
+        MARK + name + "|" + mime
+    }.getOrNull()
+
+    fun uri(name: String): android.net.Uri? {
+        val f = File(dir, name)
+        if (!f.isFile) return null
+        return runCatching { androidx.core.content.FileProvider.getUriForFile(ctx, authority, f) }.getOrNull()
+    }
+
+    /** A thumbnail about [size] pixels on its short side. */
+    fun thumbnail(name: String, size: Int): Bitmap? = runCatching {
+        val f = File(dir, name)
+        val o = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(f.path, o)
+        var sample = 1
+        while (minOf(o.outWidth, o.outHeight) / (sample * 2) >= size) sample *= 2
+        BitmapFactory.decodeFile(f.path, BitmapFactory.Options().apply { inSampleSize = sample })
+    }.getOrNull()
+
+    /** Deletes the files of pictures no longer in [entries]. */
+    fun prune(entries: List<String>) {
+        val keep = entries.mapNotNull { parse(it)?.first }.toSet()
+        Background.run { dir.listFiles()?.forEach { if (it.name !in keep) it.delete() } }
+    }
+
+    companion object {
+        private const val MARK = "\u0001img:"
+        private const val MAX_BYTES = 20 * 1024 * 1024
+
+        fun isImage(t: String) = t.startsWith(MARK)
+
+        /** The file name and type a history line names, if it is a picture. */
+        fun parse(t: String): Pair<String, String>? {
+            if (!t.startsWith(MARK)) return null
+            val rest = t.removePrefix(MARK)
+            return rest.substringBefore('|') to rest.substringAfter('|', "image/png")
+        }
     }
 }

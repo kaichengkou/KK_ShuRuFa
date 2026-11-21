@@ -8,6 +8,9 @@ import android.view.KeyEvent
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.ExtractedTextRequest
 import android.view.inputmethod.InputConnection
+import androidx.core.view.inputmethod.EditorInfoCompat
+import androidx.core.view.inputmethod.InputConnectionCompat
+import androidx.core.view.inputmethod.InputContentInfoCompat
 import com.kk.shurufa.Prefs
 import kotlin.math.abs
 
@@ -19,6 +22,19 @@ import kotlin.math.abs
 class Editor(private val ime: InputMethodService, private val prefs: Prefs) {
     private val history = EditHistory()
     private val ic: InputConnection? get() = ime.currentInputConnection
+
+    /**
+     * Sends an image as content (what chat apps take for a pasted picture). False when the field
+     * says it takes no image of this type, or the app turned it down.
+     */
+    fun commitImage(uri: android.net.Uri, mime: String): Boolean {
+        val info = ime.currentInputEditorInfo ?: return false
+        val ic = ic ?: return false
+        val accepted = EditorInfoCompat.getContentMimeTypes(info)
+        if (accepted.none { android.content.ClipDescription.compareMimeTypes(mime, it) }) return false
+        val content = InputContentInfoCompat(uri, android.content.ClipDescription("图片", arrayOf(mime)), null)
+        return InputConnectionCompat.commitContent(ic, info, content, InputConnectionCompat.INPUT_CONTENT_GRANT_READ_URI_PERMISSION, null)
+    }
 
     /** Selection as last reported by the editor. */
     var selStart = 0

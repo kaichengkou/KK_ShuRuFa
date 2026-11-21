@@ -77,6 +77,16 @@ class ImeServiceTest {
         val clip = KkImeService::class.java.getDeclaredField("clipboard").apply { isAccessible = true }.get(ime) as ClipboardFeature
         for (t in listOf("莫斯科市特维尔大街 7 号", "【银行】您的验证码是482913，5分钟内有效。", "https://github.com/kaichengkou/KK_ShuRuFa", "好的，明天见", "x^2 + 2x + 1 = 0"))
             clip.clips.add(t)
+        // and a picture: a gradient written as a PNG, copied in the way the clipboard listener does
+        val png = File(ctx.cacheDir, "copied.png")
+        val pic = Bitmap.createBitmap(480, 320, Bitmap.Config.ARGB_8888)
+        Canvas(pic).drawPaint(android.graphics.Paint().apply {
+            shader = android.graphics.LinearGradient(0f, 0f, 480f, 320f, 0xFF2B7A8C.toInt(), 0xFFF2C14E.toInt(), android.graphics.Shader.TileMode.CLAMP)
+        })
+        png.outputStream().use { pic.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        val line = com.kk.shurufa.ime.ClipImages(ctx).save(android.net.Uri.fromFile(png), "image/png")
+        assertTrue("a copied picture is kept", line != null && com.kk.shurufa.ime.ClipImages.isImage(line))
+        clip.clips.add(line!!)
         for ((tool, panel) in listOf("emoji" to Panel.EMOJI, "clipboard" to Panel.CLIPBOARD, "quick" to Panel.QUICK,
             "cursor" to Panel.CURSOR, "mic" to Panel.VOICE, "ai" to Panel.AI)) {
             ime.onTool(tool); idle()

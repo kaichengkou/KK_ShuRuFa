@@ -641,7 +641,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
                 if (prefs.zhPreeditInline) editor.compose(RimeBridge.input())
             }
             predictions.isNotEmpty() && letters -> bar.showPredictions(predictions, predictionLabel)
-            clipboard.pendingChip() != null && letters -> clipboard.pendingChip()?.let { bar.showClip(it, ClipHistory.kind(it)) }
+            clipboard.pendingChip() != null && letters -> clipboard.chip()?.let { (text, kind) -> bar.showClip(text, kind) }
             else -> {
                 bar.showToolbar()
                 if (panel == Panel.CANDIDATES) showPanel(Panel.LETTERS)
@@ -1319,7 +1319,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     }
 
     override fun onClipChip(text: String) {
-        clipboard.paste(text)
+        clipboard.pasteChip()
         syncBar()
     }
 
