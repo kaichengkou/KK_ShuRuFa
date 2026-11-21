@@ -87,13 +87,31 @@ class KeyboardView(context: Context, prefs: Prefs) : KbView(context, prefs) {
 
     // ---- layout -------------------------------------------------------------------------
 
-    fun setRows(newRows: List<List<Key>>, math: Boolean = false) {
+    /**
+     * 换语言: the keyboard that leaves slides out [slide] (−1 left, 1 right) and fades, the new one
+     * slides in from the other side. The old one is a snapshot taken just before; it goes when the
+     * slide ends.
+     */
+    private var ghost: android.graphics.Bitmap? = null
+    private val swap = Tween(1f)
+    private var swapDir = 0
+    private val ghostPaint = android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG)
+
+    fun setRows(newRows: List<List<Key>>, math: Boolean = false, slide: Int = 0) {
+        if (slide != 0 && newRows !== rows && Motion.on(prefs) && isAttachedToWindow && width > 0 && height > 0) {
+            ghost?.recycle()
+            ghost = runCatching {
+                android.graphics.Bitmap.createBitmap(width, height, android.graphics.Bitmap.Config.ARGB_8888).also { draw(Canvas(it)) }
+            }.getOrNull()
+            swapDir = slide
+            swap.set(0f); swap.animateTo(1f, dur(Motion.PANEL), Motion.MOVE)
+        }
         val changed = newRows !== rows
         rows = newRows
         mathMode = math
         pressAnim.clear()
         requestLayout()
-        if (changed && isAttachedToWindow && Motion.on(prefs)) {
+        if (changed && isAttachedToWindow && Motion.on(prefs) && ghost == null) {
             // a new set of keys: the labels arrive, the key shapes stay where they are
             labelsAlpha.set(0.35f)
             labelsAlpha.animateTo(1f, dur(Motion.SWAP), Motion.ENTER)
@@ -176,6 +194,10 @@ class KeyboardView(context: Context, prefs: Prefs) : KbView(context, prefs) {
         val t = theme
         c.drawColor(t.background)
         if (prefs.style == "paper") Paper.grain(c, width, height, t.dark)
+        val g = ghost
+        val sp = swap.value
+        val travel = dp(44f)
+        if (g != null) { c.save(); c.translate(swapDir * (1f - sp) * travel, 0f) }
         val r = dp(prefs.keyRadiusDp)
         val borders = prefs.keyBorders
         val shadowDy = dp(1.2f)
@@ -227,6 +249,15 @@ class KeyboardView(context: Context, prefs: Prefs) : KbView(context, prefs) {
                 else -> t.ink
             }
             if (isSpace) drawSpace(c, kr, k.label, tp) else drawKeyContent(c, k, kr, la, ink)
+        }
+        if (g != null) {
+            c.restore()
+            if (swap.running) {
+                // the keyboard that left, on its way out the other side
+                ghostPaint.alpha = (255 * (1f - sp)).toInt()
+                c.drawBitmap(g, -swapDir * sp * travel, 0f, ghostPaint)
+                animating = true
+            } else { g.recycle(); ghost = null }
         }
         if (animating) postInvalidateOnAnimation()
     }
@@ -690,6 +721,7 @@ class KeyboardView(context: Context, prefs: Prefs) : KbView(context, prefs) {
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
         touch?.save()
+        ghost?.recycle(); ghost = null
         if (mode != Mode.NONE) finish(commit = false)
         handler.removeCallbacksAndMessages(null)
     }

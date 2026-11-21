@@ -185,6 +185,23 @@ class ImeServiceTest {
         Prefs(ctx).put(Prefs.STYLE, "modern")
     }
 
+    /** 换语言 with animations on: halfway, the old keys are leaving and the new ones arriving. */
+    @Test fun languageSlide() {
+        Prefs(ctx).put(Prefs.LANGUAGES, "zh,ru,en")
+        val (ime, view) = start("light")
+        Prefs(ctx).put(Prefs.ANIMATIONS, true)
+        ime.onSwitchLanguage(1)
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(110))
+        shot(view, "lang_slide_mid")
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(600))
+        shot(view, "lang_slide_end")
+        val kb = KkImeService::class.java.getDeclaredField("keyboard").apply { isAccessible = true }.get(ime)
+        assertNull("the snapshot is let go once the slide ends",
+            kb.javaClass.getDeclaredField("ghost").apply { isAccessible = true }.get(kb))
+        ime.onDestroy()
+        Prefs(ctx).sp.edit().remove(Prefs.LANGUAGES).apply()
+    }
+
     @Test fun lightTour() = tour("light")
 
     @Test fun darkTour() = tour("dark")

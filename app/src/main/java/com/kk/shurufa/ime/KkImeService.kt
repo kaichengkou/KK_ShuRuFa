@@ -1211,17 +1211,19 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         val langs = prefs.languages
         if (langs.size < 2) return
         val i = langs.indexOf(curLang).coerceAtLeast(0)
-        setLanguage(langs[(i + direction + langs.size) % langs.size])
+        setLanguage(langs[(i + direction + langs.size) % langs.size], direction)
     }
 
-    private fun setLanguage(id: String) {
+    /** [direction] is where the new language comes from (the swipe's or the globe key's); 0 for none. */
+    private fun setLanguage(id: String, direction: Int = 0) {
         finishComposing()
         tempLang = null
         lang = id
         shift = 0; autoShift = false
         predictions = emptyList()
         currentInputEditorInfo?.packageName?.let { if (prefs.perAppLanguage) prefs.setAppLanguage(it, id) }
-        if (panel != Panel.LETTERS) showPanel(Panel.LETTERS) else { keyboard.setRows(lettersRows()); syncBar() }
+        // the old keys slide out the way the finger went, the new ones follow
+        if (panel != Panel.LETTERS) showPanel(Panel.LETTERS) else { keyboard.setRows(lettersRows(), slide = if (direction < 0) 1 else if (direction > 0) -1 else 0); syncBar() }
         updateAutoCap()
     }
 

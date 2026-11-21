@@ -213,6 +213,8 @@ private val PAGES = listOf(
 @Composable
 private fun SettingsApp(prefs: Prefs, start: String) {
     var page by remember { mutableStateOf(start) }
+    // the home list keeps where it was while a page is open, so 返回 lands back there
+    val homeList = androidx.compose.foundation.lazy.rememberLazyListState()
     BackHandler(enabled = page != "home") { page = if (page == "dict_edit") "dict" else "home" }
     AnimatedContent(
         targetState = page,
@@ -223,8 +225,9 @@ private fun SettingsApp(prefs: Prefs, start: String) {
         label = "page",
     ) { p ->
         when (p) {
-            "home" -> Home(prefs) { page = it }
-            else -> SubPage(PAGES.firstOrNull { it.id == p }?.title ?: "", { page = "home" }) {
+            "home" -> Home(prefs, homeList) { page = it }
+            else -> SubPage(PAGES.firstOrNull { it.id == p }?.title ?: "", { page = "home" }, page = p, prefs = prefs,
+                header = if (p == "look") ({ KeyboardPreview(prefs) }) else null) {
                 when (p) {
                     "look" -> LookPage(prefs)
                     "motion" -> MotionPage(prefs)
@@ -250,17 +253,61 @@ private fun SettingsApp(prefs: Prefs, start: String) {
 
 // ---- building blocks -------------------------------------------------------------------
 
+/** The settings a page's controls show, gathered as it is drawn, for its 恢复初始设定. */
+private val LocalPageKeys = androidx.compose.runtime.staticCompositionLocalOf<MutableSet<String>?> { null }
+
+/** Pages whose contents are the user's own data, not settings: nothing there to restore. */
+private val NO_RESET = setOf("dict", "stats", "files", "dict_edit")
+
+/** Settings a page changes without the shared controls (and so are not gathered). */
+private fun extraKeys(page: String, prefs: Prefs): List<String> = when (page) {
+    "haptics" -> prefs.sp.all.keys.filter { it.startsWith("hap_") }
+    "look" -> listOf(Prefs.ACCENT)
+    "keys" -> prefs.sp.all.keys.filter { it.startsWith("key_ovr_") }
+    "toolbar" -> listOf(Prefs.TOOLBAR_ITEMS)
+    else -> emptyList()
+}
+
 @Composable
-private fun SubPage(title: String, onBack: () -> Unit, content: @Composable () -> Unit) {
+private fun SubPage(title: String, onBack: () -> Unit, page: String = "", prefs: Prefs? = null, header: (@Composable () -> Unit)? = null, content: @Composable () -> Unit) {
+    val keys = remember(page) { mutableSetOf<String>() }
+    // a new generation of the page after 恢复初始设定: every control reads its default again
+    var generation by remember { mutableIntStateOf(0) }
+    var confirm by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxSize().systemBarsPadding().imePadding()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") }
             Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
         }
+        // a header stays put while the page scrolls under it (外观's live keyboard)
+        header?.invoke()
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp, 4.dp, 16.dp, 32.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            item { content() }
+            item {
+                androidx.compose.runtime.CompositionLocalProvider(LocalPageKeys provides keys) {
+                    key(generation) { content() }
+                }
+            }
+            if (prefs != null && page.isNotEmpty() && page !in NO_RESET) item {
+                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    TextButton(onClick = { confirm = true }) { Text("恢复这一页的初始设定", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                }
+            }
         }
     }
+    if (confirm && prefs != null) AlertDialog(
+        onDismissRequest = { confirm = false },
+        title = { Text("恢复「$title」的初始设定？") },
+        text = { Text("这一页的设置都回到安装时的样子；其他页面不受影响。") },
+        confirmButton = {
+            TextButton(onClick = {
+                val all = keys + extraKeys(page, prefs)
+                // removing a setting tells the keyboard's listeners, which rebuild or reapply as for a change
+                prefs.sp.edit().apply { all.forEach { remove(it) } }.apply()
+                confirm = false; generation++
+            }) { Text("恢复") }
+        },
+        dismissButton = { TextButton(onClick = { confirm = false }) { Text("取消") } },
+    )
 }
 
 @Composable
@@ -280,6 +327,7 @@ internal fun Note(text: String) = Text(text, style = MaterialTheme.typography.bo
 
 @Composable
 internal fun Toggle(prefs: Prefs, key: String, title: String, sub: String?, def: Boolean) {
+    LocalPageKeys.current?.add(key)
     var v by remember { mutableStateOf(prefs.sp.getBoolean(key, def)) }
     Row(Modifier.fillMaxWidth().clickable { v = !v; prefs.put(key, v) }.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
@@ -322,6 +370,7 @@ private fun ValueLabel(text: String, title: String, unit: String, onEnter: (Stri
 
 @Composable
 private fun IntSlider(prefs: Prefs, key: String, title: String, def: Int, range: IntRange, unit: String, sub: String? = null, onDone: (() -> Unit)? = null) {
+    LocalPageKeys.current?.add(key)
     var v by remember { mutableIntStateOf(prefs.sp.getInt(key, def)) }
     val step = intStep(range.last - range.first)
     Column(Modifier.padding(vertical = 4.dp)) {
@@ -343,6 +392,7 @@ private fun IntSlider(prefs: Prefs, key: String, title: String, def: Int, range:
 
 @Composable
 private fun FloatSlider(prefs: Prefs, key: String, title: String, def: Float, range: ClosedFloatingPointRange<Float>, unit: String, sub: String? = null) {
+    LocalPageKeys.current?.add(key)
     var v by remember { mutableStateOf(prefs.sp.getFloat(key, def)) }
     val step = floatStep(range.endInclusive - range.start)
     Column(Modifier.padding(vertical = 4.dp)) {
@@ -365,6 +415,7 @@ private fun cleanSlider() = androidx.compose.material3.SliderDefaults.colors(act
 
 @Composable
 private fun Choice(prefs: Prefs, key: String, title: String, options: List<Pair<String, String>>, def: String = options.first().first) {
+    LocalPageKeys.current?.add(key)
     var v by remember { mutableStateOf(prefs.sp.getString(key, def) ?: def) }
     Column(Modifier.padding(vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(title)
@@ -380,7 +431,7 @@ private fun Choice(prefs: Prefs, key: String, title: String, options: List<Pair<
 // ---- home ------------------------------------------------------------------------------
 
 @Composable
-private fun Home(prefs: Prefs, open: (String) -> Unit) {
+private fun Home(prefs: Prefs, list: androidx.compose.foundation.lazy.LazyListState, open: (String) -> Unit) {
     var tick by remember { mutableIntStateOf(0) }
     val owner = LocalLifecycleOwner.current
     DisposableEffect(owner) {
@@ -388,7 +439,7 @@ private fun Home(prefs: Prefs, open: (String) -> Unit) {
         owner.lifecycle.addObserver(obs)
         onDispose { owner.lifecycle.removeObserver(obs) }
     }
-    LazyColumn(Modifier.fillMaxSize().systemBarsPadding().imePadding(), contentPadding = PaddingValues(16.dp, 20.dp, 16.dp, 32.dp)) {
+    LazyColumn(Modifier.fillMaxSize().systemBarsPadding().imePadding(), state = list, contentPadding = PaddingValues(16.dp, 20.dp, 16.dp, 32.dp)) {
         item {
             // the app's own key, as on the home screen, beside its name
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 18.dp)) {
