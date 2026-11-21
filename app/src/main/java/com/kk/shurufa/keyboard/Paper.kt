@@ -13,7 +13,8 @@ import kotlin.random.Random
  * and never in the way of the keys.
  */
 object Paper {
-    private const val SIZE = 160
+    // large enough not to show a repeat on a dense screen (ALPHA_8: 100 KB)
+    private const val SIZE = 320
     private var tile: Bitmap? = null
     private val paint = Paint(Paint.FILTER_BITMAP_FLAG)
 
@@ -23,13 +24,13 @@ object Paper {
         // specks of differing weight
         for (i in px.indices) px[i] = (rnd.nextInt(0, 38) * rnd.nextInt(0, 2)).toByte()
         // a few fibres: short soft strokes
-        repeat(26) {
+        repeat(100) {
             var x = rnd.nextFloat() * SIZE; var y = rnd.nextFloat() * SIZE
             val a = rnd.nextFloat() * Math.PI.toFloat()
             val dx = kotlin.math.cos(a); val dy = kotlin.math.sin(a)
             repeat(rnd.nextInt(10, 28)) {
                 val ix = ((x.toInt() % SIZE) + SIZE) % SIZE; val iy = ((y.toInt() % SIZE) + SIZE) % SIZE
-                px[iy * SIZE + ix] = 70
+                px[iy * SIZE + ix] = 52
                 x += dx; y += dy
             }
         }

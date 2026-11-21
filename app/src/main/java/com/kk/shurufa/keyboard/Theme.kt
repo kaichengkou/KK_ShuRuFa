@@ -66,25 +66,28 @@ data class KbTheme(
             else -> (context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
         }
 
-        /** 临时模式: night indigo with a violet accent, whatever the theme, so it is plain to see it is on. */
+        /**
+         * 临时模式: 黛蓝 night, a muted slate blue with a moonlit accent: plainly not the usual
+         * keyboard (and the space key says 临时), but in the same quiet palette as the rest.
+         */
         fun incognito(): KbTheme {
-            val ink = Color.parseColor("#E9E6FF")
-            val accent = Color.parseColor("#A99BFF")
+            val ink = Color.parseColor("#E4E7EF")
+            val accent = Color.parseColor("#9AA6D4")
             return KbTheme(
                 dark = true,
-                background = Color.parseColor("#15132A"),
-                surface = Color.parseColor("#2A2650"),
-                surfacePressed = Color.parseColor("#3A3566"),
+                background = Color.parseColor("#161A26"),
+                surface = Color.parseColor("#272D3E"),
+                surfacePressed = Color.parseColor("#353C51"),
                 soft = Colors.alpha(ink, 0x17),
                 softPressed = Colors.alpha(ink, 0x30),
                 ink = ink,
-                inkSoft = Color.parseColor("#BDB7E6"),
-                hint = Color.parseColor("#8A84B8"),
+                inkSoft = Color.parseColor("#B7BDCC"),
+                hint = Color.parseColor("#858DA3"),
                 accent = accent,
                 accentPressed = Colors.blend(accent, Color.WHITE, 0.25f),
-                onAccent = Color.parseColor("#15132A"),
-                accentSoft = Colors.alpha(accent, 0x38),
-                popup = Color.parseColor("#332E5E"),
+                onAccent = Color.parseColor("#161A26"),
+                accentSoft = Colors.alpha(accent, 0x33),
+                popup = Color.parseColor("#2E3547"),
                 shadow = Colors.alpha(Color.BLACK, 0x50),
                 divider = Colors.alpha(ink, 0x16),
             )
@@ -128,7 +131,7 @@ data class KbTheme(
                     softPressed = Colors.alpha(ink, 0x22),
                     ink = ink,
                     inkSoft = Color.parseColor("#454B54"),
-                    hint = Color.parseColor("#8F96A0"),
+                    hint = Color.parseColor("#737A86"),   // 3.6:1 on the background (was 2.6:1)
                     accent = accent,
                     accentPressed = Colors.blend(accent, Color.BLACK, 0.2f),
                     onAccent = Color.WHITE,
@@ -178,7 +181,7 @@ private fun paper(night: Boolean, accent: Int): KbTheme = if (night) {
         softPressed = Colors.alpha(Color.parseColor("#5B4A36"), 0x28),
         ink = ink,
         inkSoft = Color.parseColor("#5A5149"),
-        hint = Color.parseColor("#9C9184"),
+        hint = Color.parseColor("#7D7367"),   // warm grey-brown, readable on rice paper
         accent = accent,
         accentPressed = Colors.blend(accent, Color.BLACK, 0.18f),
         onAccent = Color.parseColor("#FFF9F0"),

@@ -151,6 +151,9 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     private val aiCand by lazy { AiCandidate(prefs) { syncBar() } }
     private var aiShown = false
 
+    /** 学习延后: what Rime is taught once it has stayed a few seconds. */
+    private val learning = DeferredLearning()
+
     /** Taps may teach the touch model (not in 临时模式 or passwords). */
     private var tapLearn = true
 
@@ -264,6 +267,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         applyRimeOptions()
         if (built) setInputView(onCreateInputView())
         currentInputEditorInfo?.let { applyPrivacy(it) }
+        if (prefs.incognito) learning.dropAll()
         notice(if (prefs.incognito) "临时模式：输入的内容不学习、不记录" else "已退出临时模式")
     }
 
@@ -434,6 +438,8 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
 
     override fun onFinishInputView(finishingInput: Boolean) {
         super.onFinishInputView(finishingInput)
+        // leaving the field: what stayed is learned now
+        learning.flush(all = true)
         if (sink != null) dropSink()
         stopBackgroundWork()
         if (RimeEngine.ready) RimeBridge.clearComposition()
@@ -472,8 +478,9 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         if (!RimeEngine.ready) return
         RimeBridge.setOption("emoji", prefs.zhEmoji)
         RimeBridge.setOption("traditionalization", prefs.zhTraditional)
-        // 临时模式: Rime learns nothing from what is committed (a guard added to its Memory)
-        RimeBridge.setOption("_kk_no_learning", prefs.incognito)
+        // Rime never learns at the moment of a commit (a guard added to its Memory): commits that
+        // stay are taught a few seconds later (学习延后), and in 临时模式 not at all
+        RimeBridge.setOption("_kk_no_learning", true)
     }
 
     // ---- panels -------------------------------------------------------------------------
@@ -1045,6 +1052,8 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
                 if (prev.isNotEmpty() && prev[0].isLetterOrDigit() && !isCjk(prev[0])) out = " $out"
             }
             zh.reset()
+            // learned later if it stays (a slip deleted right away teaches nothing)
+            if (learnHere && commit.any { isCjk(it) }) learning.committed(syl.joinToString(""), commit)
             editor.type(pangu(out), pairable = false, syllables = if (out == commit) syl else null)
             predictions = if (prefs.zhPredict && !prefs.pinyinMode && out.any { isCjk(it) })
                 predictor.suggest(editor.textBefore(20).ifEmpty { out }) else emptyList()
@@ -1086,12 +1095,14 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     private fun clearAll() {
         if (composing) { RimeBridge.clearComposition(); flushRime(); return }
         if (!editor.clearAll()) return
+        learning.clearedAll()
         predictions = emptyList()
         syncBar()
         updateAutoCap()
     }
 
     private fun undo() {
+        learning.undone()
         editor.undo()
         predictions = emptyList()
         syncBar()
@@ -1127,7 +1138,11 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         val name = layout(curLang).label
         // 节气: on the day of a solar term the space key names it, quietly
         val term = if (prefs.solarTerms) SolarTerms.on() else null
-        return if (term != null) "$name · $term" else name
+        return when {
+            prefs.incognito -> "$name · 临时"
+            term != null -> "$name · $term"
+            else -> name
+        }
     }
 
     override fun onOutput(key: Key, output: Output) {
@@ -1201,7 +1216,10 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
                 when {
                     composing -> rimeKey(RimeBridge.XK_BackSpace)
                     sink != null -> { if (query.isNotEmpty()) query.setLength(query.offsetByCodePoints(query.length, -1)); syncBar() }
-                    else -> { editor.deleteBackward(); updateAutoCap(); suggestAfterDelete(); if (panel == Panel.NUM) showMoneyChip(); syncBar() }
+                    else -> {
+                        learning.deleting { n -> editor.textBefore(n) }
+                        editor.deleteBackward(); updateAutoCap(); suggestAfterDelete(); if (panel == Panel.NUM) showMoneyChip(); syncBar()
+                    }
                 }
             }
             "space" -> {

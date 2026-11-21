@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <string>
 #include <cstdlib>
 
 extern void rime_require_module_lua();
@@ -69,6 +70,25 @@ int main(int argc, char** argv) {
       show(api, q, seq);
       api->destroy_session(q);
       show(api, s, "  main still");
+      continue;
+    }
+    if (strncmp(seq, "@learn=", 7) == 0) {  // @learn=shi:十 — teach a commit through a session of its own
+      std::string arg(seq + 7); size_t c = arg.find(':');
+      RimeSessionId t = api->create_session();
+      api->set_option(t, "_kk_no_learning", False);
+      api->set_input(t, arg.substr(0, c).c_str());
+      std::string want = arg.substr(c + 1);
+      RimeCandidateListIterator it = {0};
+      int pick = -1;
+      if (api->candidate_list_begin(t, &it)) {
+        while (api->candidate_list_next(&it)) if (it.candidate.text && want == it.candidate.text) { pick = it.index; break; }
+        api->candidate_list_end(&it);
+      }
+      if (pick >= 0) api->select_candidate(t, pick);
+      RIME_STRUCT(RimeCommit, cm);
+      bool ok = api->get_commit(t, &cm); if (ok) api->free_commit(&cm);
+      printf("  learn %s -> %d\n", arg.c_str(), ok);
+      api->destroy_session(t);
       continue;
     }
     if (strcmp(seq, "@sync") == 0) {  // Rime's sync: write snapshots, merge the others

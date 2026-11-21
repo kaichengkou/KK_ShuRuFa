@@ -309,13 +309,13 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
     companion object {
         /** How long a toolbar icon's tap motion runs. */
         const val TAP_MS = 560L
-        const val HEIGHT_DP = 50f
+        const val HEIGHT_DP = 52f
         /**
          * Where everything in the bar is centered: tool icons, words, chips, the end button. The
          * top 16 dp hold the pinyin while typing; keeping every mode on this one line means the
          * words come up exactly where the icons were, and nothing jumps when typing starts.
          */
-        const val LINE_DP = 32f
+        const val LINE_DP = 33.5f
         /** Tools that show a text glyph instead of a line icon. */
         val TOOL_GLYPHS = mapOf("symbols" to "§", "math" to "π")
         /** Every tool the toolbar can hold: id to name. */
@@ -331,6 +331,10 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
 
     private var pressedTool: String? = null
 
+    /** A mark on a word (AI, 云, a correction), as against a rare character's reading. */
+    private fun isBadge(note: String) = note == "AI" || note == "云" || note.contains('→') || note.contains('⇄') ||
+        note.startsWith("多") || note.startsWith("漏")
+
     private fun drawCandidates(c: Canvas, a: Float) {
         val endW = dp(END_DP)
         val composing = mode == Mode.CANDIDATES
@@ -338,7 +342,8 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
         if (composing && preedit.isNotEmpty()) {
             tp.textAlign = Paint.Align.LEFT
             tp.textSize = sp(Ui.SMALL)
-            tp.color = theme.hint
+            // what is being typed is read while typing: inkSoft, not the faint hint grey
+            tp.color = theme.inkSoft
             tp.alpha = (255 * a).toInt()
             val x0 = dp(12f)
             c.drawText(preedit, x0, dp(14f), tp)
@@ -366,7 +371,7 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
         val bottom = height - dp(3f)
         tp.textAlign = Paint.Align.LEFT
         val size = sp(Ui.CANDIDATE * prefs.candidateScale)
-        val noteSize = sp(Ui.CAPTION)
+        val noteSize = sp(Ui.CAPTION - 1f)
         val r = dp(prefs.keyRadiusDp)
         val face = if (prefs.candFont == "serif") Ui.serif else Ui.regular
         for (i in candidates.indices) {
@@ -375,8 +380,10 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
             val note = notes.getOrNull(i).orEmpty()
             val tw = tp.measureText(s)
             val nw = if (note.isNotEmpty()) { tp.textSize = noteSize; tp.measureText(note) } else 0f
-            // the note sits above the word, so it adds no width unless it is longer than the word
-            val cw = max(tw, nw) + dp(24f)
+            // marks (AI, 云, a correction like i→u or 多i) sit small at the word's upper right, clear of
+            // the pinyin line; a rare character's reading sits above it and adds width only if longer
+            val badge = note.isNotEmpty() && isBadge(note)
+            val cw = (if (badge) tw + dp(2.5f) + nw else max(tw, nw)) + dp(24f)
             val rect = candRect(candCount++).apply { set(x + scrollX0, top, x + scrollX0 + cw, bottom) }
             if (x + cw > 0 && x < width) {
                 val cr = tmp.apply { set(rect); offset(-scrollX0, 0f) }
@@ -384,12 +391,14 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
                 tp.textSize = size; tp.typeface = face
                 tp.color = if (i == 0 && composing) theme.accent else theme.ink
                 tp.alpha = (255 * a).toInt()
-                drawText(c, s, x + dp(12f) + (cw - dp(24f) - tw) / 2, lineCy, tp)
+                val wx = x + dp(12f) + if (badge) 0f else (cw - dp(24f) - tw) / 2
+                drawText(c, s, wx, lineCy, tp)
                 if (note.isNotEmpty()) {
                     tp.textSize = noteSize; tp.typeface = Ui.regular
-                    tp.color = if (note == "AI" || note == "云" || note.contains('→') || note.contains('⇄')) theme.accent else theme.hint
+                    tp.color = if (badge) theme.accent else theme.hint
                     tp.alpha = (255 * a).toInt()
-                    c.drawText(note, x + dp(12f) + (cw - dp(24f) - nw) / 2, lineCy - dp(9.5f), tp)
+                    if (badge) c.drawText(note, wx + tw + dp(2.5f), lineCy - size * 0.18f, tp)
+                    else c.drawText(note, x + dp(12f) + (cw - dp(24f) - nw) / 2, lineCy - size * 0.5f - dp(1.5f), tp)
                 }
             }
             x += cw

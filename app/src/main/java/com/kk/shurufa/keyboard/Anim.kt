@@ -26,7 +26,7 @@ object Motion {
     /** From one place on screen to another: a brisk start, a short settle. */
     val MOVE: Interpolator = PathInterpolator(0.25f, 0.1f, 0f, 1f)
     /** Popping up: a touch past full size and back, like something light landing. */
-    val POP: Interpolator = PathInterpolator(0.34f, 1.45f, 0.64f, 1f)
+    val POP: Interpolator = PathInterpolator(0.34f, 1.18f, 0.64f, 1f)
     val LINEAR: Interpolator = LinearInterpolator()
 
     // Durations in ms, before the 动画时长 factor.

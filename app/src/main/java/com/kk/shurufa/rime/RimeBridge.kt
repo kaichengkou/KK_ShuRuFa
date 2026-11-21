@@ -21,6 +21,7 @@ object RimeBridge {
     external fun deleteCandidate(index: Int): Boolean
     external fun highlightCandidate(index: Int): Boolean
     external fun syncUserData(): Boolean
+    external fun learn(input: String, text: String): Boolean
     external fun setInput(input: String): Boolean
     external fun candidateComments(limit: Int): Array<String>
     external fun caretPos(): Int

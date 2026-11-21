@@ -43,7 +43,8 @@ class PopupOverlay(context: Context, prefs: Prefs) : KbView(context, prefs) {
     private var pvDir: Dir? = null
     private val pvAlpha = Tween(0f)
     /** The bubble grows out of the key with a little spring in it. */
-    private val pvScale = Spring(0f, stiffness = 1500f, dampingRatio = 0.6f)
+    // firm, not jelly: fast typing shows a bubble per key, and a bouncy one would wobble all along
+    private val pvScale = Spring(0f, stiffness = 1500f, dampingRatio = 0.8f)
     private val pvSwap = Tween(1f)
 
     fun showPreview(r: RectF, label: String, dir: Dir?) {
@@ -304,16 +305,19 @@ class PopupOverlay(context: Context, prefs: Prefs) : KbView(context, prefs) {
     private fun drawToast(c: Canvas, a: Float) {
         text.typeface = Ui.regular; text.textSize = sp(Ui.BODY)
         val w = minOf(text.measureText(toastText) + dp(36f), width - dp(24f))
+        ellipsizer.set(text)
+        val shown = android.text.TextUtils.ellipsize(toastText, ellipsizer, w - dp(36f), android.text.TextUtils.TruncateAt.END).toString()
         val h = dp(36f)
         val rise = (1 - a) * dp(8f)
         toastRect.set((width - w) / 2, toastBottom - h + rise, (width + w) / 2, toastBottom + rise)
         bg.color = theme.popup
         bg.alpha = (255 * a).toInt()
-        bg.setShadowLayer(dp(10f), 0f, dp(3f), Colors.alpha(Color.BLACK, ((if (theme.dark) 0x70 else 0x38) * a).toInt()))
+        bg.setShadowLayer(dp(10f), 0f, dp(3f), shadow(if (theme.dark) 0x70 else 0x38, a))
         c.drawRoundRect(toastRect, h / 2, h / 2, bg)
         bg.clearShadowLayer()
+        outline(c, toastRect, h / 2, a)
         text.color = theme.ink; text.alpha = (255 * a).toInt()
-        drawText(c, toastText, toastRect.centerX(), toastRect.centerY(), text)
+        drawText(c, shown, toastRect.centerX(), toastRect.centerY(), text)
     }
 
     // ---- drawing ----
@@ -339,11 +343,25 @@ class PopupOverlay(context: Context, prefs: Prefs) : KbView(context, prefs) {
     private fun bubble(c: Canvas, r: RectF, alpha: Float) {
         bg.color = theme.popup
         bg.alpha = (255 * alpha).toInt()
-        bg.setShadowLayer(dp(8f), 0f, dp(2.5f), Colors.alpha(Color.BLACK, ((if (theme.dark) 0x66 else 0x30) * alpha).toInt()))
+        bg.setShadowLayer(dp(8f), 0f, dp(2.5f), shadow(if (theme.dark) 0x66 else 0x30, alpha))
         val rad = Ui.radiusLarge(dp(prefs.keyRadiusDp), dp(1f))
         c.drawRoundRect(r, rad, rad, bg)
         bg.clearShadowLayer()
+        outline(c, r, rad, alpha)
     }
+
+    /** A shadow in the theme's own hue (cool grey, or warm brown on 纸墨), not plain black. */
+    private fun shadow(alpha: Int, a: Float): Int = Colors.alpha(theme.shadow or (0xFF shl 24), (alpha * a).toInt())
+
+    /** A hairline round a popup, so it stands off a dark keyboard. */
+    private fun outline(c: Canvas, r: RectF, rad: Float, a: Float) {
+        bg.style = Paint.Style.STROKE; bg.strokeWidth = dp(0.75f)
+        bg.color = Colors.alpha(theme.ink, ((if (theme.dark) 0x12 else 0x0A) * a).toInt())
+        c.drawRoundRect(r, rad, rad, bg)
+        bg.style = Paint.Style.FILL
+    }
+
+    private val ellipsizer = android.text.TextPaint(Paint.ANTI_ALIAS_FLAG)
 
     private fun drawPreview(c: Canvas, alpha: Float, scale: Float) {
         c.save()
@@ -382,7 +400,9 @@ class PopupOverlay(context: Context, prefs: Prefs) : KbView(context, prefs) {
         bubble(c, opRect, show)
         val alpha = (255 * show).toInt()
         val inset = dp(1.5f)
-        val rad = if (words) (cellH - 2 * inset) / 2 else dp(prefs.keyRadiusDp)
+        // the highlight's corners follow the card's (concentric), for words and characters alike
+        val outer = Ui.radiusLarge(dp(prefs.keyRadiusDp), dp(1f))
+        val rad = if (words) max(dp(4f), outer - pad - inset) else dp(prefs.keyRadiusDp)
         // hairlines between word pills, except beside the highlighted one
         if (words) {
             bg.color = Colors.fade(theme.divider, 0.55f * show)

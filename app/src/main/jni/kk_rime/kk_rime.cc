@@ -294,6 +294,52 @@ FN(jobjectArray, query)(JNIEnv* env, jobject, jstring input, jint limit) {
   return jarr(env, v);
 }
 
+// Learning after the fact: the keyboard's session learns nothing (_kk_no_learning), and a commit
+// that stayed (not deleted right away) is taught here: [input] typed again in a session of its
+// own, with learning on, and candidates chosen until exactly [text] is committed. Nothing is
+// learned when the text cannot be made again from the input.
+FN(jboolean, learn)(JNIEnv* env, jobject, jstring jinput, jstring jtext) {
+  std::lock_guard<std::mutex> lock(g_mutex);
+  const std::string input = str(env, jinput), text = str(env, jtext);
+  if (input.empty() || text.empty()) return false;
+  const bool trad = api()->get_option(session(), "traditionalization");
+  RimeSessionId s = api()->create_session();
+  if (!s) return false;
+  api()->set_option(s, "_kk_no_learning", False);
+  api()->set_option(s, "traditionalization", trad ? True : False);
+  api()->set_option(s, "emoji", False);
+  bool ok = false;
+  if (api()->set_input(s, input.c_str())) {
+    std::string done;  // what has been chosen so far
+    for (int step = 0; step < 8 && !ok; ++step) {
+      const std::string rest = text.substr(std::min(done.size(), text.size()));
+      int pick = -1; size_t best = 0;
+      RimeCandidateListIterator it = {0};
+      if (api()->candidate_list_begin(s, &it)) {
+        for (int i = 0; i < 300 && api()->candidate_list_next(&it); ++i) {
+          const std::string c = it.candidate.text ? it.candidate.text : "";
+          if (c.empty() || rest.compare(0, c.size(), c) != 0) continue;
+          if (c.size() > best) { best = c.size(); pick = it.index; }
+          if (c.size() == rest.size()) break;   // the whole of what is left
+        }
+        api()->candidate_list_end(&it);
+      }
+      if (pick < 0) break;
+      api()->select_candidate(s, pick);
+      done += rest.substr(0, best);
+      RIME_STRUCT(RimeCommit, commit);
+      if (api()->get_commit(s, &commit)) {
+        ok = commit.text && text == commit.text;
+        api()->free_commit(&commit);
+        break;
+      }
+    }
+  }
+  api()->clear_composition(s);
+  api()->destroy_session(s);
+  return ok;
+}
+
 FN(jboolean, selectCandidateGlobal)(JNIEnv*, jobject, jint index) {
   std::lock_guard<std::mutex> lock(g_mutex);
   bool r = api()->select_candidate(session(), index);

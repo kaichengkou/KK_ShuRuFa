@@ -195,8 +195,11 @@ class KeyboardView(context: Context, prefs: Prefs) : KbView(context, prefs) {
     private fun surfaceShader(t: KbTheme, h: Float): android.graphics.Shader {
         val key = t.surface * 31 + h.toInt()
         surfaceShader?.let { if (shaderFor == key) return it }
-        val top = if (t.dark) Colors.blend(t.surface, android.graphics.Color.WHITE, 0.045f) else t.surface
-        val bottom = if (t.dark) t.surface else Colors.blend(t.surface, t.background, 0.22f)
+        // 纸墨 is matte paper: no sheen, at most a breath of shading; the modern keys are molded
+        val paper = prefs.style == "paper"
+        val top = if (t.dark && !paper) Colors.blend(t.surface, android.graphics.Color.WHITE, 0.045f) else t.surface
+        val bottom = if (paper) (if (t.dark) t.surface else Colors.blend(t.surface, t.background, 0.04f))
+            else if (t.dark) t.surface else Colors.blend(t.surface, t.background, 0.22f)
         return android.graphics.LinearGradient(0f, 0f, 0f, h, top, bottom, android.graphics.Shader.TileMode.CLAMP)
             .also { surfaceShader = it; shaderFor = key }
     }
@@ -211,8 +214,11 @@ class KeyboardView(context: Context, prefs: Prefs) : KbView(context, prefs) {
         if (g != null) { c.save(); c.translate(swapDir * (1f - sp) * travel, 0f) }
         val r = dp(prefs.keyRadiusDp)
         val borders = prefs.keyBorders
-        val shadowDy = dp(1.2f)
-        val pressInset = dp(1.6f)
+        val paper = prefs.style == "paper"
+        val shadowDy = dp(if (paper) 0.6f else 1.2f)
+        // pressed, a key goes down onto the board: a little smaller, a little lower, its shadow gone
+        val pressInset = dp(1.1f)
+        val pressDy = dp(0.7f)
         val tp = trackpad.value
         val la = labelsAlpha.value * (1f - 0.88f * tp)
         var animating = labelsAlpha.running || trackpad.running || spaceSwap.running || keyTapT.running
@@ -226,7 +232,8 @@ class KeyboardView(context: Context, prefs: Prefs) : KbView(context, prefs) {
             val armed = k.fn == "backspace" && bsArmed != null
             val style = if (armed) KeyStyle.ACTION else k.style
             val inset = pressInset * pv
-            val kr = tmpRect.apply { set(rect.left + inset, rect.top + inset, rect.right - inset, rect.bottom - inset) }
+            val sink = pressDy * pv
+            val kr = tmpRect.apply { set(rect.left + inset, rect.top + inset + sink, rect.right - inset, rect.bottom - inset + sink) }
             var fill = when (style) {
                 KeyStyle.NORMAL -> Colors.blend(t.surface, t.surfacePressed, pv)
                 KeyStyle.FUNC, KeyStyle.SOFT -> Colors.blend(t.soft, t.softPressed, pv)
@@ -237,8 +244,9 @@ class KeyboardView(context: Context, prefs: Prefs) : KbView(context, prefs) {
             val isSpace = k.fn == "space"
             if (tp > 0f && !isSpace) fill = Colors.blend(fill, t.soft, tp)
             if (style == KeyStyle.NORMAL && borders && (tp < 1f || isSpace)) {
-                keyPaint.color = Colors.fade(t.shadow, if (isSpace) 1f else 1f - tp)
-                c.drawRoundRect(kr.left, kr.top + shadowDy, kr.right, kr.bottom + shadowDy, r, r, keyPaint)
+                keyPaint.color = Colors.fade(t.shadow, (if (isSpace) 1f else 1f - tp) * (1f - pv))
+                val sd = shadowDy * (1f - pv)
+                c.drawRoundRect(kr.left, kr.top + sd, kr.right, kr.bottom + sd, r, r, keyPaint)
             }
             keyPaint.color = fill
             if (style == KeyStyle.NORMAL && pv < 0.01f && tp < 0.01f) {
@@ -248,11 +256,18 @@ class KeyboardView(context: Context, prefs: Prefs) : KbView(context, prefs) {
                 keyPaint.shader = sh
                 c.drawRoundRect(kr, r, r, keyPaint)
                 keyPaint.shader = null
-                if (t.dark) {
+                if (t.dark && !paper) {
                     keyPaint.color = Colors.alpha(android.graphics.Color.WHITE, 0x12)
                     c.drawRoundRect(kr.left + r * 0.6f, kr.top, kr.right - r * 0.6f, kr.top + dp(1f), dp(0.5f), dp(0.5f), keyPaint)
                 }
             } else c.drawRoundRect(kr, r, r, keyPaint)
+            if (paper && style == KeyStyle.NORMAL && tp < 0.01f) {
+                // the edge of a sheet of paper: a hairline, warm, instead of a plastic shine
+                keyPaint.style = android.graphics.Paint.Style.STROKE; keyPaint.strokeWidth = dp(0.75f)
+                keyPaint.color = if (t.dark) Colors.alpha(0xECE5D8.toInt() or (0xFF shl 24), 0x0A) else Colors.alpha(0x5B4A36 or (0xFF shl 24), 0x16)
+                c.drawRoundRect(kr, r, r, keyPaint)
+                keyPaint.style = android.graphics.Paint.Style.FILL
+            }
             val ink = when (style) {
                 KeyStyle.ACTION -> t.onAccent
                 KeyStyle.TINT -> t.accent

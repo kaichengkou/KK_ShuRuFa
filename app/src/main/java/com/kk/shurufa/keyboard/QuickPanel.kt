@@ -65,7 +65,7 @@ class QuickPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
         val h = (height - padTop - dotsH) / rows
         val a = appear.value
         val p0 = page.value + dragOffset
-        val discR = minOf(dp(23f), h * 0.29f)
+        val discR = minOf(dp(23f), h * 0.27f)
         var again = appear.running || page.running || press.running
         tiles.forEachIndexed { i, tile ->
             val pg = i / perPage; val k = i % perPage
@@ -126,7 +126,7 @@ class QuickPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
         val maxW = w - dp(6f)
         val tw = tp.measureText(title)
         if (tw > maxW) tp.textSize *= maxW / tw
-        drawText(c, title, cx, cy + r + dp(14f), tp)
+        drawText(c, title, cx, minOf(cy + r + dp(14f), y + h - dp(6f)), tp)
     }
 
     // ---- touch: tap a button, swipe for pages ----
