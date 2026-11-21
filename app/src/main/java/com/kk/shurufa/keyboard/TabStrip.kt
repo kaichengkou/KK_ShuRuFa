@@ -23,7 +23,7 @@ class TabStrip(context: Context, prefs: Prefs) : KbView(context, prefs) {
 
     private var tabs: List<Pair<String, String>> = emptyList()
     private var current = ""
-    private val pill = Spring(0f, stiffness = 750f, dampingRatio = 0.85f)
+    private val pill = Spring(0f, stiffness = 1000f, dampingRatio = 0.76f)
 
     private val bg = Paint(Paint.ANTI_ALIAS_FLAG)
     private val tp = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER }
@@ -87,6 +87,8 @@ class TabStrip(context: Context, prefs: Prefs) : KbView(context, prefs) {
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(e: MotionEvent): Boolean {
         if (e.actionMasked == MotionEvent.ACTION_DOWN && tabs.isNotEmpty()) {
+            // compact tabs end where their names do: the empty rest of the row is not a tab
+            if (compact && (e.x > edge(tabs.size) + dp(4f) || e.x < edge(0) - dp(4f))) return false
             val i = (0 until tabs.size).firstOrNull { e.x < edge(it + 1) } ?: (tabs.size - 1)
             val id = tabs[i].first
             if (id != current) { onFeedback?.invoke(); onTab?.invoke(id) }

@@ -36,7 +36,7 @@ class SheetHandle(context: Context, prefs: Prefs) : KbView(context, prefs) {
     private var crossed = false
     private var vt: VelocityTracker? = null
     private val grip = Tween(0f)
-    private val spring = Spring(0f, stiffness = 520f, dampingRatio = 0.78f)
+    private val spring = Spring(0f, stiffness = 720f, dampingRatio = 0.8f)
     private val ticker = TimeAnimator().apply {
         setTimeListener { a, _, _ ->
             val h = spring.step()

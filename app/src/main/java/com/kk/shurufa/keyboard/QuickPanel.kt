@@ -42,7 +42,7 @@ class QuickPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
     private var pressed = -1
     private val press = Tween(0f)
     private val appear = Tween(1f)
-    private val page = Spring(0f, stiffness = 420f, dampingRatio = 0.9f)
+    private val page = Spring(0f, stiffness = 620f, dampingRatio = 0.86f)
     private val cols = 4
     private val rows = 2
     private val perPage get() = cols * rows

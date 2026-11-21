@@ -94,6 +94,15 @@ class KeyboardView(context: Context, prefs: Prefs) : KbView(context, prefs) {
      */
     private var ghost: android.graphics.Bitmap? = null
     private val swap = Tween(1f)
+
+    // a function key's icon plays its little motion after a tap (删除 nudges, 回车 pushes …)
+    private var tappedKey: Key? = null
+    private val keyTapT = Tween(1f)
+    private fun tapped(k: Key) {
+        if (!Motion.on(prefs) || k.fn == null) return
+        tappedKey = k; keyTapT.set(0f); keyTapT.animateTo(1f, dur(KEY_TAP_MS), Motion.LINEAR); postInvalidateOnAnimation()
+    }
+    private fun tapOf(k: Key) = if (k === tappedKey) keyTapT.value else 1f
     private var swapDir = 0
     private val ghostPaint = android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG)
 
@@ -204,7 +213,7 @@ class KeyboardView(context: Context, prefs: Prefs) : KbView(context, prefs) {
         val pressInset = dp(1.6f)
         val tp = trackpad.value
         val la = labelsAlpha.value * (1f - 0.88f * tp)
-        var animating = labelsAlpha.running || trackpad.running || spaceSwap.running
+        var animating = labelsAlpha.running || trackpad.running || spaceSwap.running || keyTapT.running
         if (spaceOffset.running) { spaceOffset.step(); animating = true }
         for (i in keys.indices) {
             val k = keys[i]
@@ -289,7 +298,7 @@ class KeyboardView(context: Context, prefs: Prefs) : KbView(context, prefs) {
                 fn == "shift" -> {
                     val st = listener?.shiftState() ?: 0
                     if (st > 0) { iconPaint.color = theme.accent; iconPaint.alpha = a }
-                    Icons.draw(c, "shift", cx, cy, dp(Ui.KEY_ICON), iconPaint, filled = st > 0)
+                    Icons.draw(c, "shift", cx, cy, dp(Ui.KEY_ICON), iconPaint, filled = st > 0, t = tapOf(k))
                     // caps lock: a bar under the arrow
                     if (st == 2) c.drawRoundRect(cx - dp(6f), cy + dp(12f), cx + dp(6f), cy + dp(13.6f), dp(1f), dp(1f), iconPaint)
                 }
@@ -305,7 +314,7 @@ class KeyboardView(context: Context, prefs: Prefs) : KbView(context, prefs) {
                     fitText(label, rect.width() - dp(8f), textPaint)
                     drawText(c, label, cx, cy, textPaint)
                 }
-                else -> Icons.draw(c, fn, cx, cy, dp(Ui.KEY_ICON), iconPaint)
+                else -> Icons.draw(c, fn, cx, cy, dp(Ui.KEY_ICON), iconPaint, t = tapOf(k))
             }
             return
         }
@@ -422,6 +431,8 @@ class KeyboardView(context: Context, prefs: Prefs) : KbView(context, prefs) {
     private enum class Mode { NONE, PRESS, POPUP, CURSOR, SPACE_SWIPE, BS_GESTURE, BS_REPEAT, CANCELLED }
 
     private companion object {
+        /** How long a function key's icon motion runs. */
+        const val KEY_TAP_MS = 460L
         /** A drag that takes longer than this to go far is a change of mind, not a flick. */
         const val SLOW_DRAG_MS = 450L
     }
@@ -681,7 +692,7 @@ class KeyboardView(context: Context, prefs: Prefs) : KbView(context, prefs) {
                 val fl = flick
                 val main = k.main
                 if (main != null) listener?.onOutput(k, if (fl != null) k.flicks[fl] ?: main else main)
-                else listener?.onFunction(k)
+                else { tapped(k); listener?.onFunction(k) }
             }
             Mode.POPUP -> overlay?.selected()?.let { listener?.onOption(k, it) }
             Mode.SPACE_SWIPE -> {

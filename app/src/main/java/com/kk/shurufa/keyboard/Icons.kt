@@ -4,6 +4,9 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.sin
 
 /** Line icons drawn on a 24×24 grid, scaled to the key. */
 object Icons {
@@ -40,6 +43,31 @@ object Icons {
         moveTo(8.2f, 13.6f); cubicTo(9.6f, 16.4f, 14.4f, 16.4f, 15.8f, 13.6f)
         moveTo(9.3f, 9.6f); lineTo(9.3f, 10.2f); moveTo(14.7f, 9.6f); lineTo(14.7f, 10.2f)
     }
+    // ---- parts of icons whose pieces move on their own when tapped ----
+    private val smileFace = p {
+        addCircle(12f, 12f, 8.5f, Path.Direction.CW)
+    }
+    private val translateBack = p { moveTo(10f, 4f); lineTo(19f, 4f); quadTo(21f, 4f, 21f, 6f); lineTo(21f, 15f) }
+    private val translateFront = p {
+        addRoundRect(RectF(3f, 8f, 14f, 20f), 2f, 2f, Path.Direction.CW)
+        moveTo(5.8f, 17.5f); lineTo(8.5f, 11f); lineTo(11.2f, 17.5f); moveTo(6.8f, 15.3f); lineTo(10.2f, 15.3f)
+    }
+    private val clipBoard = p { addRoundRect(RectF(5f, 4.5f, 19f, 20.5f), 2.5f, 2.5f, Path.Direction.CW) }
+    private val clipTop = p { addRect(RectF(9f, 3f, 15f, 6.5f), Path.Direction.CW) }
+    private val beam = p { moveTo(12f, 5f); lineTo(12f, 19f); moveTo(9.5f, 5f); lineTo(14.5f, 5f); moveTo(9.5f, 19f); lineTo(14.5f, 19f) }
+    private val arrowL = p { moveTo(6f, 9f); lineTo(3f, 12f); lineTo(6f, 15f) }
+    private val arrowR = p { moveTo(18f, 9f); lineTo(21f, 12f); lineTo(18f, 15f) }
+    private val micWaveL = p { moveTo(3.5f, 8f); quadTo(2f, 11f, 3.5f, 14f) }
+    private val micWaveR = p { moveTo(20.5f, 8f); quadTo(22f, 11f, 20.5f, 14f) }
+    private val sparkBig = p {
+        moveTo(10f, 3f); lineTo(11.8f, 8.2f); lineTo(17f, 10f); lineTo(11.8f, 11.8f); lineTo(10f, 17f)
+        lineTo(8.2f, 11.8f); lineTo(3f, 10f); lineTo(8.2f, 8.2f); close()
+    }
+    private val sparkSmall = p {
+        moveTo(18f, 13.5f); lineTo(18.9f, 15.6f); lineTo(21f, 16.5f); lineTo(18.9f, 17.4f); lineTo(18f, 19.5f)
+        lineTo(17.1f, 17.4f); lineTo(15f, 16.5f); lineTo(17.1f, 15.6f); close()
+    }
+
     private val translate = p {
         addRoundRect(RectF(3f, 8f, 14f, 20f), 2f, 2f, Path.Direction.CW)
         moveTo(10f, 4f); lineTo(19f, 4f); quadTo(21f, 4f, 21f, 6f); lineTo(21f, 15f)
@@ -145,7 +173,7 @@ object Icons {
      * Draws icon [name] centered at (cx, cy) with the given size in pixels. The canvas is scaled
      * instead of the path, so the GPU's path cache keeps every icon from frame to frame.
      */
-    fun draw(c: Canvas, name: String, cx: Float, cy: Float, size: Float, paint: Paint, filled: Boolean = false): Boolean {
+    fun draw(c: Canvas, name: String, cx: Float, cy: Float, size: Float, paint: Paint, filled: Boolean = false, t: Float = 1f): Boolean {
         val src = all[name] ?: return false
         val s = size / 24f
         val oldStyle = paint.style
@@ -157,10 +185,97 @@ object Icons {
         val save = c.save()
         c.translate(cx - size / 2, cy - size / 2)
         c.scale(s, s)
-        c.drawPath(src, paint)
+        if (t >= 1f || t < 0f || !tapMotion(c, name, src, paint, t)) c.drawPath(src, paint)
         c.restoreToCount(save)
         paint.style = oldStyle
         paint.strokeWidth = oldWidth
         return true
     }
+
+    // ---- tap motions: [t] runs 0→1 once after a tap; every motion ends where the icon rests ----
+
+    /** Up and back down: 0 → 1 → 0. */
+    private fun bump(t: Float) = sin(PI.toFloat() * t.coerceIn(0f, 1f))
+    /** A shake that dies away: [n] swings. */
+    private fun shake(t: Float, n: Int) = sin(t * PI.toFloat() * 2 * n) * (1f - t) * (1f - t)
+    /** A quick rise and a springy settle back. */
+    private fun hop(t: Float): Float = if (t < 0.3f) sin(t / 0.3f * PI.toFloat() / 2) else cos((t - 0.3f) / 0.7f * PI.toFloat() * 1.5f) * (1f - (t - 0.3f) / 0.7f)
+
+    /** Draws [name] mid-motion (canvas already in the 24-unit grid). False: no motion of its own. */
+    private fun tapMotion(c: Canvas, name: String, src: Path, paint: Paint, t: Float): Boolean {
+        fun around(deg: Float = 0f, scale: Float = 1f, dx: Float = 0f, dy: Float = 0f, sx: Float = scale, path: Path = src) {
+            val k = c.save()
+            c.translate(12f + dx, 12f + dy); c.rotate(deg); c.scale(sx, scale); c.translate(-12f, -12f)
+            c.drawPath(path, paint)
+            c.restoreToCount(k)
+        }
+        when (name) {
+            // 表情: a blink, and the smile grows
+            "emoji" -> {
+                c.drawPath(smileFace, paint)
+                val b = bump(((t - 0.08f) / 0.42f))
+                val k = c.save()
+                c.translate(12f, 14.6f); c.scale(1f + 0.18f * bump(t), 1f + 0.25f * bump(t)); c.translate(-12f, -14.6f)
+                tmp.reset(); tmp.moveTo(8.2f, 13.6f); tmp.cubicTo(9.6f, 16.4f, 14.4f, 16.4f, 15.8f, 13.6f)
+                c.drawPath(tmp, paint)
+                c.restoreToCount(k)
+                for (x in floatArrayOf(9.3f, 14.7f)) {
+                    tmp.reset()
+                    if (b > 0.6f) { tmp.moveTo(x - 1f, 10f); tmp.quadTo(x, 10.8f, x + 1f, 10f) }   // shut: a little arc
+                    else { val h = 0.3f * (1f - b / 0.6f); tmp.moveTo(x, 9.9f - h); tmp.lineTo(x, 9.9f + h) }
+                    c.drawPath(tmp, paint)
+                }
+            }
+            // 翻译: the card with the letter shakes in front of the page behind it
+            "translate" -> {
+                c.drawPath(translateBack, paint)
+                around(deg = 9f * shake(t, 3), dx = 1.4f * shake(t, 3), path = translateFront)
+            }
+            // 剪贴板: the clip lifts and drops back
+            "clipboard" -> {
+                around(scale = 1f - 0.04f * bump(t), path = clipBoard)
+                around(dy = -2.6f * hop(t), path = clipTop)
+            }
+            // 文字编辑: the arrows push out and come back
+            "cursor" -> {
+                c.drawPath(beam, paint)
+                val d = 2.2f * hop(t)
+                around(dx = -d, path = arrowL); around(dx = d, path = arrowR)
+            }
+            // AI: the spark twists and twinkles
+            "ai" -> {
+                val k = c.save()
+                c.translate(10f, 10f); c.rotate(45f * bump(t)); c.scale(1f + 0.12f * bump(t), 1f + 0.12f * bump(t)); c.translate(-10f, -10f)
+                c.drawPath(sparkBig, paint)
+                c.restoreToCount(k)
+                val k2 = c.save()
+                val tw = 1f + 0.6f * bump((t - 0.25f) / 0.5f)
+                c.translate(18f, 16.5f); c.scale(tw, tw); c.translate(-18f, -16.5f)
+                c.drawPath(sparkSmall, paint)
+                c.restoreToCount(k2)
+            }
+            // 语音: the mic bounces, a sound ring on each side
+            "mic", "voice" -> {
+                around(dy = -1.6f * hop(t), scale = 1f + 0.05f * bump(t))
+                val a = paint.alpha
+                val w = bump(t)
+                paint.alpha = (a * w).toInt()
+                around(dx = -1.5f * t, path = micWaveL); around(dx = 1.5f * t, path = micWaveR)
+                paint.alpha = a
+            }
+            // the grid of the menu turns a little and settles
+            "quick", "grid" -> around(deg = 22f * shake(t, 1) + 0f, scale = 1f + 0.1f * bump(t))
+            // keys: 删除 nudges left, 回车 pushes, Shift hops, the globe spins
+            "backspace" -> around(dx = -2.4f * hop(t))
+            "enter" -> around(dx = -2.2f * hop(t), dy = 1f * hop(t))
+            "shift" -> around(dy = -2.6f * hop(t))
+            "language" -> around(sx = cos(2f * PI.toFloat() * Motion.ENTER.getInterpolation(t)), scale = 1f)
+            "undo" -> around(deg = -40f * bump(t))
+            "settings" -> around(deg = 12f * shake(t, 2))
+            else -> around(scale = 1f + 0.16f * bump(t))
+        }
+        return true
+    }
+
+    private val tmp = Path()
 }

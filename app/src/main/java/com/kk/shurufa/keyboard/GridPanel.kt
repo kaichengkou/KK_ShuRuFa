@@ -89,7 +89,7 @@ class GridPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
     private val slop = ViewConfiguration.get(context).scaledTouchSlop
     private val handler = Handler(Looper.getMainLooper())
     private val appear = Tween(1f)
-    private val selPos = Spring(-1f, stiffness = 800f, dampingRatio = 0.85f)
+    private val selPos = Spring(-1f, stiffness = 1050f, dampingRatio = 0.78f)
 
     private val bg = Paint(Paint.ANTI_ALIAS_FLAG)
     private val tp = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER }

@@ -109,7 +109,7 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
     private val ellipsizer = android.text.TextPaint(Paint.ANTI_ALIAS_FLAG)
 
     private val fade = Tween(1f)
-    private val indicator = Spring(0f, stiffness = 700f, dampingRatio = 0.82f)
+    private val indicator = Spring(0f, stiffness = 1000f, dampingRatio = 0.72f)
     private val indicatorAlpha = Tween(0f)
     private var scrollX0 = 0f
     private val scroller = OverScroller(context)
@@ -121,6 +121,9 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
     var toneMarks = false
     var toneFilter = 0
     private val toneRect = RectF()
+    /** The toolbar button last tapped, and how far its motion has run. */
+    private var tappedTool: String? = null
+    private val tapT = Tween(1f)
     private var contentW = 0f
     private val handler = Handler(Looper.getMainLooper())
 
@@ -290,22 +293,29 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
             }
             val ink = Colors.fade(if (active) theme.accent else theme.inkSoft, a)
             val glyph = TOOL_GLYPHS[id]
+            // the tapped tool plays its little motion
+            val t = if (id == tappedTool) tapT.value else 1f
             if (glyph != null) {
                 tp.textAlign = Paint.Align.CENTER; tp.typeface = Ui.medium; tp.textSize = sp(Ui.TITLE + 1f)
                 tp.color = ink
+                val pop = 1f + 0.22f * kotlin.math.sin(Math.PI.toFloat() * t)
+                c.save(); c.scale(pop, pop, cx, cy)
                 drawText(c, glyph, cx, cy, tp)
+                c.restore()
                 tp.typeface = Ui.regular
             } else {
                 ip.color = ink
-                Icons.draw(c, id, cx, cy, dp(Ui.TOOL_ICON), ip, filled = active && id == "ai")
+                Icons.draw(c, id, cx, cy, dp(Ui.TOOL_ICON), ip, filled = active && id == "ai", t = t)
             }
             hits.add("tool:$id", cx - slot / 2, 0f, cx + slot / 2, height.toFloat())
         }
-        return indicator.running || indicatorAlpha.running
+        return indicator.running || indicatorAlpha.running || tapT.running
     }
 
     companion object {
         val TONE_MARKS = listOf("ā", "á", "ǎ", "à")
+        /** How long a toolbar icon's tap motion runs. */
+        const val TAP_MS = 560L
         const val HEIGHT_DP = 50f
         /**
          * Where everything in the bar is centered: tool icons, words, chips, the end button. The
@@ -823,7 +833,11 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
     private fun tap(id: String) {
         val l = listener ?: return
         when {
-            id.startsWith("tool:") -> l.onTool(id.removePrefix("tool:"))
+            id.startsWith("tool:") -> {
+                val tool = id.removePrefix("tool:")
+                if (Motion.on(prefs)) { tappedTool = tool; tapT.set(0f); tapT.animateTo(1f, dur(TAP_MS), Motion.LINEAR); postInvalidateOnAnimation() }
+                l.onTool(tool)
+            }
             id == "expand" -> l.onExpand()
             id == "dismiss" -> l.onDismissSuggestions()
             id == "query" -> l.onQueryAction()

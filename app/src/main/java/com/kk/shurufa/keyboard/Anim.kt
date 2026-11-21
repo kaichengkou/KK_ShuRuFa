@@ -19,26 +19,28 @@ import kotlin.math.sqrt
  * scaled by 动画时长 and turned off with 动画.
  */
 object Motion {
-    /** Entering and settling: a quick start and a long, soft landing. */
-    val ENTER: Interpolator = PathInterpolator(0.05f, 0.7f, 0.1f, 1f)
+    /** Entering and settling: off at once, and landing crisply (an exponential ease-out, no crawl at the end). */
+    val ENTER: Interpolator = PathInterpolator(0.16f, 1f, 0.3f, 1f)
     /** Leaving: gathers speed on the way out. */
-    val EXIT: Interpolator = PathInterpolator(0.3f, 0f, 0.8f, 0.15f)
-    /** From one place on screen to another. */
-    val MOVE: Interpolator = PathInterpolator(0.2f, 0f, 0f, 1f)
+    val EXIT: Interpolator = PathInterpolator(0.4f, 0f, 0.9f, 0.4f)
+    /** From one place on screen to another: a brisk start, a short settle. */
+    val MOVE: Interpolator = PathInterpolator(0.25f, 0.1f, 0f, 1f)
+    /** Popping up: a touch past full size and back, like something light landing. */
+    val POP: Interpolator = PathInterpolator(0.34f, 1.45f, 0.64f, 1f)
     val LINEAR: Interpolator = LinearInterpolator()
 
     // Durations in ms, before the 动画时长 factor.
     /** A key going down: almost at once, so the finger never waits for it. */
     const val PRESS = 24L
     /** A key coming back up. */
-    const val RELEASE = 170L
+    const val RELEASE = 130L
     /** Content swapping in place (candidates, labels). */
-    const val SWAP = 140L
+    const val SWAP = 110L
     /** A popup or bubble appearing. */
-    const val POP_IN = 150L
-    const val POP_OUT = 100L
+    const val POP_IN = 130L
+    const val POP_OUT = 80L
     /** One panel replacing another, and the keyboard changing height with it. */
-    const val PANEL = 280L
+    const val PANEL = 220L
 
     /**
      * Whether anything should move: the keyboard's 动画 switch, and the system's own (移除动画 in

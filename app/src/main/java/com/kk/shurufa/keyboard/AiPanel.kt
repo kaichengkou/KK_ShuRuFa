@@ -95,7 +95,7 @@ class AiPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
     private val pulse = Tween(0f)
     private val r = RectF()
     /** The switch's highlight glides between the kinds. */
-    private val tabPos = Spring(0f, stiffness = 900f, dampingRatio = 0.9f)
+    private val tabPos = Spring(0f, stiffness = 1100f, dampingRatio = 0.8f)
     private val tabBox = RectF()
 
     override fun onThemeChanged() { resLayout = null; resFadeTop = null; resFadeBottom = null }
