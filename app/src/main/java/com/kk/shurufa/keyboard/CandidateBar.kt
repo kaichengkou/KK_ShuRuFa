@@ -161,10 +161,20 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
 
     fun showResult(text: String?) { resultChip = text; invalidate() }
 
-    /** A status line; with [tappable] the whole bar answers a tap ([Listener.onMessageTap]). */
-    fun showMessage(text: String, tappable: Boolean = false) { message = text; messageTap = tappable; switchTo(Mode.MESSAGE) }
+    /**
+     * A status line; with [tappable] the whole bar answers a tap ([Listener.onMessageTap]); with
+     * [busy] a thin line under it says the work is still going.
+     */
+    fun showMessage(text: String, tappable: Boolean = false, busy: Boolean = false) {
+        message = text; messageTap = tappable
+        if (busy && !messageBusy) busySince = Motion.now()
+        messageBusy = busy
+        switchTo(Mode.MESSAGE)
+    }
 
     private var messageTap = false
+    private var messageBusy = false
+    private var busySince = 0L
 
     /** 拼音编辑: the typed letters, large, with a caret that can be dragged letter by letter. */
     fun showEdit(input: String, caretPos: Int, gapsBefore: Set<Int>) {
@@ -199,9 +209,26 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
                 drawText(c, android.text.TextUtils.ellipsize(message, ellipsizer, width - dp(32f), android.text.TextUtils.TruncateAt.END), width / 2f, height / 2f, tp)
                 tp.typeface = Ui.regular
                 if (messageTap) hits.add("message", 0f, 0f, width.toFloat(), height.toFloat())
+                if (messageBusy) { drawBusy(c, a); again = true }
             }
         }
         if (again) postInvalidateOnAnimation()
+    }
+
+    /** An indeterminate line under a status that is still in progress: a short segment gliding across. */
+    private fun drawBusy(c: Canvas, a: Float) {
+        val track = dp(120f)
+        val y = height - dp(9f)
+        val left = (width - track) / 2
+        bg.color = Colors.fade(theme.divider, a)
+        c.drawRoundRect(left, y - dp(1f), left + track, y + dp(1f), dp(1f), dp(1f), bg)
+        // one sweep every 1.4 s, eased at both ends
+        val t = ((Motion.now() - busySince) % 1400L) / 1400f
+        val p = Motion.MOVE.getInterpolation(if (t < 0.5f) t * 2 else 2 - t * 2)
+        val seg = track * 0.32f
+        val x = left + (track - seg) * p
+        bg.color = Colors.fade(theme.accent, a)
+        c.drawRoundRect(x, y - dp(1f), x + seg, y + dp(1f), dp(1f), dp(1f), bg)
     }
 
     /** Returns true while the indicator is still moving. */

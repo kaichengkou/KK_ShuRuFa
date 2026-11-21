@@ -629,8 +629,8 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
                     else -> "查找「$q」· 点按发送"
                 })
             }
-            isZh && RimeEngine.state == RimeEngine.State.DEPLOYING && letters -> bar.showMessage("正在部署雾凇拼音词库，首次约需一分钟…")
-            isZh && RimeEngine.state == RimeEngine.State.PREPARING && letters -> bar.showMessage("正在准备中文词库…")
+            isZh && RimeEngine.state == RimeEngine.State.DEPLOYING && letters -> bar.showMessage("正在部署雾凇拼音词库，首次约需一分钟…", busy = true)
+            isZh && RimeEngine.state == RimeEngine.State.PREPARING && letters -> bar.showMessage("正在准备中文词库…", busy = true)
             isZh && RimeEngine.state == RimeEngine.State.FAILED && letters -> bar.showMessage("中文引擎没有启动 · 点按重试", tappable = true)
             composing && pinyinEdit -> bar.showEdit(RimeBridge.input(), RimeBridge.caretPos(), zh.gaps(RimeBridge.input(), RimeBridge.preedit()))
             composing -> {
