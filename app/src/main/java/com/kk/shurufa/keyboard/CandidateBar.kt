@@ -38,6 +38,8 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
         fun onCandidateOption(index: Int, option: Output) {}
         /** The pinyin line was tapped at character [index] of the preedit. */
         fun onPreeditTap(index: Int) {}
+        /** 声调筛选: a tone mark on the pinyin line was tapped (1–4; 0 clears). */
+        fun onToneFilter(tone: Int) {}
         /** In pinyin editing, the caret was moved to [pos] (a position in the typed letters). */
         fun onEditCaret(pos: Int) {}
         fun onEditDone() {}
@@ -113,6 +115,10 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
     private val candRects = mutableListOf<RectF>()
     private var candCount = 0
     private val preeditRect = RectF()
+    /** 声调筛选: show ˉ ˊ ˇ ˋ on the pinyin line, and which one is on (0 none). */
+    var toneMarks = false
+    var toneFilter = 0
+    private val toneRect = RectF()
     private var contentW = 0f
     private val handler = Handler(Looper.getMainLooper())
 
@@ -293,6 +299,7 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
     }
 
     companion object {
+        val TONE_MARKS = listOf("ā", "á", "ǎ", "à")
         const val HEIGHT_DP = 50f
         /**
          * Where everything in the bar is centered: tool icons, words, chips, the end button. The
@@ -333,7 +340,30 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
                 bg.color = theme.accent
                 c.drawRect(cx - dp(0.8f), dp(3.5f), cx + dp(0.8f), dp(16f), bg)
             }
-        } else if (!composing && predictionLabel.isNotEmpty()) {
+        }
+        toneRect.setEmpty()
+        if (composing && toneMarks && preedit.isNotEmpty()) {
+            // ā á ǎ à at the right end of the pinyin line; the one in use sits on an accent pill
+            val cellW = dp(30f)
+            val right = width - endW - dp(6f)
+            val left = right - 4 * cellW
+            toneRect.set(left, 0f, right, dp(19f))
+            tp.textAlign = Paint.Align.CENTER; tp.textSize = sp(Ui.SMALL + 1f); tp.typeface = Ui.medium
+            for (t in 1..4) {
+                val cx = left + (t - 0.5f) * cellW
+                val on = t == toneFilter
+                if (on) {
+                    bg.color = theme.accentSoft
+                    c.drawRoundRect(cx - cellW / 2 + dp(3f), dp(1.5f), cx + cellW / 2 - dp(3f), dp(18f), dp(8f), dp(8f), bg)
+                }
+                tp.color = if (on) theme.accent else theme.hint
+                tp.alpha = (255 * a).toInt()
+                c.drawText(TONE_MARKS[t - 1], cx, dp(14f), tp)
+                hits.add("tone:$t", cx - cellW / 2, 0f, cx + cellW / 2, dp(19f))
+            }
+            tp.typeface = Ui.regular
+        }
+        if (!composing && predictionLabel.isNotEmpty()) {
             // 按原拼音 / 查找: on the pinyin line, where what was typed always shows
             tp.textAlign = Paint.Align.LEFT; tp.textSize = sp(Ui.SMALL); tp.color = theme.accent; tp.alpha = (255 * a).toInt()
             ellipsizer.set(tp)
@@ -663,7 +693,7 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
                 }
                 downX = e.x; lastX = e.x; dragging = false; menuOpen = false
                 rawScroll = scrollX0
-                pressedCand = if (list && e.x < width - dp(END_DP) && !preeditRect.contains(e.x, e.y)) candidateAt(e.x, e.y) else -1
+                pressedCand = if (list && e.x < width - dp(END_DP) && !preeditRect.contains(e.x, e.y) && !toneRect.contains(e.x, e.y)) candidateAt(e.x, e.y) else -1
                 if (pressedCand >= 0 && mode == Mode.CANDIDATES) handler.postDelayed(longRunnable, 450)
                 val hit = hits.at(e.x, e.y)
                 pressedTool = hit?.takeIf { mode == Mode.TOOLBAR && it.startsWith("tool:") }?.removePrefix("tool:")
@@ -775,6 +805,7 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
             id == "result" -> resultChip?.let { l.onResultChip(it) }
             id == "done" -> l.onEditDone()
             id == "message" -> l.onMessageTap()
+            id.startsWith("tone:") -> id.removePrefix("tone:").toInt().let { t -> l.onToneFilter(if (t == toneFilter) 0 else t) }
             id.startsWith("hint:") -> {
                 prefs.state.edit().putBoolean("seen_" + id.removePrefix("hint:"), true).apply()
                 fade.set(0.6f); fade.animateTo(1f, dur(Motion.SWAP))

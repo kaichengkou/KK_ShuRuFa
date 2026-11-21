@@ -551,8 +551,8 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
             Panel.AI -> { content.addView(aiPanel, fixed); if (entering) ai.onOpened() }
             Panel.VOICE -> { content.addView(voicePanel, fixed); if (entering) voice.onOpened() }
             Panel.CANDIDATES -> {
-                val cands = RimeBridge.candidates(300).toList()
-                candGrid.notes = zh.annotations(cands, RimeBridge.candidateComments(cands.size).toList())
+                val (cands, comments) = zhCandidates(300)
+                candGrid.notes = zh.annotations(cands, comments)
                 candGrid.setItems(cands)
                 content.addView(candPanel, fixed)
             }
@@ -655,8 +655,10 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
             composing -> {
                 val pre = RimeBridge.preedit()
                 zh.track(pre)
-                val cands = RimeBridge.candidates(CANDIDATES_ON_BAR).toList()
-                bar.showCandidates(pre, cands, zh.annotations(cands, RimeBridge.candidateComments(cands.size).toList()), zh.caretInPreedit(pre, RimeBridge.cursor()))
+                val (cands, comments) = zhCandidates(CANDIDATES_ON_BAR)
+                bar.toneMarks = prefs.toneFilter
+                bar.toneFilter = toneFilter
+                bar.showCandidates(pre, cands, zh.annotations(cands, comments), zh.caretInPreedit(pre, RimeBridge.cursor()))
                 if (prefs.zhPreeditInline) editor.compose(RimeBridge.input())
             }
             predictions.isNotEmpty() && letters -> bar.showPredictions(predictions, predictionLabel)
@@ -939,8 +941,8 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         syncBar()
         if (panel == Panel.CANDIDATES) {
             if (composing) {
-                val c = RimeBridge.candidates(300).toList()
-                candGrid.notes = zh.annotations(c, RimeBridge.candidateComments(c.size).toList())
+                val (c, comments) = zhCandidates(300)
+                candGrid.notes = zh.annotations(c, comments)
                 candGrid.setItems(c)
             } else showPanel(Panel.LETTERS)
         }
@@ -1313,7 +1315,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         }
         if (!RimeEngine.ready) return
         zh.track(RimeBridge.preedit())
-        RimeBridge.selectCandidateGlobal(index)
+        RimeBridge.selectCandidateGlobal(rimeIndex(index))
         flushRime()
     }
 
@@ -1363,15 +1365,52 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         syncBar()
     }
 
+    // ---- 声调筛选 ----------------------------------------------------------------------------
+
+    /** The tone kept (1–4), 0 for all; for the pinyin in [toneFor] only. */
+    private var toneFilter = 0
+    private var toneFor = ""
+    /** While filtering: position on the bar or in the grid → Rime's own candidate index. */
+    private var toneIdx: IntArray? = null
+
+    private fun rimeIndex(i: Int) = toneIdx?.getOrNull(i) ?: i
+
+    override fun onToneFilter(tone: Int) {
+        toneFilter = tone
+        toneFor = RimeBridge.input()
+        syncBar()
+        if (panel == Panel.CANDIDATES) showPanel(Panel.CANDIDATES)
+    }
+
+    /**
+     * Up to [n] candidates with their comments. With a tone picked, only those whose first
+     * character has that tone for the first syllable typed (行 is xíng for "xing", háng for "hang").
+     */
+    private fun zhCandidates(n: Int): Pair<List<String>, List<String>> {
+        if (toneFilter != 0 && RimeBridge.input() != toneFor) toneFilter = 0
+        if (toneFilter == 0) {
+            toneIdx = null
+            val c = RimeBridge.candidates(n).toList()
+            return c to RimeBridge.candidateComments(c.size).toList()
+        }
+        val all = RimeBridge.candidates(400).toList()
+        val comments = RimeBridge.candidateComments(all.size).toList()
+        val syllable = RimeBridge.preedit().split(' ', '\'').firstOrNull { s -> s.isNotEmpty() && s.all { it in 'a'..'z' } }
+        val keep = all.indices.filter { i -> all[i].firstOrNull()?.let { toneFilter in zh.tones.tonesOf(it, syllable) } == true }
+        toneIdx = keep.toIntArray()
+        val shown = keep.take(n)
+        return shown.map { all[it] } to shown.map { comments.getOrElse(it) { "" } }
+    }
+
     override fun candidateOptions(index: Int): List<Output> {
-        val word = RimeBridge.candidates(index + 1).getOrNull(index) ?: return emptyList()
+        val word = RimeBridge.candidates(rimeIndex(index) + 1).getOrNull(rimeIndex(index)) ?: return emptyList()
         val shown = if (word.codePointCount(0, word.length) > 6) word.substring(0, word.offsetByCodePoints(0, 5)) + "…" else word
         return listOf(Output("取消", "§cancel"), Output("不再优先「$shown」", "§forget"))
     }
 
     override fun onCandidateOption(index: Int, option: Output) {
         if (option.text != "§forget") return
-        val ok = RimeBridge.deleteCandidate(index)
+        val ok = RimeBridge.deleteCandidate(rimeIndex(index))
         flushRime()
         notice(if (ok) "已删除学习记录，下次不再排在前面" else "这个词没有学习记录")
     }

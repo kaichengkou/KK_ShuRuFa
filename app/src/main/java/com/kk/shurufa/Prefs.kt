@@ -92,6 +92,8 @@ class Prefs(context: Context) {
     /** …and whether it learns from what is typed. */
     val wordLearn get() = b(WORD_LEARN, true)
     val zhCorrection get() = b(ZH_CORRECTION, true)
+    /** 声调筛选: ˉ ˊ ˇ ˋ on the pinyin line. */
+    val toneFilter get() = b(TONE_FILTER, true)
     val pinyinMode get() = b(PINYIN_MODE, false)
     val backspaceReselect get() = b(BACKSPACE_RESELECT, true)
     val typoMark get() = b(TYPO_MARK, true)
@@ -253,6 +255,7 @@ class Prefs(context: Context) {
         const val WORD_PREDICT = "word_predict"
         const val WORD_LEARN = "word_learn"
         const val ZH_CORRECTION = "zh_correction"
+        const val TONE_FILTER = "tone_filter"
         const val PINYIN_MODE = "pinyin_mode"
         const val BACKSPACE_RESELECT = "backspace_reselect"
         const val TYPO_MARK = "typo_mark"

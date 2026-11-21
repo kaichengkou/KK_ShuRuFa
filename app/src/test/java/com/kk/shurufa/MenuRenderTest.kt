@@ -96,6 +96,11 @@ class MenuRenderTest {
         bar.showPredictions(listOf("你好", "拟好", "你号", "泥好"), "按原拼音 ni hao"); f.invalidate(); save("bar_reselect", f)
         bar.showPredictions(listOf("你好", "拟好", "你号", "泥好")); f.invalidate(); save("bar_predict", f)
         bar.showCandidates("ni hao", listOf("你好", "拟好", "你号", "泥好"), emptyList(), -1); f.invalidate(); save("bar_compose", f)
+        bar.toneMarks = true; bar.toneFilter = 0
+        bar.showCandidates("ma", listOf("吗", "妈", "马", "嘛", "骂", "麻", "码", "妈妈"), emptyList(), -1); f.invalidate(); save("bar_tone_all", f)
+        bar.toneFilter = 3
+        bar.showCandidates("ma", listOf("马", "码", "吗", "玛", "蚂", "犸", "马上"), emptyList(), -1); f.invalidate(); save("bar_tone_3", f)
+        bar.toneMarks = false; bar.toneFilter = 0
     }
 
     private fun setPicking(v: Any, value: Any?) {

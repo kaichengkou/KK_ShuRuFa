@@ -32,6 +32,29 @@ class PinyinTones(private val context: Context) {
 
     private companion object { val MARKS = Regex("[\\u0300-\\u036f]") }
 
+    /**
+     * 声调筛选: the tones (1–4, 5 for the neutral tone) [ch] has when read as [syllable] (what was
+     * typed for it); all its tones when no reading matches, empty when it is not in the table.
+     */
+    fun tonesOf(ch: Char, syllable: String?): Set<Int> {
+        val readings = table()[ch] ?: return emptySet()
+        val typed = syllable?.lowercase()?.replace("ü", "v")
+        val match = typed?.let { ty -> readings.filter { plain(it) == ty }.ifEmpty { readings.filter { plain(it).startsWith(ty) } } }
+        return (match?.ifEmpty { null } ?: readings).map { toneOf(it) }.toSet()
+    }
+
+    /** 1 ā, 2 á, 3 ǎ, 4 à, 5 none. */
+    private fun toneOf(reading: String): Int {
+        val d = Normalizer.normalize(reading, Normalizer.Form.NFD)
+        return when {
+            d.contains('\u0304') -> 1
+            d.contains('\u0301') -> 2
+            d.contains('\u030C') -> 3
+            d.contains('\u0300') -> 4
+            else -> 5
+        }
+    }
+
     /** [syllables] are the typed syllables in order (may be shorter than the text). */
     fun convert(text: String, syllables: List<String>): String {
         val t = table()

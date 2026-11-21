@@ -709,6 +709,7 @@ private fun ChinesePage(prefs: Prefs, openDict: () -> Unit) {
         Toggle(prefs, Prefs.ZH_EMOJI, "候选里带 emoji", "黄脸表情排在原位，其他 emoji 排在前五个词之后", true)
         Toggle(prefs, Prefs.ZH_PREDICT, "联想", "上屏后在候选栏推荐常接的词", true)
         Toggle(prefs, Prefs.ZH_CORRECTION, "按键纠错", "按错相邻键也能出正确的词；可能多出几个不相干的候选。切换后会重新部署", true)
+        Toggle(prefs, Prefs.TONE_FILTER, "声调筛选", "打拼音时拼音行右侧显示 ā á ǎ à，点一个只留第一个字是这个声调的候选（按你打的拼音判断多音字），再点取消", true)
         Toggle(prefs, Prefs.TYPO_MARK, "纠错批注", "纠错得到的候选后面用小字标出改了哪里，比如 p→o、no⇄on", true)
         Toggle(prefs, Prefs.RARE_ANNOTATE, "生僻字注音", "常用 3500 字以外的字，在候选后面标出读音", true)
         Note("长按候选词可以删除它的学习记录，下次同样的拼音就不会再把它排到前面。点候选栏上方的拼音，可以把光标放到那里直接改。")
