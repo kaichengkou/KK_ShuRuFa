@@ -792,7 +792,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     private fun buildNumPad() {
         val strip = GridPanel(this, prefs).apply {
             theme = kbTheme; cellStyle = GridPanel.CellStyle.SOFT; columns = 1; textSp = 20f
-            cellPadDp = 0f; cellGapDp = prefs.keyGapDp; scrollHint = true
+            cellPadDp = 0f; cellGapDp = prefs.keyGapDp
             onItem = { i -> NUM_OPS.getOrNull(i)?.let { onNumOp(it) } }
             onFeedback = { haptics.play(HapticEvent.LETTER) }
         }

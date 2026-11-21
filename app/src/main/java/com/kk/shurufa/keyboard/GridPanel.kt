@@ -74,8 +74,6 @@ class GridPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
     /** Margins around and between key-like cells (default 6 dp). */
     var cellPadDp: Float? = null
     var cellGapDp: Float? = null
-    /** Fade the bottom edge while more items are below (a hint to scroll). */
-    var scrollHint = false
     /** Fling friction multiplier (higher stops sooner). */
     var friction = 1f
         set(v) { field = v; scroller.setFriction(ViewConfiguration.getScrollFriction() * v) }
@@ -100,7 +98,9 @@ class GridPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
     private val tri = Path()
     private val tmp = RectF()
     private val layouts = HashMap<Int, StaticLayout>()
-    private var hintShader: LinearGradient? = null
+    /** Edge fades, top and bottom: a side fades while there is more to scroll to on it. */
+    private var fadeTop: LinearGradient? = null
+    private var fadeBottom: LinearGradient? = null
 
     fun setItems(list: List<String>, resetScroll: Boolean = true) {
         items = list
@@ -112,9 +112,9 @@ class GridPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
         invalidate()
     }
 
-    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) { layoutCells(); layouts.clear(); hintShader = null }
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) { layoutCells(); layouts.clear(); fadeTop = null; fadeBottom = null }
 
-    override fun onThemeChanged() { layouts.clear(); hintShader = null }
+    override fun onThemeChanged() { layouts.clear(); fadeTop = null; fadeBottom = null }
 
     private fun layoutCells() {
         cells.clear()
@@ -170,6 +170,31 @@ class GridPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
         contentH = (cells.maxOfOrNull { it.bottom } ?: 0f) + pad
     }
 
+    /**
+     * Content cut by an edge fades into the background there instead of ending in a sliver, the
+     * way the candidate row and the clipboard strip do sideways. Each fade comes in over its first
+     * few pixels of scroll, so a grid at rest at the top shows no fade above.
+     */
+    private fun drawFades(c: Canvas) {
+        val t = theme
+        val h = dp(16f)
+        val w = width.toFloat()
+        val top = headerH()
+        val above = (scrollPos / h).coerceIn(0f, 1f)
+        val below = ((maxScroll - scrollPos) / h).coerceIn(0f, 1f)
+        if (above > 0f) {
+            bg.shader = fadeTop ?: LinearGradient(0f, top, 0f, top + h, t.background, Colors.alpha(t.background, 0), Shader.TileMode.CLAMP).also { fadeTop = it }
+            bg.alpha = (255 * above).toInt()
+            c.drawRect(0f, top, w, top + h, bg)
+        }
+        if (below > 0f) {
+            bg.shader = fadeBottom ?: LinearGradient(0f, height - h, 0f, height.toFloat(), Colors.alpha(t.background, 0), t.background, Shader.TileMode.CLAMP).also { fadeBottom = it }
+            bg.alpha = (255 * below).toInt()
+            c.drawRect(0f, height - h, w, height.toFloat(), bg)
+        }
+        bg.shader = null; bg.alpha = 255
+    }
+
     private fun headerH() = if (header.isNotEmpty()) dp(22f) else 0f
 
     private val maxScroll get() = max(0f, contentH - height)
@@ -197,14 +222,7 @@ class GridPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
             }
         }
         c.restore()
-        if (scrollHint && scrollPos < maxScroll - 1f) {
-            val h = dp(18f)
-            val sh = hintShader ?: LinearGradient(0f, height - h, 0f, height.toFloat(), Colors.alpha(t.background, 0), t.background, Shader.TileMode.CLAMP)
-                .also { hintShader = it }
-            bg.shader = sh
-            c.drawRect(0f, height - h, width.toFloat(), height.toFloat(), bg)
-            bg.shader = null
-        }
+        drawFades(c)
         if (header.isNotEmpty()) {
             bg.color = t.background
             c.drawRect(0f, 0f, width.toFloat(), headerH(), bg)

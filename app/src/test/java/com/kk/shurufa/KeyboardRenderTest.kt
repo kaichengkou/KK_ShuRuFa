@@ -224,7 +224,7 @@ class KeyboardRenderTest {
         val fam = 220
         // 数字·标准: keys with the operator column over their spacers
         val opStrip = com.kk.shurufa.keyboard.GridPanel(ctx, prefs).apply {
-            cellStyle = com.kk.shurufa.keyboard.GridPanel.CellStyle.SOFT; columns = 1; textSp = 20f; cellPadDp = 0f; cellGapDp = prefs.keyGapDp; scrollHint = true }
+            cellStyle = com.kk.shurufa.keyboard.GridPanel.CellStyle.SOFT; columns = 1; textSp = 20f; cellPadDp = 0f; cellGapDp = prefs.keyGapDp }
         val num = com.kk.shurufa.keyboard.NumPadView(ctx, KeyboardView(ctx, prefs).apply { listener = this@KeyboardRenderTest.listener; setRows(repo.keyboard("num").rows) }, opStrip)
         num.setItems(listOf("+", "−", "×", "÷", "=", "%", "(", ")", "/", ",", "±"))
         panelShot("num", num, fam) { it.showMath("uni", simple = true) }
