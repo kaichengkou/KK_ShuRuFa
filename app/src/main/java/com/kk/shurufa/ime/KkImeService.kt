@@ -375,12 +375,24 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     override fun onFinishInputView(finishingInput: Boolean) {
         super.onFinishInputView(finishingInput)
         if (sink != null) dropSink()
-        if (panel == Panel.VOICE) voice.onClosed()
+        stopBackgroundWork()
         if (RimeEngine.ready) RimeBridge.clearComposition()
         zh.reset()
         predictions = emptyList()
         editor.finishComposingText()
         if (built) syncBar()
+    }
+
+    /** The keyboard went away without the field finishing (another app came up, the screen went off). */
+    override fun onWindowHidden() {
+        super.onWindowHidden()
+        stopBackgroundWork()
+    }
+
+    /** Nothing keeps working once the keyboard is out of sight: the microphone stops, a streaming answer is dropped. */
+    private fun stopBackgroundWork() {
+        if (panel == Panel.VOICE) voice.onClosed()
+        ai.cancel()
     }
 
     override fun onUpdateSelection(oldSelStart: Int, oldSelEnd: Int, newSelStart: Int, newSelEnd: Int, candidatesStart: Int, candidatesEnd: Int) {
