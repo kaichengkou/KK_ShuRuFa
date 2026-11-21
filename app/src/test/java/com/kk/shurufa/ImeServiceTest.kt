@@ -189,6 +189,11 @@ class ImeServiceTest {
     @Test fun languageSlide() {
         Prefs(ctx).put(Prefs.LANGUAGES, "zh,ru,en")
         val (ime, view) = start("light")
+        // in a window, as on the phone: the slide only runs for keys that are on screen
+        val host = Robolectric.buildActivity(android.app.Activity::class.java).setup().get()
+        (view.parent as? ViewGroup)?.removeView(view)
+        host.setContentView(view, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        shadowOf(Looper.getMainLooper()).idle()
         Prefs(ctx).put(Prefs.ANIMATIONS, true)
         ime.onSwitchLanguage(1)
         val kb0 = KkImeService::class.java.getDeclaredField("keyboard").apply { isAccessible = true }.get(ime)
