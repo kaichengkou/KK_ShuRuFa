@@ -691,6 +691,7 @@ private fun LanguagesPage(prefs: Prefs) {
     Group("俄语和英语") {
         Toggle(prefs, Prefs.AUTO_CAP, "句首自动大写", "输入框开头、句号问号感叹号之后", true)
         Toggle(prefs, Prefs.DOUBLE_SPACE, "双击空格输入句号", null, true)
+        Toggle(prefs, Prefs.DOUBLE_PERIOD, "双击句号输入省略号", "中文「。」点两下变成「……」，俄语和英语「.」点两下变成「…」", true)
         Toggle(prefs, Prefs.STRESS_MODE, "重音模式", "俄语元音上滑输入带重音的字母（а́ е́ и́ …）；不开时长按也有", false)
     }
     Group("俄语和英语联想") {

@@ -79,6 +79,8 @@ class Prefs(context: Context) {
     val languages: List<String> get() = s(LANGUAGES, "zh,ru,en").split(",").filter { it.isNotBlank() }
     val autoCap get() = b(AUTO_CAP, true)
     val doubleSpacePeriod get() = b(DOUBLE_SPACE, true)
+    /** 双击句号: 。。 becomes ……, .. becomes … */
+    val doublePeriodEllipsis get() = b(DOUBLE_PERIOD, true)
     val perAppLanguage get() = b(PER_APP_LANG, true)
     val stressMode get() = b(STRESS_MODE, false)
 
@@ -256,6 +258,7 @@ class Prefs(context: Context) {
         const val LANGUAGES = "languages"
         const val AUTO_CAP = "auto_cap"
         const val DOUBLE_SPACE = "double_space"
+        const val DOUBLE_PERIOD = "double_period"
         const val PER_APP_LANG = "per_app_lang"
         const val STRESS_MODE = "stress_mode"
         const val ZH_TRAD = "zh_trad"

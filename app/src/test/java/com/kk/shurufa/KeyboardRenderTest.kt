@@ -295,19 +295,17 @@ class KeyboardRenderTest {
         panelShot("cursor_selecting", edit, 220) { it.activeTool = "cursor" }
         // quick panel
         val q = com.kk.shurufa.keyboard.QuickPanel(ctx, prefs)
-        q.tiles = listOf(
-            com.kk.shurufa.keyboard.QuickPanel.Tile("predict", "联想", on = true),
-            com.kk.shurufa.keyboard.QuickPanel.Tile("correct", "纠错", on = true),
-            com.kk.shurufa.keyboard.QuickPanel.Tile("trad", "繁体", on = false),
-            com.kk.shurufa.keyboard.QuickPanel.Tile("emoji", "候选表情", on = true),
-            com.kk.shurufa.keyboard.QuickPanel.Tile("pinyin", "拼音模式", on = false),
-            com.kk.shurufa.keyboard.QuickPanel.Tile("stress", "俄语重音", on = false),
-            com.kk.shurufa.keyboard.QuickPanel.Tile("vibrate", "振动", on = true),
-            com.kk.shurufa.keyboard.QuickPanel.Tile("sound", "按键音", on = false),
-            com.kk.shurufa.keyboard.QuickPanel.Tile("theme", "主题", "自动"),
-            com.kk.shurufa.keyboard.QuickPanel.Tile("toolbar", "工具栏"),
-            com.kk.shurufa.keyboard.QuickPanel.Tile("picker", "切换输入法"),
-            com.kk.shurufa.keyboard.QuickPanel.Tile("settings", "设置"),
+        q.sections = listOf(
+            com.kk.shurufa.keyboard.QuickPanel.Section(com.kk.shurufa.keyboard.QuickPanel.Kind.SWITCHES, "", listOf(
+                com.kk.shurufa.keyboard.QuickPanel.Tile("incognito", "临时模式", on = false), com.kk.shurufa.keyboard.QuickPanel.Tile("predict", "联想", on = true),
+                com.kk.shurufa.keyboard.QuickPanel.Tile("correct", "纠错", on = true), com.kk.shurufa.keyboard.QuickPanel.Tile("trad", "繁体", on = false),
+                com.kk.shurufa.keyboard.QuickPanel.Tile("emoji", "候选表情", on = true), com.kk.shurufa.keyboard.QuickPanel.Tile("pinyin", "拼音模式", on = false),
+                com.kk.shurufa.keyboard.QuickPanel.Tile("vibrate", "振动", on = true), com.kk.shurufa.keyboard.QuickPanel.Tile("sound", "按键音", on = false))),
+            com.kk.shurufa.keyboard.QuickPanel.Section(com.kk.shurufa.keyboard.QuickPanel.Kind.ROW, "插入", listOf(com.kk.shurufa.keyboard.QuickPanel.Tile("date", "日期"), com.kk.shurufa.keyboard.QuickPanel.Tile("time", "时间"),
+                com.kk.shurufa.keyboard.QuickPanel.Tile("week", "星期"), com.kk.shurufa.keyboard.QuickPanel.Tile("lunar", "农历"), com.kk.shurufa.keyboard.QuickPanel.Tile("calc", "计算 · 大写"))),
+            com.kk.shurufa.keyboard.QuickPanel.Section(com.kk.shurufa.keyboard.QuickPanel.Kind.ROW, "工具", listOf(com.kk.shurufa.keyboard.QuickPanel.Tile("tool:translate", "翻译"), com.kk.shurufa.keyboard.QuickPanel.Tile("tool:cursor", "文字编辑"))),
+            com.kk.shurufa.keyboard.QuickPanel.Section(com.kk.shurufa.keyboard.QuickPanel.Kind.FOOTER, "", listOf(com.kk.shurufa.keyboard.QuickPanel.Tile("theme", "主题 · 自动"), com.kk.shurufa.keyboard.QuickPanel.Tile("toolbar", "工具栏"),
+                com.kk.shurufa.keyboard.QuickPanel.Tile("picker", "切换输入法"), com.kk.shurufa.keyboard.QuickPanel.Tile("settings", "设置"))),
         )
         panelShot("quick", q)
         // expanded candidates: 8 units, single characters take one, notes above

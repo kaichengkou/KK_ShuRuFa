@@ -974,27 +974,32 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         val tools = listOf("ai" to "AI 改写", "mic" to "语音", "translate" to "翻译", "cursor" to "文字编辑", "clipboard" to "剪贴板", "emoji" to "表情")
             .filter { it.first !in onBar }
             .map { (id, name) -> QuickPanel.Tile("tool:$id", name) }
-        quickPanel.tiles = listOf(
-            QuickPanel.Tile("incognito", "临时模式", on = prefs.incognito),
-            QuickPanel.Tile("predict", "联想", on = if (isZh) prefs.zhPredict else prefs.wordPredict),
-            QuickPanel.Tile("correct", "纠错", on = prefs.zhCorrection),
-            QuickPanel.Tile("trad", "繁体", on = prefs.zhTraditional),
-            QuickPanel.Tile("emoji", "候选表情", on = prefs.zhEmoji),
-            QuickPanel.Tile("pinyin", "拼音模式", on = prefs.pinyinMode),
-            QuickPanel.Tile("stress", "俄语重音", on = prefs.stressMode),
-            QuickPanel.Tile("vibrate", "振动", on = prefs.vibrate),
-            QuickPanel.Tile("sound", "按键音", on = prefs.sound),
-            QuickPanel.Tile("theme", "主题", themeName),
-        ) + tools + listOf(
-            QuickPanel.Tile("date", "日期"),
-            QuickPanel.Tile("time", "时间"),
-            QuickPanel.Tile("week", "星期"),
-            QuickPanel.Tile("lunar", "农历"),
-            QuickPanel.Tile("calc", "计算 · 大写"),
-        ) + listOf(
-            QuickPanel.Tile("toolbar", "工具栏"),
-            QuickPanel.Tile("picker", "切换输入法"),
-            QuickPanel.Tile("settings", "设置"),
+        // switches for the language in use: 中文's own three, or 俄语重音
+        val langSwitches = when {
+            isZh -> listOf(
+                QuickPanel.Tile("trad", "繁体", on = prefs.zhTraditional),
+                QuickPanel.Tile("emoji", "候选表情", on = prefs.zhEmoji),
+                QuickPanel.Tile("pinyin", "拼音模式", on = prefs.pinyinMode))
+            curLang == "ru" -> listOf(QuickPanel.Tile("stress", "俄语重音", on = prefs.stressMode))
+            else -> emptyList()
+        }
+        quickPanel.sections = listOf(
+            QuickPanel.Section(QuickPanel.Kind.SWITCHES, "", listOf(
+                QuickPanel.Tile("incognito", "临时模式", on = prefs.incognito),
+                QuickPanel.Tile("predict", "联想", on = if (isZh) prefs.zhPredict else prefs.wordPredict),
+            ) + (if (isZh) listOf(QuickPanel.Tile("correct", "纠错", on = prefs.zhCorrection)) else emptyList()) + langSwitches + listOf(
+                QuickPanel.Tile("vibrate", "振动", on = prefs.vibrate),
+                QuickPanel.Tile("sound", "按键音", on = prefs.sound),
+            )),
+            QuickPanel.Section(QuickPanel.Kind.ROW, "插入", listOf(
+                QuickPanel.Tile("date", "日期"), QuickPanel.Tile("time", "时间"), QuickPanel.Tile("week", "星期"),
+                QuickPanel.Tile("lunar", "农历"), QuickPanel.Tile("calc", "计算 · 大写"))),
+            QuickPanel.Section(QuickPanel.Kind.ROW, "工具", tools),
+            QuickPanel.Section(QuickPanel.Kind.FOOTER, "", listOf(
+                QuickPanel.Tile("theme", "主题 · $themeName"),
+                QuickPanel.Tile("toolbar", "工具栏"),
+                QuickPanel.Tile("picker", "切换输入法"),
+                QuickPanel.Tile("settings", "设置"))),
         )
     }
 
@@ -1171,11 +1176,13 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
                 if (!RimeEngine.ready) { editor.type(t); return }
             }
             finishComposing()
+            if (ellipsis(t)) { syncBar(); return }
             editor.type(pangu(smartPunct(t)))
             syncBar()
             return
         }
         val typed = if (isMain && key.isLetter && shift > 0) t.uppercase() else t
+        if (ellipsis(typed)) { autoSpaced = false; updateAutoCap(); if (panel == Panel.LETTERS) { suggestWords(); syncBar() }; return }
         val wordChar = typed.isNotEmpty() && typed.all { WordPredictor.isWordChar(it) }
         if (!wordChar) learnWordBefore()
         if (autoSpaced && typed.length == 1 && typed[0] in ",.!?;:)…" && editor.textBefore(1) == " ") {
@@ -1200,6 +1207,22 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         fun latin(c: Char) = c in 'a'..'z' || c in 'A'..'Z' || c in '0'..'9'
         return if ((isCjk(prev) && latin(first)) || (latin(prev) && isCjk(first))) " $t" else t
     }
+
+    /**
+     * 双击句号: the period tapped again right away becomes an ellipsis, 。。→ …… and .. → …
+     * Returns true when it did (and the tap is used up).
+     */
+    private fun ellipsis(t: String): Boolean {
+        val now = SystemClock.uptimeMillis()
+        val quick = now - lastPeriodAt < DOUBLE_PERIOD_MS
+        lastPeriodAt = if (t == "。" || t == ".") now else 0L
+        if (!prefs.doublePeriodEllipsis || !quick || (t != "。" && t != ".")) return false
+        if (editor.textBefore(1) != t) return false
+        lastPeriodAt = 0L
+        editor.replaceBefore(1, if (t == "。") "……" else "…")
+        return true
+    }
+    private var lastPeriodAt = 0L
 
     /** 数字后的标点保持半角: after a digit, Chinese punctuation that would break a number is typed half-width. */
     private fun smartPunct(t: String): String {
@@ -1743,6 +1766,8 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         const val CANDIDATES_ON_BAR = 60
         /** Where the AI 候选 sits on the bar. */
         const val AI_SLOT = 1
+        /** Two taps of the period within this make an ellipsis. */
+        const val DOUBLE_PERIOD_MS = 400L
         /** 声调筛选 in the opened candidates. */
         val TONE_TABS = listOf("0" to "全部", "1" to "ā 一声", "2" to "á 二声", "3" to "ǎ 三声", "4" to "à 四声")
         const val XK_BRACKETLEFT = 0x5b
