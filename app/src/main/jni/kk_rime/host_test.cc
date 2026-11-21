@@ -69,6 +69,19 @@ int main(int argc, char** argv) {
       show(api, s, "  main still");
       continue;
     }
+    if (strcmp(seq, "@sync") == 0) {  // Rime's sync: write snapshots, merge the others
+      printf("  sync -> %d\n", api->sync_user_data());
+      api->join_maintenance_thread();
+      s = api->create_session();
+      api->select_schema(s, "rime_ice");
+      continue;
+    }
+    if (strncmp(seq, "@sel=", 5) == 0) {  // choose a candidate of the current input (0-based)
+      api->select_candidate(s, atoi(seq + 5));
+      show(api, s, seq);
+      api->clear_composition(s);
+      continue;
+    }
     if (strncmp(seq, "@hl=", 4) == 0) {  // highlight a candidate of the current input (0-based)
       printf("  highlight %d -> %d\n", atoi(seq + 4), api->highlight_candidate(s, atoi(seq + 4)));
       show(api, s, seq);

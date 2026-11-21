@@ -87,6 +87,7 @@ import androidx.compose.material.icons.outlined.Animation
 import androidx.compose.material.icons.outlined.Apps
 import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.outlined.Insights
+import androidx.compose.material.icons.outlined.Backup
 import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.ContentPaste
 import androidx.compose.material.icons.outlined.Functions
@@ -179,7 +180,7 @@ private val SECTIONS = listOf(
     "外观与手感" to listOf("look", "motion", "haptics", "gestures"),
     "输入" to listOf("languages", "chinese", "dict", "packs", "keys"),
     "工具" to listOf("toolbar", "symbols", "clipboard", "voice", "online", "stats"),
-    "高级" to listOf("files"),
+    "高级" to listOf("backup", "files"),
 )
 
 private val PAGE_ICONS: Map<String, ImageVector> = mapOf(
@@ -188,7 +189,7 @@ private val PAGE_ICONS: Map<String, ImageVector> = mapOf(
     "dict" to Icons.AutoMirrored.Outlined.MenuBook, "packs" to Icons.AutoMirrored.Outlined.LibraryBooks,
     "keys" to Icons.Outlined.Keyboard, "toolbar" to Icons.Outlined.Apps, "symbols" to Icons.Outlined.Functions,
     "clipboard" to Icons.Outlined.ContentPaste, "voice" to Icons.Outlined.Mic, "online" to Icons.Outlined.Cloud,
-    "files" to Icons.Outlined.Code, "stats" to Icons.Outlined.Insights,
+    "files" to Icons.Outlined.Code, "stats" to Icons.Outlined.Insights, "backup" to Icons.Outlined.Backup,
 )
 
 private val PAGES = listOf(
@@ -206,6 +207,7 @@ private val PAGES = listOf(
     PageInfo("toolbar", "工具栏", "选择和排列键盘上方的按钮"),
     PageInfo("voice", "语音输入", "本地识别模型、识别语言、系统识别"),
     PageInfo("online", "联网功能", "翻译、词库更新、AI 改写"),
+    PageInfo("backup", "备份与恢复", "设置、学到的词和自定义词库，换手机不丢"),
     PageInfo("files", "布局文件", "导出和重新加载 YAML 布局"),
     PageInfo("stats", "打字数据", "每天的字数、时段、常用词云"),
 )
@@ -244,6 +246,7 @@ private fun SettingsApp(prefs: Prefs, start: String) {
                     "toolbar" -> ToolbarPage(prefs)
                     "online" -> OnlinePage(prefs)
                     "files" -> FilesPage()
+                    "backup" -> BackupPage()
                     "stats" -> StatsPage(prefs)
                 }
             }
@@ -257,7 +260,7 @@ private fun SettingsApp(prefs: Prefs, start: String) {
 private val LocalPageKeys = androidx.compose.runtime.staticCompositionLocalOf<MutableSet<String>?> { null }
 
 /** Pages whose contents are the user's own data, not settings: nothing there to restore. */
-private val NO_RESET = setOf("dict", "stats", "files", "dict_edit")
+private val NO_RESET = setOf("dict", "stats", "files", "dict_edit", "backup")
 
 /** Settings a page changes without the shared controls (and so are not gathered). */
 private fun extraKeys(page: String, prefs: Prefs): List<String> = when (page) {
@@ -792,6 +795,63 @@ private fun ClipboardPage(prefs: Prefs) {
     }
     Group {
         Note("标记为敏感内容的复制（比如密码管理器）不会被记录。")
+    }
+}
+
+/** 备份与恢复: everything the person made the keyboard into, in one file. */
+@Composable
+private fun BackupPage() {
+    val ctx = LocalContext.current
+    val main = remember { android.os.Handler(android.os.Looper.getMainLooper()) }
+    var status by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    var restored by remember { mutableStateOf<com.kk.shurufa.Backup.Summary?>(null) }
+    val stamp = remember { java.text.SimpleDateFormat("yyyyMMdd-HHmm", java.util.Locale.ROOT).format(java.util.Date()) }
+    val save = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        busy = true; status = "正在备份…"
+        Thread {
+            val r = runCatching { ctx.contentResolver.openOutputStream(uri)?.use { com.kk.shurufa.Backup.export(ctx, it) } ?: error("写不进这个位置") }
+            main.post {
+                busy = false
+                status = r.fold({ s -> "已备份：${s.settings} 项设置、${s.words} 条学到的词、${s.phrases} 条自定义词、${s.dicts} 个导入词库" }, { "备份失败：${it.message}" })
+            }
+        }.start()
+    }
+    val open = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        busy = true; status = "正在恢复…"
+        Thread {
+            val r = runCatching { ctx.contentResolver.openInputStream(uri)?.use { com.kk.shurufa.Backup.restore(ctx, it) } ?: error("读不到文件") }
+            main.post {
+                busy = false
+                r.fold({ s -> restored = s; status = "" }, { status = "恢复失败：${it.message}" })
+            }
+        }.start()
+    }
+    Group("备份") {
+        Note("存成一个 .zip 文件：所有设置、最近用过的符号和表情、点按落点、雾凇学到的词和顺序、自定义词库、导入的词库、俄语学到的词、打字数据和剪贴板收藏。不含 API Key（换手机后要重新填）、剪贴板历史和下载的模型。")
+        FilledTonalButton(enabled = !busy, onClick = { save.launch("KK输入法备份-$stamp.zip") }) { Text("备份到文件…") }
+    }
+    Group("恢复") {
+        Note("从备份文件恢复。设置会被备份里的覆盖；学到的词、自定义词和收藏是合并进来的，这台手机上已经学到的不会丢。恢复后输入法会重新启动并重新部署词库（约一分钟）。")
+        FilledTonalButton(enabled = !busy, onClick = { open.launch(arrayOf("application/zip", "application/octet-stream")) }) { Text("从文件恢复…") }
+    }
+    if (status.isNotEmpty()) Note(status)
+    restored?.let { s ->
+        AlertDialog(
+            onDismissRequest = {},
+            title = { Text("已恢复") },
+            text = { Text("${s.settings} 项设置、${s.words} 条学到的词、${s.phrases} 条新的自定义词、${s.dicts} 个导入词库。\n\n输入法现在重新启动，下次打开键盘时会重新部署词库，约一分钟。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    // a clean start: every part of the keyboard reads the restored files again
+                    val again = android.content.Intent(ctx, SettingsActivity::class.java).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                    ctx.startActivity(again)
+                    android.os.Process.killProcess(android.os.Process.myPid())
+                }) { Text("好") }
+            },
+        )
     }
 }
 

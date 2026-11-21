@@ -301,6 +301,17 @@ FN(jboolean, selectCandidateGlobal)(JNIEnv*, jobject, jint index) {
   return r;
 }
 
+// Rime's sync: writes a text snapshot of each user dictionary to <user>/sync/<installation>/ and
+// merges every snapshot found in the other folders there. Closes the sessions; ours is made again
+// on its next use. Blocking.
+FN(jboolean, syncUserData)(JNIEnv*, jobject) {
+  std::lock_guard<std::mutex> lock(g_mutex);
+  bool r = api()->sync_user_data();
+  api()->join_maintenance_thread();
+  g_session = 0;
+  return r;
+}
+
 // Highlight a candidate (index in the whole menu) without choosing it, for keys that act on the
 // highlighted one (以词定字's [ and ]).
 FN(jboolean, highlightCandidate)(JNIEnv*, jobject, jint index) {

@@ -55,8 +55,18 @@ object RimeEngine {
                 }
                 writeUserConfig(ctx, shared, user)
                 emit(State.DEPLOYING)
-                RimeBridge.startup(shared.absolutePath, user.absolutePath, fresh || redeploy)
+                // a restored backup asks for a full deploy (its dictionaries and phrases)
+                val mark = File(user, com.kk.shurufa.Backup.REDEPLOY_MARK)
+                val restored = mark.isFile
+                RimeBridge.startup(shared.absolutePath, user.absolutePath, fresh || redeploy || restored)
                 RimeBridge.joinMaintenance()
+                mark.delete()
+                // …and what it learned is merged in through Rime's own sync
+                val restoreDir = File(user, "sync/${com.kk.shurufa.Backup.RESTORE_DIR}")
+                if (restoreDir.isDirectory) {
+                    runCatching { RimeBridge.syncUserData() }
+                    restoreDir.deleteRecursively()
+                }
                 RimeBridge.selectSchema("rime_ice")
                 emit(State.READY)
             } catch (t: Throwable) {
