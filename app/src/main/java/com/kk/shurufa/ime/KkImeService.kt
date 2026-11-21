@@ -95,6 +95,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     private lateinit var candPanel: LinearLayout
     private lateinit var candGrid: GridPanel
     private lateinit var candHandle: SheetHandle
+    private lateinit var toneTabs: com.kk.shurufa.keyboard.TabStrip
     private lateinit var symbolPanel: LinearLayout
     private lateinit var symRail: GridPanel
     private lateinit var symCells: GridPanel
@@ -555,6 +556,8 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
             Panel.AI -> { content.addView(aiPanel, fixed); if (entering) ai.onOpened() }
             Panel.VOICE -> { content.addView(voicePanel, fixed); if (entering) voice.onOpened() }
             Panel.CANDIDATES -> {
+                toneTabs.visibility = if (prefs.toneFilter) View.VISIBLE else View.GONE
+                toneTabs.setTabs(TONE_TABS, toneFilter.toString())
                 val (cands, comments) = zhCandidates(300)
                 candGrid.notes = zh.annotations(cands, comments)
                 candGrid.setItems(cands)
@@ -660,8 +663,6 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
                 val pre = RimeBridge.preedit()
                 zh.track(pre)
                 val (cands, comments) = zhCandidates(CANDIDATES_ON_BAR)
-                bar.toneMarks = prefs.toneFilter
-                bar.toneFilter = toneFilter
                 val input = RimeBridge.input()
                 aiCand.update(input, pre.split(' ', '\'').count { it.isNotBlank() }, cands.firstOrNull().orEmpty(), editor.textBefore(20),
                     allowed = learnHere && sink == null && toneFilter == 0)
@@ -711,8 +712,16 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         row.addView(candGrid, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
         row.addView(side, LinearLayout.LayoutParams(dp(68f).toInt(), ViewGroup.LayoutParams.MATCH_PARENT))
+        // 声调筛选, in the opened candidates only: the bar stays as it was
+        toneTabs = com.kk.shurufa.keyboard.TabStrip(this, prefs).apply {
+            theme = kbTheme; compact = true
+            onFeedback = { haptics.play(HapticEvent.OPTION) }
+            onTab = { t -> onToneFilter(t.toInt()) }
+            onVerticalDrag = { phase, y, v -> when (phase) { 0 -> candHandle.begin(y); 1 -> candHandle.drag(y); else -> candHandle.end(v) } }
+        }
         candPanel = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         candPanel.addView(candHandle, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        candPanel.addView(toneTabs, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         candPanel.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
     }
 
@@ -1186,7 +1195,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
             "more_symbols" -> showPanel(Panel.SYMBOLS)
             "math" -> { finishComposing(); showPanel(Panel.MATH) }
             "abc" -> { editor.selectMode = false; showPanel(Panel.LETTERS) }
-            "collapse" -> showPanel(Panel.LETTERS)
+            "collapse" -> { toneFilter = 0; showPanel(Panel.LETTERS) }
             "reinput" -> { RimeBridge.clearComposition(); flushRime(); showPanel(Panel.LETTERS) }
             "undo" -> undo()
             "lock" -> {
@@ -1444,7 +1453,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
 
     private fun rimeIndex(i: Int) = toneIdx?.getOrNull(i) ?: i
 
-    override fun onToneFilter(tone: Int) {
+    private fun onToneFilter(tone: Int) {
         toneFilter = tone
         toneFor = RimeBridge.input()
         syncBar()
@@ -1618,7 +1627,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         startActivity(Intent(this, SettingsActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).apply { if (page != null) putExtra("page", page) })
     }
 
-    private companion object {
+    internal companion object {
         /** 运算符列 of the standard number pad: five on screen, the rest by scrolling. */
         val NUM_OPS = listOf("+", "−", "×", "÷", "=", "%", "(", ")", "/", ",", "±")
         val DIRS = listOf(Dir.UP, Dir.DOWN, Dir.LEFT, Dir.RIGHT)
@@ -1627,6 +1636,8 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         const val CANDIDATES_ON_BAR = 60
         /** Where the AI 候选 sits on the bar. */
         const val AI_SLOT = 1
+        /** 声调筛选 in the opened candidates. */
+        val TONE_TABS = listOf("0" to "全部", "1" to "ā 一声", "2" to "á 二声", "3" to "ǎ 三声", "4" to "à 四声")
         const val XK_BRACKETLEFT = 0x5b
         const val XK_BRACKETRIGHT = 0x5d
         /** Quick-panel tools that open 雾凇's own candidates: tile → what is typed for them. */

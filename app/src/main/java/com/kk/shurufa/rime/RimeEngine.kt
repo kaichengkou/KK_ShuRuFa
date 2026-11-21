@@ -108,6 +108,21 @@ object RimeEngine {
             |patch:
             |  menu/page_size: 10
             |  translator/enable_correction: ${prefs.zhCorrection}
+            |  # 雾凇's own typo spellings (zih → zhi, lng → lang …) count as plain spellings, with no
+            |  # penalty, so they take abbreviations for typos (zihp → 制品, not z+i+h+p); KK's corrector
+            |  # handles those slips with context and a penalty, and goes quiet with 按键纠错 off.
+            |  # Kept: 超级简拼 and the ü/v forms.
+            |  speller/algebra:
+            |    - erase/^hm$/
+            |    - erase/^m$/
+            |    - erase/^n$/
+            |    - erase/^ng$/
+            |    - abbrev/^([a-z]).+$/$1/
+            |    - abbrev/^([zcs]h).+$/$1/
+            |    - derive/^([nl])ve$/$1ue/
+            |    - derive/^([jqxy])u/$1v/
+            |    - derive/^([nl])ue$/$1ve/
+            |    - derive/^([jqxy])v/$1u/
             |  engine/filters/@before 0: lua_filter@*kk_typo_mark
             |  engine/filters/+:
             |    - lua_filter@*kk_emoji_order

@@ -84,14 +84,57 @@ class TabStrip(context: Context, prefs: Prefs) : KbView(context, prefs) {
         }
     }
 
+    /**
+     * A vertical drag on the row (empty part included) moves the sheet the row sits in: phase 0
+     * begins at the raw y, 1 follows it, 2 ends with the velocity. Taps pick a tab.
+     */
+    var onVerticalDrag: ((phase: Int, rawY: Float, velocity: Float) -> Unit)? = null
+    private var downX = 0f
+    private var downY = 0f
+    private var dragging = false
+    private var vt: android.view.VelocityTracker? = null
+    private val slop = android.view.ViewConfiguration.get(context).scaledTouchSlop
+
+    /** The tab under [x], or -1 (compact tabs end where their names do). */
+    private fun tabAt(x: Float): Int {
+        if (tabs.isEmpty()) return -1
+        if (compact && (x > edge(tabs.size) + dp(4f) || x < edge(0) - dp(4f))) return -1
+        return (0 until tabs.size).firstOrNull { x < edge(it + 1) } ?: (tabs.size - 1)
+    }
+
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(e: MotionEvent): Boolean {
-        if (e.actionMasked == MotionEvent.ACTION_DOWN && tabs.isNotEmpty()) {
-            // compact tabs end where their names do: the empty rest of the row is not a tab
-            if (compact && (e.x > edge(tabs.size) + dp(4f) || e.x < edge(0) - dp(4f))) return false
-            val i = (0 until tabs.size).firstOrNull { e.x < edge(it + 1) } ?: (tabs.size - 1)
-            val id = tabs[i].first
-            if (id != current) { onFeedback?.invoke(); onTab?.invoke(id) }
+        when (e.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                if (onVerticalDrag == null && tabAt(e.x) < 0) return false
+                downX = e.x; downY = e.y; dragging = false
+                vt?.recycle(); vt = android.view.VelocityTracker.obtain().also { it.addMovement(e) }
+            }
+            MotionEvent.ACTION_MOVE -> {
+                vt?.addMovement(e)
+                val dy = e.y - downY
+                if (!dragging && onVerticalDrag != null && abs(dy) > slop && abs(dy) > abs(e.x - downX)) {
+                    dragging = true
+                    parent?.requestDisallowInterceptTouchEvent(true)
+                    onVerticalDrag?.invoke(0, e.rawY - dy, 0f)
+                }
+                if (dragging) onVerticalDrag?.invoke(1, e.rawY, 0f)
+            }
+            MotionEvent.ACTION_UP -> {
+                vt?.addMovement(e)
+                if (dragging) {
+                    vt?.computeCurrentVelocity(1000)
+                    onVerticalDrag?.invoke(2, e.rawY, vt?.yVelocity ?: 0f)
+                } else if (abs(e.x - downX) < slop * 2) {
+                    val i = tabAt(e.x)
+                    if (i >= 0) { val id = tabs[i].first; if (id != current) { onFeedback?.invoke(); onTab?.invoke(id) } }
+                }
+                vt?.recycle(); vt = null; dragging = false
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                if (dragging) onVerticalDrag?.invoke(2, e.rawY, 0f)
+                vt?.recycle(); vt = null; dragging = false
+            }
         }
         return true
     }

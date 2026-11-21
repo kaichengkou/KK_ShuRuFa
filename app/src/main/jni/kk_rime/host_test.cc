@@ -16,7 +16,7 @@ static void show(RimeApi* api, RimeSessionId s, const char* label) {
   RIME_STRUCT(RimeContext, ctx);
   if (api->get_context(s, &ctx)) {
     printf("%s preedit=[%s] cands:", label, ctx.composition.preedit ? ctx.composition.preedit : "");
-    for (int i = 0; i < ctx.menu.num_candidates && i < 8; i++)
+    for (int i = 0; i < ctx.menu.num_candidates && i < 10; i++)
       printf(" %d.%s%s%s", i + 1, ctx.menu.candidates[i].text,
              ctx.menu.candidates[i].comment ? "/" : "", ctx.menu.candidates[i].comment ? ctx.menu.candidates[i].comment : "");
     printf("\n");

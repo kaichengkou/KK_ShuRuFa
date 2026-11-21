@@ -50,13 +50,34 @@ class KkCorrector : public rime::Corrector {
       std::vector<Prism::Match> exact;
       p.CommonPrefixSearch(key.substr(pos, n - pos), &exact);
       for (auto& m : exact) {
-        if (HasVowel(key, pos, m.length)) reach[pos + m.length] = true;
+        // a syllable, or initials at the end after it: an abbreviation tail (zi+h+p for 自行火炮)
+        if (HasVowel(key, pos, m.length) || !HasVowel(key, pos, n - pos)) reach[pos + m.length] = true;
       }
+    }
+    // what was typed already reads as real syllables to the end: it is meant as typed, and only
+    // the commonest slips are still offered (a vowel tapped twice, the last letter tapped twice)
+    const bool asTyped = reach[n];
+    // Rime asks again for what follows each place a syllable can end (zhnog: hnog after z). Such a
+    // tail is only corrected when the whole input does not read as typed and what comes before it
+    // is real syllables, not a bare initial: z+hong (在红) is not a reading of zhnog.
+    const bool tail = full_.size() > key.size() && full_.compare(full_.size() - key.size(), key.size(), key) == 0;
+    bool onlySlips = asTyped;
+    if (tail) {
+      size_t offset = full_.size() - key.size();
+      if (offset >= fullReach_.size() || !fullReach_[offset]) return;
+      // the whole reads as typed: only a vowel or the last letter tapped twice (zaai, menn)
+      if (fullAsTyped_) onlySlips = true;
+    } else {
+      full_ = key; fullReach_ = reach; fullAsTyped_ = asTyped;
     }
 
     Corrections found;
-    // neighbouring keys on the same row
-    near_.ToleranceSearch(prism, key, &found, tolerance);
+    // neighbouring keys on the same row: one key, not several (jii is not hou)
+    {
+      Corrections near;
+      near_.ToleranceSearch(prism, key, &near, tolerance);
+      for (auto& kv : near) if (kv.second.distance <= 1) found.Alter(kv.first, kv.second);
+    }
     // two adjacent letters swapped, within the next syllable
     for (size_t i = 0; i + 1 < key.size() && i < 6; ++i) {
       if (key[i] == key[i + 1]) continue;
@@ -101,9 +122,11 @@ class KkCorrector : public rime::Corrector {
         }
       }
     }
-    for (auto& kv : found) {
-      size_t len = kv.second.length;
-      if (len <= n && !reach[len]) results->Alter(kv.first, kv.second);
+    if (!onlySlips) {
+      for (auto& kv : found) {
+        size_t len = kv.second.length;
+        if (len <= n && !reach[len]) results->Alter(kv.first, kv.second);
+      }
     }
     for (auto& kv : doubled) results->Alter(kv.first, kv.second);
   }
@@ -144,6 +167,10 @@ class KkCorrector : public rime::Corrector {
 
  private:
   rime::NearSearchCorrector near_;
+  // the input as a whole (the longest key asked about) and where its real syllables end
+  std::string full_;
+  std::vector<bool> fullReach_;
+  bool fullAsTyped_ = false;
 };
 
 class KkCorrectorComponent : public rime::Corrector::Component {

@@ -145,6 +145,7 @@ class ClipboardFeature(private val host: Host) {
         val drag: (Int, Float, Float) -> Unit = { phase, y, v -> when (phase) { 0 -> handle.begin(y); 1 -> handle.drag(y); else -> handle.end(v) } }
         strip.onVerticalDrag = drag
         favs.onGapDrag = drag
+        filters.onVerticalDrag = drag
         panel.addView(handle, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         panel.addView(filters, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         panel.addView(strip, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (118 * dp).toInt()))

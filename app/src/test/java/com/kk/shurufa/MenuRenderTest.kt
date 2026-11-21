@@ -96,11 +96,17 @@ class MenuRenderTest {
         bar.showPredictions(listOf("你好", "拟好", "你号", "泥好"), "按原拼音 ni hao"); f.invalidate(); save("bar_reselect", f)
         bar.showPredictions(listOf("你好", "拟好", "你号", "泥好")); f.invalidate(); save("bar_predict", f)
         bar.showCandidates("ni hao", listOf("你好", "拟好", "你号", "泥好"), emptyList(), -1); f.invalidate(); save("bar_compose", f)
-        bar.toneMarks = true; bar.toneFilter = 0
-        bar.showCandidates("ma", listOf("吗", "妈", "马", "嘛", "骂", "麻", "码", "妈妈"), emptyList(), -1); f.invalidate(); save("bar_tone_all", f)
-        bar.toneFilter = 3
-        bar.showCandidates("ma", listOf("马", "码", "吗", "玛", "蚂", "犸", "马上"), emptyList(), -1); f.invalidate(); save("bar_tone_3", f)
-        bar.toneMarks = false; bar.toneFilter = 0
+        // 声调筛选, now a row in the opened candidates
+        run {
+            val tabs = com.kk.shurufa.keyboard.TabStrip(ctx, prefs).apply { compact = true; setTabs(com.kk.shurufa.ime.KkImeService.TONE_TABS, "3") }
+            val grid = com.kk.shurufa.keyboard.GridPanel(ctx, prefs).apply {
+                cellStyle = com.kk.shurufa.keyboard.GridPanel.CellStyle.FLAT; columns = 8; rowHeightDp = 50f; textSp = 19f; highlightFirst = true
+            }
+            val tf = frame(170, CandidateBar(ctx, prefs).apply { showCandidates("ma", listOf("马", "码", "吗", "玛", "蚂", "犸", "马上"), emptyList(), -1) }, tabs,
+                grid.also { it.layoutParams = LinearLayout.LayoutParams(-1, (100 * d).toInt()) })
+            grid.setItems(listOf("马", "码", "吗", "玛", "蚂", "犸", "马上", "马上就", "码头", "马路", "吗啡", "玛丽", "马克", "蚂蚁", "马马虎虎", "犸"))
+            tf.invalidate(); idle(300); save("cand_tone", tf)
+        }
         bar.showCandidates("wo men zai xue xiao men kou jian mian", listOf("我们在学校门口", "我们在学校门口见面", "我们在", "我们", "我"), listOf("", "AI"), -1)
         f.invalidate(); save("bar_ai", f)
         bar.showMath("uni", simple = true); bar.showMoney("1050" to "壹仟零伍拾元整"); f.invalidate(); save("bar_money", f)
