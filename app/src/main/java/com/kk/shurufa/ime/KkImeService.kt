@@ -601,9 +601,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         when {
             panel == Panel.MATH -> bar.showMath(prefs.mathFormat, simple = false)
             panel == Panel.NUM -> bar.showMath(prefs.mathFormat, simple = true)
-            isZh && RimeEngine.state == RimeEngine.State.DEPLOYING && letters -> bar.showMessage("正在部署雾凇拼音词库，首次约需一分钟…")
-            isZh && RimeEngine.state == RimeEngine.State.PREPARING && letters -> bar.showMessage("正在准备中文词库…")
-            isZh && RimeEngine.state == RimeEngine.State.FAILED && letters -> bar.showMessage("中文引擎没有启动 · 点按重试", tappable = true)
+            // a query the user opened comes first: it works without the Chinese engine
             s == Sink.TRANSLATE && !composing && letters -> { bar.showToolbar(); translate.sync() }
             s == Sink.AI && !composing && letters -> {
                 val q = query.toString()
@@ -619,6 +617,9 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
                     else -> "查找「$q」· 点按发送"
                 })
             }
+            isZh && RimeEngine.state == RimeEngine.State.DEPLOYING && letters -> bar.showMessage("正在部署雾凇拼音词库，首次约需一分钟…")
+            isZh && RimeEngine.state == RimeEngine.State.PREPARING && letters -> bar.showMessage("正在准备中文词库…")
+            isZh && RimeEngine.state == RimeEngine.State.FAILED && letters -> bar.showMessage("中文引擎没有启动 · 点按重试", tappable = true)
             composing && pinyinEdit -> bar.showEdit(RimeBridge.input(), RimeBridge.caretPos(), zh.gaps(RimeBridge.input(), RimeBridge.preedit()))
             composing -> {
                 val pre = RimeBridge.preedit()
