@@ -72,7 +72,6 @@ class ClipStrip(context: Context, prefs: Prefs) : KbView(context, prefs) {
     /** Left edge and width of each card: short clips get narrow cards, long ones wrap at [cardW]. */
     private var lefts = FloatArray(0)
     private var widths = FloatArray(0)
-    private val step get() = cardW + gap
     private val maxScroll get() = if (cards.isEmpty()) 0f else max(0f, lefts.last() + widths.last() + pad - width)
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) { layouts.clear(); measureCards(); fadeL = null; fadeR = null }

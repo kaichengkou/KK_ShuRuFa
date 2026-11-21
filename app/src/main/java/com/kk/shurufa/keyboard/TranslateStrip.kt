@@ -51,8 +51,6 @@ class TranslateStrip(context: Context, prefs: Prefs) : KbView(context, prefs) {
     fun refresh() { srcLayout = null; resLayout = null; caretSince = SystemClock.uptimeMillis(); invalidate() }
 
     private val bg = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val tp = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER }
-    private val ip = Paint(Paint.ANTI_ALIAS_FLAG)
     private val body = TextPaint(Paint.ANTI_ALIAS_FLAG)
     private var srcLayout: StaticLayout? = null
     private var resLayout: StaticLayout? = null
