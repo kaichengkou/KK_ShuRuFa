@@ -103,6 +103,44 @@ class KeyboardRenderTest {
 
     private fun idle(ms: Long) = shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(ms))
 
+    /**
+     * 落点自适应: a tap just inside q, next to w, reads as q until the keyboard has seen that this
+     * person's taps on w land on its left side; then the edge between them follows those taps.
+     * A tap undone by backspace teaches nothing.
+     */
+    @Test fun learnsWhereTapsLand() {
+        kb.setRows(LayoutRepo(ctx).keyboard("zh").rows)
+        layoutRoot()
+        val q = android.graphics.RectF(kb.keyRect { it.main?.text == "q" }!!)
+        val w = android.graphics.RectF(kb.keyRect { it.main?.text == "w" }!!)
+        fun tap(x: Float, y: Float): String {
+            events.clear()
+            touch(MotionEvent.ACTION_DOWN, x, y); touch(MotionEvent.ACTION_UP, x, y)
+            return events.firstOrNull { it.startsWith("out:") }?.removePrefix("out:") ?: events.joinToString()
+        }
+        val edgeX = q.right - q.width() * 0.05f
+        val y = q.centerY()
+        val model = com.kk.shurufa.keyboard.TouchModel(prefs.state)
+        kb.touch = model
+        assertEquals("before anything is learned, the key shapes decide", "q", tap(edgeX, y))
+        val bs = kb.keyRect { it.fn == "backspace" }!!
+        // mistakes: w tapped far right, each undone at once; they must not count
+        repeat(30) { tap(w.right - 2f, y); tap(bs.centerX(), bs.centerY()) }
+        assertEquals("q", tap(edgeX, y))
+        // this person hits w on its left side, and keeps what they typed
+        repeat(60) { tap(w.left + w.width() * 0.12f, y); tap(kb.keyRect { it.main?.text == "e" }!!.centerX(), y) }
+        assertEquals("w", tap(edgeX, y))
+        assertEquals("the middle of q stays q", "q", tap(q.centerX(), y))
+        // what was learned is kept, and a new model reads it back
+        model.save(); idle(50); Thread.sleep(100); idle(50)
+        kb.touch = com.kk.shurufa.keyboard.TouchModel(prefs.state)
+        assertEquals("w", tap(edgeX, y))
+        // 清除 in the settings forgets it at once, also in the model in use
+        prefs.state.edit().remove(com.kk.shurufa.keyboard.TouchModel.KEY).apply()
+        assertEquals("q", tap(edgeX, y))
+        kb.touch = null
+    }
+
     @Test fun renderAndGestures() {
         val repo = LayoutRepo(ctx)
         kb.setRows(repo.keyboard("zh").rows)

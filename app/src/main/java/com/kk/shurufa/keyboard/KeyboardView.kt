@@ -50,6 +50,8 @@ interface KeyboardListener {
 class KeyboardView(context: Context, prefs: Prefs) : KbView(context, prefs) {
 
     var listener: KeyboardListener? = null
+    /** 落点自适应: where this person's taps land on each letter; null reads taps by the key shapes alone. */
+    var touch: TouchModel? = null
     var overlay: PopupOverlay? = null
     /** Math keys show four-direction hints and use a math font. */
     var mathMode = false
@@ -383,8 +385,13 @@ class KeyboardView(context: Context, prefs: Prefs) : KbView(context, prefs) {
         }
     }
 
+    /** A letter key, whose taps are learned and read against where they land. */
+    private fun learnable(k: Key) = k.fn == null && k.main?.text?.let { it.length == 1 && it[0].isLetter() } == true
+
+    private val center = FloatArray(2)
+
     private fun keyAt(x: Float, y: Float): Int {
-        for (i in rects.indices) if (rects[i].contains(x, y)) return i
+        for (i in rects.indices) if (rects[i].contains(x, y)) return adapted(i, x, y)
         // fall back to the nearest key so taps in the gaps still count
         var best = -1
         var bd = Float.MAX_VALUE
@@ -396,6 +403,31 @@ class KeyboardView(context: Context, prefs: Prefs) : KbView(context, prefs) {
             if (d < bd) { bd = d; best = i }
         }
         return if (best >= 0 && abs(rects[best].centerY() - y) < keyH) best else -1
+    }
+
+    /**
+     * The key a tap inside [hit] is read as: of [hit] and its neighbours in the same row, the one
+     * whose learned center is nearest across, in key widths. A neighbour only wins near the shared
+     * edge (within [TouchModel.MAX_SHIFT] of a key width), and before anything is learned every
+     * center is the key's own, so taps are read exactly by the key shapes.
+     */
+    private fun adapted(hit: Int, x: Float, y: Float): Int {
+        val model = touch ?: return hit
+        if (!learnable(keys[hit])) return hit
+        val row = rects[hit]
+        var best = hit; var bd = Float.MAX_VALUE
+        for (i in rects.indices) {
+            val r = rects[i]
+            if (i != hit) {
+                if (!learnable(keys[i]) || abs(r.centerY() - row.centerY()) > row.height() / 2) continue
+                val m = r.width() * TouchModel.MAX_SHIFT
+                if (x < r.left - m || x > r.right + m) continue
+            }
+            model.center(keys[i].main!!.text, r, center)
+            val d = abs(x - center[0]) / r.width()
+            if (d < bd) { bd = d; best = i }
+        }
+        return best
     }
 
     @SuppressLint("ClickableViewAccessibility")
@@ -424,6 +456,10 @@ class KeyboardView(context: Context, prefs: Prefs) : KbView(context, prefs) {
         val hit = keyAt(x, y)
         if (hit < 0) return
         val k = keys[hit]
+        touch?.let { m ->
+            val now = SystemClock.uptimeMillis()
+            if (k.fn == "backspace") m.undone(now) else if (learnable(k)) m.tapped(k.main!!.text, rects[hit], x, y, now)
+        }
         pointerId = e.getPointerId(index)
         active = k
         activeRect = rects[hit]
@@ -618,6 +654,7 @@ class KeyboardView(context: Context, prefs: Prefs) : KbView(context, prefs) {
 
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
+        touch?.save()
         if (mode != Mode.NONE) finish(commit = false)
         handler.removeCallbacksAndMessages(null)
     }

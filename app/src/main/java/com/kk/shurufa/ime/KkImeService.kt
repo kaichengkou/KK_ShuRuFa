@@ -203,7 +203,8 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         when (key) {
             Prefs.ZH_EMOJI, Prefs.ZH_TRAD -> applyRimeOptions()
             Prefs.ZH_PREDICT -> if (prefs.zhPredict) predictor.load() else { predictions = emptyList(); syncBar() }
-            Prefs.ZH_CORRECTION -> RimeEngine.redeploy(this)
+            Prefs.ZH_CORRECTION, Prefs.GRAMMAR -> RimeEngine.redeploy(this)
+            Prefs.TOUCH_ADAPT -> if (built) keyboard.touch = if (prefs.touchAdapt) touchModel else null
             Prefs.PACK_POETRY -> { if (prefs.packPoetry) predictor.loadPoetry() else predictor.dropPoetry(); RimeEngine.redeploy(this) }
             Prefs.MATH_FORMAT -> syncBar()
             Prefs.STRESS_MODE -> if (built && panel == Panel.LETTERS) keyboard.setRows(lettersRows())
@@ -253,7 +254,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
             if (h != null) when (phase) { 0 -> h.begin(rawY); 1 -> h.drag(rawY); else -> h.end(v) }
         }
         content = FrameLayout(this)
-        keyboard = newKeyboard()
+        keyboard = newKeyboard().also { it.touch = if (prefs.touchAdapt) touchModel else null }
         buildCandidatePanel()
         buildSymbolPanel()
         buildEditPanel()
@@ -327,6 +328,9 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
             w.decorView.systemUiVisibility = if (kbTheme.dark) 0 else View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
         }
     }
+
+    /** 落点自适应 for the letter keys, kept across input views. */
+    private val touchModel by lazy { com.kk.shurufa.keyboard.TouchModel(prefs.state) }
 
     override fun newKeyboard() = KeyboardView(this, prefs).also { it.theme = kbTheme; it.listener = this; it.overlay = overlay }
 

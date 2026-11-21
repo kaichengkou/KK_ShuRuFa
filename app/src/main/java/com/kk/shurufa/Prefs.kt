@@ -82,6 +82,10 @@ class Prefs(context: Context) {
     val typoMark get() = b(TYPO_MARK, true)
     val rareAnnotate get() = b(RARE_ANNOTATE, true)
     val packPoetry get() = b(PACK_POETRY, true)
+    /** 语法模型: used when downloaded, unless turned off. */
+    val grammar get() = b(GRAMMAR, true)
+    /** 落点自适应: learn where taps land on each letter key. */
+    val touchAdapt get() = b(TOUCH_ADAPT, true)
 
     // Clipboard
     val clipKeep get() = i(CLIP_KEEP, 40)
@@ -229,6 +233,8 @@ class Prefs(context: Context) {
         const val TYPO_MARK = "typo_mark"
         const val RARE_ANNOTATE = "rare_annotate"
         const val PACK_POETRY = "pack_poetry"
+        const val GRAMMAR = "zh_grammar"
+        const val TOUCH_ADAPT = "touch_adapt"
         const val CLIP_KEEP = "clip_keep"
         const val CLIP_SUGGEST = "clip_suggest"
         const val CLIP_MAX_CHARS = "clip_max_chars"

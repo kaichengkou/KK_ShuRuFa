@@ -7,6 +7,8 @@ import android.provider.Settings
 import android.view.inputmethod.InputMethodManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.AnimatedContent
@@ -194,7 +196,7 @@ private val PAGES = listOf(
     PageInfo("languages", "语言", "启用的语言、顺序、自动大写、俄语重音"),
     PageInfo("chinese", "中文", "简繁、emoji、联想、纠错、拼音模式"),
     PageInfo("dict", "自定义词库", "添加、修改、删除自己的词"),
-    PageInfo("packs", "扩展词库", "古诗文等，可整句输入并自动接下句"),
+    PageInfo("packs", "扩展词库", "语法模型、导入搜狗词库、古诗文"),
     PageInfo("symbols", "符号与数学", "括号配对、数字后标点、数学键盘"),
     PageInfo("clipboard", "剪贴板", "保留条数、复制后的粘贴提示"),
     PageInfo("toolbar", "工具栏", "选择和排列键盘上方的按钮"),
@@ -560,6 +562,13 @@ private fun GesturesPage(prefs: Prefs) {
         IntSlider(prefs, Prefs.HOLD_CANCEL_MS, "按住太久不上屏", 1000, 0..3000, "ms", "没有长按菜单的键和剪贴板、候选：按住超过这么久松开不算点击；0 为关闭")
         Toggle(prefs, Prefs.TOP_ROW_SCRIPTS, "第一排左右滑输入上下角标数字", "左滑 ¹²³，右滑 ₁₂₃", false)
     }
+    Group("落点自适应") {
+        Toggle(prefs, Prefs.TOUCH_ADAPT, "按我的点按习惯判断按键", "记住每个字母键你实际点在哪里：点在两个键交界附近时，按你平时点这两个键的位置来判断。点错后马上删除的那一下不计入。只存在本机", true)
+        var reset by remember { mutableStateOf(false) }
+        TextButton(enabled = !reset, onClick = {
+            prefs.state.edit().remove(com.kk.shurufa.keyboard.TouchModel.KEY).apply(); reset = true
+        }) { Text(if (reset) "已清除，下次打开键盘时生效" else "清除学到的落点") }
+    }
     Group("空格") {
         Choice(prefs, Prefs.SPACE_SWIPE, "左右滑", listOf("language" to "切换语言", "cursor" to "移动光标", "none" to "无"))
         Choice(prefs, Prefs.SPACE_LONG_PRESS, "长按", listOf("cursor" to "拖动光标", "none" to "无"))
@@ -712,9 +721,94 @@ private fun FilesPage() {
 
 @Composable
 private fun PacksPage(prefs: Prefs) {
+    GrammarGroup(prefs)
+    ImportGroup()
     Group("古诗文") {
         Toggle(prefs, Prefs.PACK_POETRY, "启用古诗文词库", "唐诗三百首、宋词三百首、千家诗、诗经、论语、楚辞、古文观止，约 3.8 万句。整句拼音或首字母都能打出（比如 brysj → 白日依山尽），上屏一句后联想栏接出下一句。切换后会重新部署", true)
         Note("数据来自 chinese-poetry 项目（MIT 许可）。")
+    }
+}
+
+/** 语法模型: download, turn on or off, delete. */
+@Composable
+private fun GrammarGroup(prefs: Prefs) {
+    val ctx = LocalContext.current
+    val main = remember { android.os.Handler(android.os.Looper.getMainLooper()) }
+    var installed by remember { mutableStateOf(com.kk.shurufa.rime.Grammar.installed(ctx)) }
+    var progress by remember { mutableStateOf(-1f) }
+    var status by remember { mutableStateOf("") }
+    var cancel by remember { mutableStateOf(false) }
+    Group("语法模型") {
+        Note("让整句输入看词语之间怎么搭配，而不只看每个词常不常用，长句一次打对的次数会多很多。模型来自万象（RIME-LMDG），约 ${com.kk.shurufa.rime.Grammar.SIZE_MB} MB，建议在 Wi-Fi 下下载；用的时候直接从存储读取，不占用多少内存。")
+        if (installed) {
+            Toggle(prefs, Prefs.GRAMMAR, "使用语法模型", "切换后会重新部署", true)
+            TextButton(onClick = {
+                com.kk.shurufa.rime.Grammar.delete(ctx); installed = false; RimeEngine.redeploy(ctx); status = "已删除"
+            }) { Text("删除模型") }
+        } else if (progress >= 0f) {
+            LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("已下载 ${(progress * 100).toInt()}%", style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                TextButton(onClick = { cancel = true }) { Text("暂停") }
+            }
+        } else {
+            Button(onClick = {
+                cancel = false; progress = 0f; status = ""
+                Thread {
+                    val r = runCatching { com.kk.shurufa.rime.Grammar.download(ctx, { f -> main.post { progress = f } }, { cancel }) }
+                    main.post {
+                        progress = -1f
+                        installed = com.kk.shurufa.rime.Grammar.installed(ctx)
+                        status = when {
+                            installed -> { RimeEngine.redeploy(ctx); "已下载，正在重新部署（约一分钟，期间中文暂不可用）" }
+                            cancel -> "已暂停，再点下载会接着下"
+                            else -> "下载失败：${r.exceptionOrNull()?.message ?: "网络错误"}，再点下载会接着下"
+                        }
+                    }
+                }.start()
+            }, modifier = Modifier.padding(vertical = 6.dp)) { Text("下载（约 ${com.kk.shurufa.rime.Grammar.SIZE_MB} MB）") }
+        }
+        if (status.isNotEmpty()) Note(status)
+    }
+}
+
+/** 导入词库: add .scel or text word lists; each can be removed again. */
+@Composable
+private fun ImportGroup() {
+    val ctx = LocalContext.current
+    val main = remember { android.os.Handler(android.os.Looper.getMainLooper()) }
+    var dicts by remember { mutableStateOf(com.kk.shurufa.rime.ImportedDicts.list(ctx)) }
+    var status by remember { mutableStateOf("") }
+    val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        status = "正在导入…"
+        Thread {
+            val r = runCatching {
+                val name = ctx.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)
+                    ?.use { c -> if (c.moveToFirst()) c.getString(0) else null } ?: "导入的词库"
+                val bytes = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: error("读不到文件")
+                com.kk.shurufa.rime.ImportedDicts.import(ctx, name.substringBeforeLast('.'), bytes)
+            }
+            main.post {
+                dicts = com.kk.shurufa.rime.ImportedDicts.list(ctx)
+                status = r.fold({ n -> RimeEngine.redeploy(ctx); "导入了 $n 个词，正在重新部署（约一分钟）" }, { "导入失败：${it.message}" })
+            }
+        }.start()
+    }
+    Group("导入词库") {
+        Note("支持搜狗细胞词库（.scel）和文本词表（每行一个词，可以带拼音和词频，用 Tab 或空格隔开）。导入的词和雾凇拼音一起组句；没写拼音的词按字自动注音。导入词的词频有上限，只补充新词，不会把常用词挤到后面。")
+        for (d in dicts) Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(d.title)
+                Text("${d.words} 个词", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            TextButton(onClick = {
+                com.kk.shurufa.rime.ImportedDicts.delete(d); dicts = com.kk.shurufa.rime.ImportedDicts.list(ctx)
+                RimeEngine.redeploy(ctx); status = "已移除「${d.title}」，正在重新部署"
+            }) { Text("移除") }
+        }
+        FilledTonalButton(onClick = { pick.launch(arrayOf("*/*")) }, modifier = Modifier.padding(vertical = 6.dp)) { Text("选择词库文件") }
+        if (status.isNotEmpty()) Note(status)
     }
 }
 
