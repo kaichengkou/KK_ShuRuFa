@@ -1506,7 +1506,7 @@ private fun OnlinePage(prefs: Prefs) {
             if (pickQuick) PickerDialog("云联想和 AI 候选用", listOf("" to "跟 AI 改写相同") + targets, prefs.quickTarget,
                 onPick = { prefs.put(Prefs.QUICK_TARGET, it); tick++ }, onClose = { pickQuick = false })
         }
-        Note("今天已请求 ${com.kk.shurufa.online.AiBudget.today(prefs)} 次。键盘自己每分钟最多问 ${com.kk.shurufa.online.AiBudget.PER_MINUTE} 次、不重试；服务说太频繁就先停一会儿，连着几次就停 30 分钟。Gemini 免费版实测每分钟 15 次（每个模型分开算），每天的上限在 AI Studio 的 rate-limit 页面能看到。国内网络连不上 Gemini 时可以选智谱 GLM-4-Flash（免费）或硅基流动的免费小模型。")
+        Note("今天已请求 ${com.kk.shurufa.online.AiBudget.today(prefs)} 次（含 AI 语音识别）。键盘自己每分钟最多问 ${com.kk.shurufa.online.AiBudget.PER_MINUTE} 次、不重试；服务说太频繁就先停一会儿，连着几次就停 30 分钟。Gemini 免费版实测每分钟 15 次（每个模型分开算），每天的上限在 AI Studio 的 rate-limit 页面能看到。国内网络连不上 Gemini 时可以选智谱 GLM-4-Flash（免费）或硅基流动的免费小模型。")
     }
     Group("AI 候选") {
         Toggle(prefs, Prefs.AI_CANDIDATE, "打长拼音时请 AI 给一个候选", "打了三个音节以上、停顿一下时，把这段拼音和光标前最多 20 个字发给上面选的 AI 服务，它给出的整句排在候选栏第二个，标着 AI。会把你正在打的内容发出去；密码、地址和无痕输入框里不会发。建议用快的模型，比如 Gemini 3.5 Flash Lite（约半秒）", false)

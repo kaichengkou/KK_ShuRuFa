@@ -200,7 +200,11 @@ class VoiceEngine(private val context: Context, private val prefs: Prefs) {
     }
 
     private fun recognize(lang: String, pcm: FloatArray): String {
-        remoteTarget?.let { t -> return simplified(com.kk.shurufa.online.Llm.transcribe(prefs, t, pcm, lang)) }
+        remoteTarget?.let { t ->
+            // counted with the keyboard's other AI requests (settings show today's total)
+            com.kk.shurufa.online.AiBudget.asked(prefs)
+            return simplified(com.kk.shurufa.online.Llm.transcribe(prefs, t, pcm, lang))
+        }
         if (usesWhisper(lang)) {
             val prompt = if (lang == "ru") "Это предложение на русском языке." else "This is a sentence in English."
             val threads = Runtime.getRuntime().availableProcessors().coerceIn(2, 6)

@@ -300,6 +300,8 @@ object Llm {
                     }.trim()
                 } catch (e: HttpError) {
                     last = e
+                    // a spent or rate-limited quota: asking again (or another model) only spends more
+                    if (e.code == 429) { AiBudget.limited(); error("AI 识别：请求太多或今天的免费额度用完了，可以先换成本地模型") }
                     if (e.gone && models.size > 1) break
                     if (!e.retryable) error(e.userMessage())
                     if (attempt < 2) Thread.sleep(if (attempt == 0) 1000L else 2500L)
