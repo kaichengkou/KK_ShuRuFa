@@ -70,6 +70,7 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -722,6 +723,7 @@ private fun FilesPage() {
 @Composable
 private fun PacksPage(prefs: Prefs) {
     GrammarGroup(prefs)
+    PackGroups(prefs)
     ImportGroup()
     Group("古诗文") {
         Toggle(prefs, Prefs.PACK_POETRY, "启用古诗文词库", "唐诗三百首、宋词三百首、千家诗、诗经、论语、楚辞、古文观止，约 3.8 万句。整句拼音或首字母都能打出（比如 brysj → 白日依山尽），上屏一句后联想栏接出下一句。切换后会重新部署", true)
@@ -772,6 +774,94 @@ private fun GrammarGroup(prefs: Prefs) {
     }
 }
 
+/**
+ * 词库拓展包: the built-in catalog and every subscribed one, by subject. A pack installs with one
+ * tap and is removed the same way; the engine redeploys once after a run of changes.
+ */
+@Composable
+private fun PackGroups(prefs: Prefs) {
+    val ctx = LocalContext.current
+    val main = remember { android.os.Handler(android.os.Looper.getMainLooper()) }
+    val builtIn = remember { com.kk.shurufa.rime.DictPacks.builtIn(ctx) }
+    var feeds by remember { mutableStateOf(com.kk.shurufa.rime.DictPacks.subscriptions(prefs)) }
+    val fetched = remember { mutableStateOf(mapOf<String, Result<com.kk.shurufa.rime.DictPacks.Catalog>>()) }
+    var installed by remember { mutableStateOf(com.kk.shurufa.rime.ImportedDicts.list(ctx)) }
+    var busy by remember { mutableStateOf(setOf<String>()) }
+    var status by remember { mutableStateOf("") }
+    var open by remember { mutableStateOf<String?>(null) }
+    // subscribed catalogs are read once per visit
+    LaunchedEffect(feeds) {
+        for (f in feeds) if (f !in fetched.value) Thread {
+            val r = runCatching { com.kk.shurufa.rime.DictPacks.fetch(f) }
+            main.post { fetched.value = fetched.value + (f to r) }
+        }.start()
+    }
+    fun install(p: com.kk.shurufa.rime.DictPacks.Pack) {
+        busy = busy + p.id; status = "正在下载「${p.name}」…"
+        Thread {
+            val r = runCatching { com.kk.shurufa.rime.DictPacks.install(ctx, p) }
+            main.post {
+                busy = busy - p.id; installed = com.kk.shurufa.rime.ImportedDicts.list(ctx)
+                status = r.fold({ n -> RimeEngine.redeploySoon(ctx); "「${p.name}」装好了，$n 个词；稍后重新部署（约一分钟）" }, { "「${p.name}」安装失败：${it.message ?: "网络错误"}" })
+            }
+        }.start()
+    }
+    fun remove(p: com.kk.shurufa.rime.DictPacks.Pack) {
+        installed.filter { it.source == p.id }.forEach { com.kk.shurufa.rime.ImportedDicts.delete(it) }
+        installed = com.kk.shurufa.rime.ImportedDicts.list(ctx)
+        RimeEngine.redeploySoon(ctx); status = "已移除「${p.name}」"
+    }
+    @Composable
+    fun Catalog(c: com.kk.shurufa.rime.DictPacks.Catalog) {
+        if (c.note.isNotEmpty()) Note(c.note)
+        for ((group, packs) in c.packs.groupBy { it.group }) {
+            val key = c.source + "/" + group
+            val have = packs.count { p -> installed.any { it.source == p.id } }
+            Row(Modifier.fillMaxWidth().clickable { open = if (open == key) null else key }.padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(group, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
+                Text(if (have > 0) "已装 $have / ${packs.size}" else "${packs.size} 个", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Icon(if (open == key) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown, null, modifier = Modifier.padding(start = 4.dp))
+            }
+            if (open == key) for (p in packs) Row(Modifier.fillMaxWidth().padding(start = 8.dp, top = 2.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(p.name)
+                    if (p.words > 0) Text("${p.words} 个词", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                when {
+                    p.id in busy -> Text("下载中…", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(horizontal = 12.dp))
+                    installed.any { it.source == p.id } -> TextButton(onClick = { remove(p) }) { Text("移除") }
+                    else -> FilledTonalButton(onClick = { install(p) }) { Text("安装") }
+                }
+            }
+        }
+    }
+    Group("词库拓展包") {
+        Note("按需装上专业或兴趣词库，装好的词和雾凇拼音一起组句，常用词的排序不受影响。")
+        Catalog(builtIn)
+        if (status.isNotEmpty()) Note(status)
+    }
+    for (f in feeds) Group(fetched.value[f]?.getOrNull()?.name ?: "订阅的词库") {
+        val r = fetched.value[f]
+        when {
+            r == null -> Note("正在读取 $f …")
+            r.isFailure -> Note("读取失败：${r.exceptionOrNull()?.message ?: "网络错误"}（$f）")
+            else -> Catalog(r.getOrThrow())
+        }
+        TextButton(onClick = {
+            feeds = feeds - f; com.kk.shurufa.rime.DictPacks.setSubscriptions(prefs, feeds)
+        }) { Text("取消订阅") }
+    }
+    Group("订阅词库源") {
+        Note("词库源是一个 JSON 文件，列出一批可以一键安装的词库，格式见下面的说明。订阅后它的词库会出现在上面。")
+        var link by remember { mutableStateOf("") }
+        OutlinedTextField(link, { link = it }, label = { Text("词库源链接") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        Button(enabled = link.trim().startsWith("http"), onClick = {
+            feeds = feeds + link.trim(); com.kk.shurufa.rime.DictPacks.setSubscriptions(prefs, feeds); link = ""
+        }, modifier = Modifier.padding(vertical = 6.dp)) { Text("订阅") }
+        Note("""格式：{"name": "名字", "packs": [{"id": "唯一编号", "group": "分类", "name": "词库名", "words": 词数, "url": "下载链接"}]}。下载链接可以是搜狗 .scel、文本词表或 Rime 的 .dict.yaml；id 写成 sogou:编号 时可以不写链接。""")
+    }
+}
+
 /** 导入词库: add .scel or text word lists; each can be removed again. */
 @Composable
 private fun ImportGroup() {
@@ -791,12 +881,12 @@ private fun ImportGroup() {
             }
             main.post {
                 dicts = com.kk.shurufa.rime.ImportedDicts.list(ctx)
-                status = r.fold({ n -> RimeEngine.redeploy(ctx); "导入了 $n 个词，正在重新部署（约一分钟）" }, { "导入失败：${it.message}" })
+                status = r.fold({ n -> RimeEngine.redeploySoon(ctx); "导入了 $n 个词，稍后重新部署（约一分钟）" }, { "导入失败：${it.message}" })
             }
         }.start()
     }
     Group("导入词库") {
-        Note("支持搜狗细胞词库（.scel）和文本词表（每行一个词，可以带拼音和词频，用 Tab 或空格隔开）。导入的词和雾凇拼音一起组句；没写拼音的词按字自动注音。导入词的词频有上限，只补充新词，不会把常用词挤到后面。")
+        Note("也可以导入自己的词库文件。支持搜狗细胞词库（.scel）和文本词表（每行一个词，可以带拼音和词频，用 Tab 或空格隔开）。导入的词和雾凇拼音一起组句；没写拼音的词按字自动注音。导入词的词频有上限，只补充新词，不会把常用词挤到后面。")
         for (d in dicts) Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(d.title)
@@ -804,10 +894,29 @@ private fun ImportGroup() {
             }
             TextButton(onClick = {
                 com.kk.shurufa.rime.ImportedDicts.delete(d); dicts = com.kk.shurufa.rime.ImportedDicts.list(ctx)
-                RimeEngine.redeploy(ctx); status = "已移除「${d.title}」，正在重新部署"
+                RimeEngine.redeploySoon(ctx); status = "已移除「${d.title}」，稍后重新部署"
             }) { Text("移除") }
         }
         FilledTonalButton(onClick = { pick.launch(arrayOf("*/*")) }, modifier = Modifier.padding(vertical = 6.dp)) { Text("选择词库文件") }
+        var link by remember { mutableStateOf("") }
+        OutlinedTextField(link, { link = it }, label = { Text("或者贴一个链接") }, placeholder = { Text("搜狗词库页面，或 .scel / 文本的下载链接") },
+            singleLine = true, modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
+        val url = com.kk.shurufa.rime.DictPacks.resolve(link)
+        Button(enabled = url != null, onClick = {
+            val u = url ?: return@Button
+            status = "正在下载…"
+            Thread {
+                val r = runCatching {
+                    val bytes = com.kk.shurufa.rime.DictPacks.download(u)
+                    val title = if (com.kk.shurufa.rime.ImportedDicts.Scel.isScel(bytes)) com.kk.shurufa.rime.ImportedDicts.Scel.title(bytes) else u.substringAfterLast('/').substringBefore('?')
+                    com.kk.shurufa.rime.ImportedDicts.import(ctx, title.ifBlank { "链接导入的词库" }, bytes, source = u) to title
+                }
+                main.post {
+                    dicts = com.kk.shurufa.rime.ImportedDicts.list(ctx)
+                    status = r.fold({ (n, t) -> RimeEngine.redeploySoon(ctx); link = ""; "导入了「$t」$n 个词，稍后重新部署（约一分钟）" }, { "导入失败：${it.message ?: "网络错误"}" })
+                }
+            }.start()
+        }, modifier = Modifier.padding(vertical = 6.dp)) { Text("从链接导入") }
         if (status.isNotEmpty()) Note(status)
     }
 }

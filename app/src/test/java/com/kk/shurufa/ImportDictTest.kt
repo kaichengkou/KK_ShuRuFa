@@ -17,6 +17,7 @@ class ImportDictTest {
         val syllables = words.flatMap { it.second }.distinct()
         val b = ByteArray(0x2628)
         b[0] = 0x40; b[1] = 0x15
+        "测试词库".toByteArray(Charsets.UTF_16LE).copyInto(b, 0x130)
         val head = ByteBuffer.wrap(b).order(ByteOrder.LITTLE_ENDIAN)
         var p = 0x1540 + 4
         syllables.forEachIndexed { i, s ->
@@ -39,6 +40,7 @@ class ImportDictTest {
     @Test fun readsScel() {
         val bytes = scel(listOf("谷胱甘肽" to listOf("gu", "guang", "gan", "tai"), "嘌呤" to listOf("piao", "ling")))
         assertTrue(ImportedDicts.Scel.isScel(bytes))
+        assertEquals("测试词库", ImportedDicts.Scel.title(bytes))
         val e = ImportedDicts.Scel.parse(bytes)
         assertEquals(listOf("谷胱甘肽" to "gu guang gan tai", "嘌呤" to "piao ling"), e.map { it.text to it.code })
         assertTrue(e.all { it.weight == ImportedDicts.WEIGHT })

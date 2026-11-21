@@ -60,7 +60,8 @@ object ImportedDicts {
     /** The most an imported word may weigh, however its list ranks it. */
     const val MAX_WEIGHT = 800
 
-    class Dict(val id: String, val title: String, val words: Int, val file: File)
+    /** An imported dictionary; [source] is the pack it came from (a catalog id or a link), if any. */
+    class Dict(val id: String, val title: String, val words: Int, val file: File, val source: String?)
 
     fun list(ctx: Context): List<Dict> = RimeEngine.userDir(ctx).listFiles()
         ?.filter { it.name.startsWith(PREFIX) && it.name.endsWith(".dict.yaml") }
@@ -68,7 +69,7 @@ object ImportedDicts {
         ?.map { f ->
             val head = f.bufferedReader().use { r -> generateSequence { r.readLine() }.take(8).toList() }
             fun meta(k: String) = head.firstOrNull { it.startsWith("# $k: ") }?.substringAfter(": ")
-            Dict(f.name.removeSuffix(".dict.yaml"), meta("title") ?: f.name, meta("words")?.toIntOrNull() ?: 0, f)
+            Dict(f.name.removeSuffix(".dict.yaml"), meta("title") ?: f.name, meta("words")?.toIntOrNull() ?: 0, f, meta("source"))
         }.orEmpty()
 
     fun delete(d: Dict) { d.file.delete() }
@@ -79,19 +80,26 @@ object ImportedDicts {
      * Converts [bytes] (a .scel file, or text) into a dictionary named after [title]. Returns the
      * number of words; throws with a readable message when nothing usable is in it.
      */
-    fun import(ctx: Context, title: String, bytes: ByteArray): Int {
+    fun import(ctx: Context, title: String, bytes: ByteArray, source: String? = null): Int {
         val entries = if (Scel.isScel(bytes)) Scel.parse(bytes) else Text.parse(bytes.toString(Charsets.UTF_8))
         if (entries.isEmpty()) error("没有读到词条：支持搜狗细胞词库（.scel）和每行一个词的文本")
-        val id = PREFIX + System.currentTimeMillis().toString(36)
-        write(File(RimeEngine.userDir(ctx).apply { mkdirs() }, "$id.dict.yaml"), id, title, entries)
+        // installing a pack again replaces it
+        if (source != null) list(ctx).filter { it.source == source }.forEach { delete(it) }
+        val dir = RimeEngine.userDir(ctx).apply { mkdirs() }
+        // a fresh name, even for two imports in the same millisecond
+        var t = System.currentTimeMillis()
+        while (File(dir, "$PREFIX${t.toString(36)}.dict.yaml").exists()) t++
+        val id = PREFIX + t.toString(36)
+        write(File(dir, "$id.dict.yaml"), id, title, entries, source)
         return entries.size
     }
 
     /** Writes a Rime dictionary. Words without a spelling are spelled by Rime from its character table. */
-    fun write(f: File, id: String, title: String, entries: List<Entry>) {
+    fun write(f: File, id: String, title: String, entries: List<Entry>, source: String? = null) {
         val seen = HashSet<String>()
         f.bufferedWriter().use { w ->
             w.write("# title: ${title.replace('\n', ' ')}\n# words: ${entries.size}\n")
+            if (source != null) w.write("# source: ${source.replace('\n', ' ')}\n")
             w.write("# Imported by KK输入法.\n---\nname: $id\nversion: \"1\"\nsort: by_weight\n...\n\n")
             for (e in entries) {
                 if (!seen.add(e.text + "\t" + e.code)) continue
@@ -145,6 +153,9 @@ object ImportedDicts {
         private val MAGIC = byteArrayOf(0x40, 0x15, 0, 0)
 
         fun isScel(b: ByteArray) = b.size > 0x2628 && b.copyOfRange(0, 4).contentEquals(MAGIC)
+
+        /** The name the dictionary gives itself. */
+        fun title(b: ByteArray): String = String(b, 0x130, 0x338 - 0x130, Charsets.UTF_16LE).substringBefore('\u0000').trim()
 
         fun parse(b: ByteArray): List<Entry> {
             val buf = ByteBuffer.wrap(b).order(ByteOrder.LITTLE_ENDIAN)
@@ -223,4 +234,90 @@ object ImportedDicts {
             }
         }
     }
+}
+
+/**
+ * 词库拓展包: catalogs of dictionaries that install with one tap. One is built in (搜狗's
+ * officially recommended cell dictionaries, by subject); more can be subscribed to by link. A
+ * catalog is JSON:
+ *
+ *     {"name": "…", "note": "…", "packs": [
+ *       {"id": "unique-id", "group": "分类", "name": "名字", "words": 1234, "url": "https://…"}
+ *     ]}
+ *
+ * where url points at a .scel, a text list or a Rime .dict.yaml; an id "sogou:<n>" needs no url.
+ * Installed packs are imported dictionaries (see [ImportedDicts]) that remember their id.
+ */
+object DictPacks {
+    class Pack(val id: String, val group: String, val name: String, val words: Int, val url: String)
+    class Catalog(val name: String, val note: String, val packs: List<Pack>, val source: String)
+
+    private const val MAX_BYTES = 40 * 1024 * 1024
+
+    fun parse(json: String, source: String): Catalog {
+        val o = org.json.JSONObject(json)
+        val a = o.getJSONArray("packs")
+        val packs = (0 until a.length()).mapNotNull { i ->
+            val p = a.getJSONObject(i)
+            val id = p.optString("id").ifEmpty { return@mapNotNull null }
+            val url = p.optString("url").ifEmpty { sogouUrl(id) ?: return@mapNotNull null }
+            Pack(id, p.optString("group", "其他"), p.optString("name", id), p.optInt("words", 0), url)
+        }
+        return Catalog(o.optString("name", source), o.optString("note", ""), packs, source)
+    }
+
+    fun builtIn(ctx: Context): Catalog = parse(ctx.assets.open("data/dict_packs.json").bufferedReader().use { it.readText() }, "builtin")
+
+    private fun sogouUrl(id: String): String? = id.removePrefix("sogou:").takeIf { id.startsWith("sogou:") && it.all(Char::isDigit) }
+        ?.let { "https://pinyin.sogou.com/d/dict/download_cell.php?id=$it&name=kk" }
+
+    /**
+     * What a pasted link downloads: a 搜狗 dictionary page (…/dict/detail/index/15117) becomes its
+     * download; anything else on http(s) is taken as is.
+     */
+    fun resolve(link: String): String? {
+        val t = link.trim()
+        Regex("pinyin\\.sogou\\.com/dict/detail/index/(\\d+)").find(t)?.let { return sogouUrl("sogou:" + it.groupValues[1]) }
+        return t.takeIf { it.startsWith("https://") || it.startsWith("http://") }
+    }
+
+    /** Downloads [url] (at most 40 MB). Blocking. */
+    fun download(url: String): ByteArray {
+        var u = java.net.URL(url)
+        repeat(6) {
+            val c = u.openConnection() as java.net.HttpURLConnection
+            c.instanceFollowRedirects = false
+            c.connectTimeout = 15000; c.readTimeout = 30000
+            c.setRequestProperty("User-Agent", "KK-IME")
+            try {
+                val code = c.responseCode
+                if (code in 300..399) { u = java.net.URL(u, c.getHeaderField("Location")); return@repeat }
+                if (code !in 200..299) error("HTTP $code")
+                if (c.contentLengthLong > MAX_BYTES) error("文件太大")
+                return c.inputStream.use { input ->
+                    val out = java.io.ByteArrayOutputStream()
+                    val buf = ByteArray(64 * 1024)
+                    while (true) {
+                        val n = input.read(buf); if (n < 0) break
+                        out.write(buf, 0, n)
+                        if (out.size() > MAX_BYTES) error("文件太大")
+                    }
+                    out.toByteArray()
+                }
+            } finally { c.disconnect() }
+        }
+        error("跳转太多")
+    }
+
+    /** Downloads and imports [pack]; the number of words. Blocking. */
+    fun install(ctx: Context, pack: Pack): Int = ImportedDicts.import(ctx, pack.name, download(pack.url), source = pack.id)
+
+    /** Subscribed catalog links, kept in the settings. */
+    fun subscriptions(prefs: com.kk.shurufa.Prefs): List<String> =
+        prefs.dictFeeds.split('\n').map { it.trim() }.filter { it.isNotEmpty() }
+
+    fun setSubscriptions(prefs: com.kk.shurufa.Prefs, list: List<String>) = prefs.put(com.kk.shurufa.Prefs.DICT_FEEDS, list.distinct().joinToString("\n"))
+
+    /** Reads a subscribed catalog. Blocking. */
+    fun fetch(url: String): Catalog = parse(download(url).toString(Charsets.UTF_8), url)
 }

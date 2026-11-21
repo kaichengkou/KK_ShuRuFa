@@ -67,6 +67,16 @@ object RimeEngine {
         }
     }
 
+    private val soon = Runnable { pendingCtx?.let { redeploy(it) }; pendingCtx = null }
+    private var pendingCtx: Context? = null
+
+    /** Redeploys a moment after the last of several quick changes (packs installed one after another), once. */
+    fun redeploySoon(context: Context) {
+        pendingCtx = context.applicationContext
+        main.removeCallbacks(soon)
+        main.postDelayed(soon, 2500)
+    }
+
     fun redeploy(context: Context) {
         if (state == State.READY) exec.execute { runCatching { RimeBridge.shutdown() } }
         state = State.IDLE

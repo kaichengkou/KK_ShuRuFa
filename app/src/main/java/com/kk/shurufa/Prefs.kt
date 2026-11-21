@@ -86,6 +86,7 @@ class Prefs(context: Context) {
     val grammar get() = b(GRAMMAR, true)
     /** 落点自适应: learn where taps land on each letter key. */
     val touchAdapt get() = b(TOUCH_ADAPT, true)
+    val dictFeeds get() = s(DICT_FEEDS, "")
 
     // Clipboard
     val clipKeep get() = i(CLIP_KEEP, 40)
@@ -235,6 +236,8 @@ class Prefs(context: Context) {
         const val PACK_POETRY = "pack_poetry"
         const val GRAMMAR = "zh_grammar"
         const val TOUCH_ADAPT = "touch_adapt"
+        /** 词库拓展包 catalogs subscribed to, one link a line. */
+        const val DICT_FEEDS = "dict_feeds"
         const val CLIP_KEEP = "clip_keep"
         const val CLIP_SUGGEST = "clip_suggest"
         const val CLIP_MAX_CHARS = "clip_max_chars"

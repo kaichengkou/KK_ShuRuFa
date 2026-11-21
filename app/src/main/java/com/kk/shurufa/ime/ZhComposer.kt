@@ -90,8 +90,15 @@ class ZhComposer(context: Context, private val prefs: Prefs) {
         }
     }
 
-    /** The proofreading mark of a correction: one key swapped (p→o) or two keys in the wrong order (no⇄on). */
+    /**
+     * The proofreading mark of a correction: one key swapped (p→o), two keys in the wrong order
+     * (no⇄on), a letter that did not register (漏i), or one too many (多h).
+     */
     private fun typoNote(typed: String, want: String): String {
+        if (typed.length != want.length) {
+            val i = want.indices.firstOrNull { typed.getOrNull(it) != want[it] } ?: minOf(typed.length, want.length)
+            return if (typed.length < want.length) "漏${want[i]}" else "多${typed[i]}"
+        }
         val i = typed.indices.firstOrNull { typed[it] != want.getOrNull(it) } ?: return ""
         return if (i + 1 < typed.length && typed[i] == want[i + 1] && typed[i + 1] == want[i]) "${typed[i]}${typed[i + 1]}⇄${want[i]}${want[i + 1]}"
         else "${typed[i]}→${want[i]}"
