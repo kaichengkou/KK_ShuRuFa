@@ -93,7 +93,8 @@ with open("rime-data/packs/kk_poetry.dict.yaml", "w", encoding="utf-8") as f:
         if py.count(" ") + 1 == len(c):
             f.write(f"{c}\t{py}\t{w}\n")
 os.makedirs("app/src/main/assets/data", exist_ok=True)
+# sorted by the UTF-8 bytes of the line, so the keyboard can search the file in place
 with open("app/src/main/assets/data/poetry_next.txt", "w", encoding="utf-8") as f:
-    for c, n in nexts.items():
-        f.write(f"{c}\t{n}\n")
+    for c in sorted(nexts, key=lambda k: k.encode("utf-8")):
+        f.write(f"{c}\t{nexts[c]}\n")
 print(len(entries), "lines,", len(nexts), "next-line pairs")
