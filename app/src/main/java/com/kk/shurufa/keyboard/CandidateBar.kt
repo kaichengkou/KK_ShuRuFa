@@ -348,10 +348,12 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
             }
         }
         toneRect.setEmpty()
-        if (composing && toneMarks && preedit.isNotEmpty()) {
-            // ā á ǎ à at the right end of the pinyin line; the one in use sits on an accent pill
-            val cellW = dp(30f)
-            val right = width - endW - dp(6f)
+        val cellW = dp(30f)
+        val toneRight = width - endW - dp(6f)
+        // ā á ǎ à at the right end of the pinyin line, while the pinyin leaves room for them
+        if (composing && toneMarks && preedit.isNotEmpty() && (preeditRect.right < toneRight - 4 * cellW || toneFilter != 0)) {
+            // the one in use sits on an accent pill
+            val right = toneRight
             val left = right - 4 * cellW
             toneRect.set(left, 0f, right, dp(19f))
             tp.textAlign = Paint.Align.CENTER; tp.textSize = sp(Ui.SMALL + 1f); tp.typeface = Ui.medium
