@@ -126,6 +126,28 @@ class ImeServiceTest {
         assertTrue(File("build/screens/${tag}_letters.png").isFile)
     }
 
+    /**
+     * With animations on, panels cross-fade: the leaving one moves to the content's overlay while
+     * it fades. Switching back and forth faster than the fade must never leave a panel behind or
+     * try to add one that is still fading.
+     */
+    @Test fun quickSwitchesWithAnimations() {
+        val (ime, view) = start("light")
+        Prefs(ctx).put(Prefs.ANIMATIONS, true)
+        val content = ((view as ViewGroup).getChildAt(0) as ViewGroup).getChildAt(2) as ViewGroup
+        for (tool in listOf("emoji", "clipboard", "emoji", "quick", "quick", "cursor", "mic", "mic", "ai", "emoji")) {
+            ime.onTool(tool)
+            shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(40))
+            assertEquals(1, content.childCount)
+        }
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(800))
+        val ghost = KkImeService::class.java.getDeclaredField("ghost").apply { isAccessible = true }.get(ime)
+        assertNull("the faded panel is gone once its fade ends", ghost)
+        assertEquals(Panel.EMOJI, ime.panel)
+        assertEquals(1f, content.getChildAt(0).alpha)
+        ime.onDestroy()
+    }
+
     @Test fun lightTour() = tour("light")
 
     @Test fun darkTour() = tour("dark")

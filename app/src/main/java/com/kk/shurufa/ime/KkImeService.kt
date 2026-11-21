@@ -230,6 +230,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     override fun onCreateInputView(): View {
         // a rebuilt view starts without a query: the strip it typed into is replaced
         if (sink != null) dropSink()
+        ghost = null
         kbTheme = KbTheme.resolve(this, prefs)
         loadData()
         // The input window keeps one tall, mostly transparent size. Panels then change height inside
@@ -474,6 +475,10 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         panel = p
         if (p != Panel.LETTERS && p != Panel.CANDIDATES) pinyinEdit = false
         val oldTotal = (if (bar.visibility == View.VISIBLE) bar.height else 0) + content.height
+        // the panel that leaves fades out where it is while the new one fades in over it
+        val leaving = content.getChildAt(0)
+        clearGhost()
+        if (from != p && leaving != null) fadeOut(leaving)
         content.removeAllViews()
         heightAnim?.cancel()
         reportH = -1
@@ -538,7 +543,12 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         heightAnim = ValueAnimator.ofInt(start, target).apply {
             duration = Motion.dur(prefs, Motion.PANEL)
             interpolator = Motion.ENTER
-            addUpdateListener { content.layoutParams = content.layoutParams.apply { height = it.animatedValue as Int }; content.requestLayout() }
+            addUpdateListener {
+                val h = it.animatedValue as Int
+                content.layoutParams = content.layoutParams.apply { height = h }; content.requestLayout()
+                // the leaving panel stays on the keyboard's bottom edge while the top edge moves
+                ghost?.translationY = (h - ghostBase).toFloat()
+            }
             addListener(object : AnimatorListenerAdapter() {
                 override fun onAnimationEnd(a: Animator) {
                     reportH = -1
@@ -547,6 +557,31 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
             })
             start()
         }
+    }
+
+    /** The panel fading out, drawn on the content's overlay: it is seen, but takes no touches. */
+    private var ghost: View? = null
+    /** The content's height when [ghost] left it. */
+    private var ghostBase = 0
+
+    private fun fadeOut(v: View) {
+        if (!Motion.on(prefs) || !v.isLaidOut || v.alpha < 0.5f) return
+        // whatever it was still doing (rising in) stops; from here the height animation moves it
+        v.animate().cancel()
+        v.translationY = 0f
+        ghostBase = content.height
+        content.overlay.add(v)
+        ghost = v
+        v.animate().alpha(0f).setDuration(Motion.dur(prefs, 150)).setInterpolator(Motion.EXIT).withLayer()
+            .withEndAction { if (ghost === v) clearGhost() }.start()
+    }
+
+    private fun clearGhost() {
+        val g = ghost ?: return
+        ghost = null
+        g.animate().cancel()
+        content.overlay.remove(g)
+        g.alpha = 1f; g.translationY = 0f
     }
 
     /** A panel arrives: it rises a little into place as it fades in. */
