@@ -77,7 +77,7 @@ class VoicePanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
     private val chipRect = RectF()
 
     /** The voice level, 0..1, about thirty times a second while listening. */
-    fun setLevel(v: Float) { level.animateTo(v, if (prefs.animations) 90 else 0); invalidate() }
+    fun setLevel(v: Float) { level.animateTo(v, if (Motion.on(prefs)) 90 else 0); invalidate() }
 
     private val handler = Handler(Looper.getMainLooper())
     private var repeats = 0

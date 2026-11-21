@@ -524,7 +524,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
 
     /** Eases the keyboard's height from what it was to what the new panel needs. */
     private fun animateHeight(oldTotal: Int, newBar: Int) {
-        if (!prefs.animations || oldTotal <= 0) return
+        if (!Motion.on(prefs) || oldTotal <= 0) return
         content.measure(View.MeasureSpec.makeMeasureSpec(root.width.coerceAtLeast(1), View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
         val target = content.measuredHeight
         val start = oldTotal - newBar
@@ -547,7 +547,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
 
     /** A panel arrives: it rises a little into place as it fades in. */
     private fun animateIn(v: View?) {
-        if (v == null || !prefs.animations) return
+        if (v == null || !Motion.on(prefs)) return
         v.alpha = 0f; v.translationY = dp(14f)
         v.animate().alpha(1f).translationY(0f).setDuration(Motion.dur(prefs, Motion.PANEL))
             .setInterpolator(Motion.ENTER).withLayer().start()

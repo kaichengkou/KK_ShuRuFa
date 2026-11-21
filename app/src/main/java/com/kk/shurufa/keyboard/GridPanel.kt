@@ -45,7 +45,7 @@ class GridPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
             if (field == v) return
             val from = field
             field = v
-            if (from < 0 || v < 0 || !prefs.animations) selPos.snap(v.toFloat()) else { selPos.enabled = true; selPos.animateTo(v.toFloat()) }
+            if (from < 0 || v < 0 || !Motion.on(prefs)) selPos.snap(v.toFloat()) else { selPos.enabled = true; selPos.animateTo(v.toFloat()) }
             invalidate()
         }
     var marks: Set<Int> = emptySet()
@@ -108,7 +108,7 @@ class GridPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
         if (resetScroll) { scrollPos = 0f; scroller.forceFinished(true) }
         layoutCells()
         scrollPos = scrollPos.coerceIn(0f, maxScroll)
-        if (prefs.animations && resetScroll) { appear.set(0f); appear.animateTo(1f, dur(Motion.SWAP + 30), Motion.ENTER) }
+        if (Motion.on(prefs) && resetScroll) { appear.set(0f); appear.animateTo(1f, dur(Motion.SWAP + 30), Motion.ENTER) }
         invalidate()
     }
 

@@ -46,7 +46,7 @@ class MathPanel(context: Context, private val prefs: Prefs, newKeyboard: () -> K
         tabs.setTabs(m.tabs.map { it.id to it.name }, tab.id)
         if (shownPad !== m) { pad.setRows(m.pad, math = true); shownPad = m }
         func.setRows(tab.rows, math = true)
-        if (slide != 0 && prefs.animations) {
+        if (slide != 0 && Motion.on(prefs)) {
             func.animate().cancel()
             func.translationX = slide * dp(28f); func.alpha = 0f
             func.animate().translationX(0f).alpha(1f).setDuration(Motion.dur(prefs, 220))

@@ -66,7 +66,7 @@ class TranslateFeature(private val host: Host, private val service: TranslateSer
         fromSelection = selection != null
         result = ""; resultFor = ""
         strip.visibility = View.VISIBLE
-        if (prefs.animations) {
+        if (Motion.on(prefs)) {
             strip.alpha = 0f; strip.translationY = strip.resources.displayMetrics.density * 24
             strip.animate().alpha(1f).translationY(0f).setDuration(Motion.dur(prefs, Motion.PANEL))
                 .setInterpolator(Motion.ENTER).withLayer().start()

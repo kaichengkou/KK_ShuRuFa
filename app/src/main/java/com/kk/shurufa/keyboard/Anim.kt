@@ -1,5 +1,6 @@
 package com.kk.shurufa.keyboard
 
+import android.animation.ValueAnimator
 import android.view.animation.AnimationUtils
 import android.view.animation.Interpolator
 import android.view.animation.LinearInterpolator
@@ -39,8 +40,14 @@ object Motion {
     /** One panel replacing another, and the keyboard changing height with it. */
     const val PANEL = 280L
 
-    /** [ms] scaled by the user's speed, or 0 when animations are off. */
-    fun dur(prefs: Prefs, ms: Long): Long = if (prefs.animations) (ms * prefs.animSpeed).toLong() else 0L
+    /**
+     * Whether anything should move: the keyboard's 动画 switch, and the system's own (移除动画 in
+     * the accessibility settings, or animator scale 0 in the developer options).
+     */
+    fun on(prefs: Prefs): Boolean = prefs.animations && ValueAnimator.areAnimatorsEnabled()
+
+    /** [ms] scaled by the user's speed and the system's animator scale, or 0 when nothing should move. */
+    fun dur(prefs: Prefs, ms: Long): Long = if (on(prefs)) (ms * prefs.animSpeed * ValueAnimator.getDurationScale()).toLong() else 0L
 
     /** The time every animation of one frame agrees on. */
     fun now(): Long = AnimationUtils.currentAnimationTimeMillis()

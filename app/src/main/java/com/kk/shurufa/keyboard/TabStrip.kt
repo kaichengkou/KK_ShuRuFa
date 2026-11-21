@@ -28,7 +28,7 @@ class TabStrip(context: Context, prefs: Prefs) : KbView(context, prefs) {
         val first = tabs.isEmpty() || list != tabs
         tabs = list
         val i = list.indexOfFirst { it.first == selected }.coerceAtLeast(0)
-        pill.enabled = prefs.animations
+        pill.enabled = Motion.on(prefs)
         if (first || current.isEmpty()) pill.snap(i.toFloat()) else if (selected != current) pill.animateTo(i.toFloat())
         current = selected
         invalidate()

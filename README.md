@@ -23,6 +23,10 @@
 - **设置**：分类页面；7 种主体色（含系统取色）；9 类事件的振动各自选效果、强度、时长；键位编辑可改任意键的滑动字符和长按选项。
 - **布局都是 YAML**：设置里可以导出、修改、重新加载。
 
+## 测试
+
+`./gradlew testDebugUnitTest` 跑全部单元测试，并把键盘、各面板（浅色和深色）和设置页渲染到 `app/build/screens/`。`ImeServiceTest` 会真实创建输入法服务，逐个打开每个面板和查询模式。
+
 ## 安装
 
 GitHub Actions 每次提交都会编译 APK（Actions 页面里的 `kk-shurufa-debug`）。装好后打开 KK输入法，按页面上的两步启用并切换。第一次打中文前会部署词库，约一分钟，候选栏会显示进度。
@@ -41,8 +45,8 @@ cd KK_ShuRuFa
 
 | 路径 | 内容 |
 | --- | --- |
-| `app/src/main/java/com/kk/shurufa/ime` | 输入法服务：按键处理、Rime 交互、各面板、计算器 |
-| `app/src/main/java/com/kk/shurufa/keyboard` | 自绘键盘、手势、弹出层、候选栏、布局加载 |
+| `app/src/main/java/com/kk/shurufa/ime` | 输入法服务（窗口、面板调度、候选栏、按键路由）；写入输入框统一走 `Editor`；表情、剪贴板、翻译、AI、语音各是一个模块（`*Feature`），通过 `Host` 和服务交互 |
+| `app/src/main/java/com/kk/shurufa/keyboard` | 自绘键盘、手势、弹出层、候选栏、各面板、布局加载；设计系统在 `Ui`（字号、尺寸）、`Theme`（颜色）、`Anim`（动效曲线、时长、弹簧）、`KbView`（所有自绘视图的基类和统一胶囊组件） |
 | `app/src/main/java/com/kk/shurufa/settings` | 设置界面 |
 | `app/src/main/assets/layouts` | 所有键盘布局（YAML） |
 | `app/src/main/jni` | librime 及依赖的编译脚本、JNI 桥 |

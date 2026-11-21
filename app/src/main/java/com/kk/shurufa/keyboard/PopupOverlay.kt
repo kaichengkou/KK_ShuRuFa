@@ -62,7 +62,7 @@ class PopupOverlay(context: Context, prefs: Prefs) : KbView(context, prefs) {
         pvLabel = label
         pvDir = dir
         pvAlpha.animateTo(1f, dur(70), Motion.ENTER)
-        pvScale.enabled = prefs.animations
+        pvScale.enabled = Motion.on(prefs)
         pvScale.animateTo(1f)
         invalidate()
     }
@@ -159,7 +159,7 @@ class PopupOverlay(context: Context, prefs: Prefs) : KbView(context, prefs) {
         lastX = fingerX; lastY = startY
         moved = false
         cells[0][0].let { selX.snap(it.left); selY.snap(it.top); selW.snap(it.width()) }
-        for (s in arrayOf(selX, selY, selW)) s.enabled = prefs.animations
+        for (s in arrayOf(selX, selY, selW)) s.enabled = Motion.on(prefs)
         opShow.set(0f)
         opShow.animateTo(1f, dur(Motion.POP_IN), Motion.ENTER)
         invalidate()

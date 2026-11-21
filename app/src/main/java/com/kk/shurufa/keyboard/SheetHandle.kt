@@ -118,7 +118,7 @@ class SheetHandle(context: Context, prefs: Prefs) : KbView(context, prefs) {
         val target = (if (tall) high else low).toFloat()
         ticker.cancel()
         spring.snap(current.toFloat())
-        spring.enabled = prefs.animations
+        spring.enabled = Motion.on(prefs)
         spring.animateTo(target, velocity.coerceIn(-dp(4000f), dp(4000f)))
         if (spring.running) ticker.start() else { current = target.toInt(); onHeight?.invoke(current); onRest?.invoke() }
         onFeedback?.invoke("gesture")

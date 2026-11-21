@@ -59,7 +59,7 @@ class ClipStrip(context: Context, prefs: Prefs) : KbView(context, prefs) {
         measureCards()
         if (!keepPosition) { scrollPos = 0f; scroller.forceFinished(true) }
         scrollPos = scrollPos.coerceIn(0f, maxScroll)
-        if (prefs.animations && !keepPosition) { appear.set(0f); appear.animateTo(1f, dur(Motion.SWAP + 60), Motion.ENTER) }
+        if (Motion.on(prefs) && !keepPosition) { appear.set(0f); appear.animateTo(1f, dur(Motion.SWAP + 60), Motion.ENTER) }
         invalidate()
     }
 
@@ -292,7 +292,7 @@ class ClipStrip(context: Context, prefs: Prefs) : KbView(context, prefs) {
                         val dist = abs(target - scrollPos)
                         // with a decelerating curve the starting speed is 2·distance/time: match the finger
                         val v = abs(vt?.xVelocity ?: 0f)
-                        val ms = (if (v > 50f) 2000f * dist / v else 220f).coerceIn(160f, 650f) * (if (prefs.animations) prefs.animSpeed else 0f)
+                        val ms = (if (v > 50f) 2000f * dist / v else 220f).coerceIn(160f, 650f) * (if (Motion.on(prefs)) prefs.animSpeed else 0f)
                         scroller.startScroll(scrollPos.toInt(), 0, (target - scrollPos).toInt(), 0, ms.toInt())
                         postInvalidateOnAnimation()
                     }

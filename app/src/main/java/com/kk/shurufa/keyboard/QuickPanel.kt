@@ -49,7 +49,7 @@ class QuickPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
     private val pages get() = ((tiles.size + perPage - 1) / perPage).coerceAtLeast(1)
 
     fun animateIn() {
-        if (prefs.animations) { appear.set(0f); appear.animateTo(1f, dur(Motion.PANEL), Motion.ENTER) }
+        if (Motion.on(prefs)) { appear.set(0f); appear.animateTo(1f, dur(Motion.PANEL), Motion.ENTER) }
         invalidate()
     }
 
@@ -166,7 +166,7 @@ class QuickPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
                     if (abs(v) > dp(400f)) to = if (v < 0) floor(cur).toInt() + 1 else floor(cur).toInt()
                     to = to.coerceIn(0, pages - 1)
                     page.snap(cur); dragOffset = 0f
-                    page.enabled = prefs.animations
+                    page.enabled = Motion.on(prefs)
                     page.animateTo(to.toFloat(), -v / width)
                 } else {
                     val i = hits.at(e.x, e.y)?.toInt() ?: -1

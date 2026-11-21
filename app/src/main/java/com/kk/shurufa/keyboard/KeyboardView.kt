@@ -91,7 +91,7 @@ class KeyboardView(context: Context, prefs: Prefs) : KbView(context, prefs) {
         mathMode = math
         pressAnim.clear()
         requestLayout()
-        if (changed && isAttachedToWindow && prefs.animations) {
+        if (changed && isAttachedToWindow && Motion.on(prefs)) {
             // a new set of keys: the labels arrive, the key shapes stay where they are
             labelsAlpha.set(0.35f)
             labelsAlpha.animateTo(1f, dur(Motion.SWAP), Motion.ENTER)
@@ -602,7 +602,7 @@ class KeyboardView(context: Context, prefs: Prefs) : KbView(context, prefs) {
         bsArmed = null
         if (mode == Mode.POPUP) overlay?.hideOptions()
         // the label springs home from wherever the finger left it
-        spaceOffset.enabled = prefs.animations
+        spaceOffset.enabled = Motion.on(prefs)
         if (spaceOffset.value != 0f) spaceOffset.animateTo(0f)
         if (cursorMode) {
             cursorMode = false

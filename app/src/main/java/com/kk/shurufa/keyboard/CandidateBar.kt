@@ -55,7 +55,7 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
             val from = field?.let { tools.indexOf(it) } ?: -1
             val to = v?.let { tools.indexOf(it) } ?: -1
             field = v
-            indicator.enabled = prefs.animations
+            indicator.enabled = Motion.on(prefs)
             when {
                 to < 0 -> indicatorAlpha.animateTo(0f, dur(Motion.POP_OUT), Motion.EXIT)
                 from < 0 || indicatorAlpha.value < 0.05f -> { indicator.snap(to.toFloat()); indicatorAlpha.animateTo(1f, dur(Motion.POP_IN), Motion.ENTER) }
