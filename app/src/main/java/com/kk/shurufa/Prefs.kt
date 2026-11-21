@@ -102,6 +102,8 @@ class Prefs(context: Context) {
     val aiCandidate get() = b(AI_CANDIDATE, false)
     /** 云联想: the AI service suggests how the text goes on (sends the last 80 characters). */
     val cloudPredict get() = b(CLOUD_PREDICT, false)
+    /** The service and model for 云联想 and AI 候选 ("id|model"); empty: the one for 改写. */
+    val quickTarget get() = s(QUICK_TARGET, "")
     val pinyinMode get() = b(PINYIN_MODE, false)
     val backspaceReselect get() = b(BACKSPACE_RESELECT, true)
     val typoMark get() = b(TYPO_MARK, true)
@@ -268,6 +270,7 @@ class Prefs(context: Context) {
         const val PANGU = "pangu"
         const val AI_CANDIDATE = "ai_candidate"
         const val CLOUD_PREDICT = "cloud_predict"
+        const val QUICK_TARGET = "quick_target"
         const val PINYIN_MODE = "pinyin_mode"
         const val BACKSPACE_RESELECT = "backspace_reselect"
         const val TYPO_MARK = "typo_mark"

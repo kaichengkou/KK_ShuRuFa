@@ -1498,7 +1498,15 @@ private fun OnlinePage(prefs: Prefs) {
         Note("工具栏的 ✦：润色、纠错、正式、口语、精简、扩写，翻译成英文 / 俄语 / 中文，以及“输入指令”——直接用键盘打出想怎么改，回车执行。面板右上角可以临时换模型。")
     }
     Group("云联想") {
-        Toggle(prefs, Prefs.CLOUD_PREDICT, "打字停顿时请 AI 续写", "上屏一个词、打完一个空格或选了联想后稍停，把光标前最多 80 个字发给上面选的 AI 服务，它给出的 3 个接下来的说法排在联想栏最前，标着「云」。中文、俄语、英语都行。会把你写的内容发出去；临时模式、密码、地址和无痕输入框里不发。用 Gemini 3.5 Flash Lite 约半秒", false)
+        Toggle(prefs, Prefs.CLOUD_PREDICT, "打字停顿时请 AI 续写", "上屏一个词、打完一个空格或选了联想后稍停，把光标前最多 80 个字发给下面选的服务，它给出的 3 个接下来的说法排在联想栏最前，标着「云」。中文、俄语、英语都行。会把你写的内容发出去；临时模式、密码、地址和无痕输入框里不发", false)
+        if (targets.isNotEmpty()) {
+            var pickQuick by remember { mutableStateOf(false) }
+            val q = prefs.quickTarget.takeIf { it.isNotEmpty() }?.let { com.kk.shurufa.online.Llm.resolve(prefs, it) }
+            PickRow("云联想和 AI 候选用", q?.let { com.kk.shurufa.online.Llm.targetLabel(prefs, it) } ?: "跟 AI 改写相同") { pickQuick = true }
+            if (pickQuick) PickerDialog("云联想和 AI 候选用", listOf("" to "跟 AI 改写相同") + targets, prefs.quickTarget,
+                onPick = { prefs.put(Prefs.QUICK_TARGET, it); tick++ }, onClose = { pickQuick = false })
+        }
+        Note("今天已请求 ${com.kk.shurufa.online.AiBudget.today(prefs)} 次。键盘自己每分钟最多问 ${com.kk.shurufa.online.AiBudget.PER_MINUTE} 次、不重试；服务说太频繁就先停一会儿，连着几次就停 30 分钟。Gemini 免费版实测每分钟 15 次（每个模型分开算），每天的上限在 AI Studio 的 rate-limit 页面能看到。国内网络连不上 Gemini 时可以选智谱 GLM-4-Flash（免费）或硅基流动的免费小模型。")
     }
     Group("AI 候选") {
         Toggle(prefs, Prefs.AI_CANDIDATE, "打长拼音时请 AI 给一个候选", "打了三个音节以上、停顿一下时，把这段拼音和光标前最多 20 个字发给上面选的 AI 服务，它给出的整句排在候选栏第二个，标着 AI。会把你正在打的内容发出去；密码、地址和无痕输入框里不会发。建议用快的模型，比如 Gemini 3.5 Flash Lite（约半秒）", false)

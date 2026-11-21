@@ -42,12 +42,18 @@ class CloudPredict(private val prefs: Prefs, private val onReady: () -> Unit) {
         if (!prefs.cloudPredict || !allowed || key.isBlank() || key.trim().length < 2) { token++; asking = ""; return }
         if (key == forText || key == asking) return
         cache[key]?.let { forText = key; answer = it; return }
-        val target = Llm.resolve(prefs, prefs.aiProvider) ?: return
+        val target = Llm.resolve(prefs, prefs.quickTarget.ifEmpty { prefs.aiProvider }) ?: return
+        // within the keyboard's own budget, and not while the service asked to wait
+        if (!com.kk.shurufa.online.AiBudget.mayAsk()) return
         val t = ++token
         main.postDelayed({
             asking = key
             Thread {
-                val raw = runCatching { Llm.completeTarget(prefs, target, SYSTEM, key, cancelled = { t != token }) }.getOrNull().orEmpty()
+                com.kk.shurufa.online.AiBudget.asked(prefs)
+                val r = runCatching { Llm.completeQuick(prefs, target, SYSTEM, key, cancelled = { t != token }) }
+                val e = r.exceptionOrNull()
+                if (e is Llm.HttpError && e.code == 429) com.kk.shurufa.online.AiBudget.limited() else if (r.isSuccess) com.kk.shurufa.online.AiBudget.ok()
+                val raw = r.getOrNull().orEmpty()
                 val list = parse(raw, key)
                 results.post {
                     if (t != token) return@post

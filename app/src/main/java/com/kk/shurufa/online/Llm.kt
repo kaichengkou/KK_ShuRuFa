@@ -121,6 +121,26 @@ object Llm {
         if (t != null && (t in all || (!t.contains('|') && configured(prefs, t)))) return if (t.contains('|')) t else "$t|${model(prefs, t)}"
         return all.firstOrNull()
     }
+    /**
+     * One quick request for the keyboard itself while typing (云联想, AI 候选): no retries and no
+     * other model, so a free quota is not spent twice; a busy or spent service throws [HttpError]
+     * 429 for the caller to wait. Blocking.
+     */
+    fun completeQuick(prefs: Prefs, target: String, system: String, user: String, cancelled: () -> Boolean = { false }): String {
+        val id = targetId(target); val m = targetModel(prefs, target)
+        if (!configured(prefs, id)) error("还没有设置 ${provider(id).title} 的 API Key")
+        return when (protocol(prefs, id)) {
+            "claude" -> try {
+                claude(key(prefs, id), m, system, user, {}, cancelled, if (id == "claude") null else base(prefs, id))
+            } catch (e: IllegalStateException) {
+                // the SDK's rate limit comes back as a message; it means the same as a 429
+                if (e.message?.contains("频繁") == true) throw HttpError(429, e.message.orEmpty()) else throw e
+            }
+            "gemini" -> gemini(base(prefs, id), key(prefs, id), m, system, user, {}, cancelled)
+            else -> openAi(base(prefs, id), key(prefs, id), m, system, user, {}, cancelled)
+        }.trim()
+    }
+
     fun completeTarget(prefs: Prefs, target: String, system: String, user: String, onText: (String) -> Unit = {}, cancelled: () -> Boolean = { false }): String =
         complete(prefs, targetId(target), system, user, onText, cancelled, targetModel(prefs, target))
 

@@ -714,6 +714,10 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
                 // 云联想: the AI's continuations of this text, when they came, go first, marked 云
                 val before = editor.textBefore(CloudPredict.CONTEXT)
                 if (predictionLabel.isEmpty()) cloud.update(before, allowed = learnHere && sink == null)
+                if (com.kk.shurufa.online.AiBudget.justPaused) {
+                    com.kk.shurufa.online.AiBudget.justPaused = false
+                    notice("AI 服务说请求太多（免费额度可能用完了），云联想先歇 30 分钟")
+                }
                 cloudShown = if (predictionLabel.isEmpty()) cloud.answerFor(before) else emptyList()
                 if (cloudShown.isEmpty()) bar.showPredictions(predictions, predictionLabel)
                 else bar.showPredictions(cloudShown + predictions.filter { it !in cloudShown }, predictionLabel, cloudShown.map { "云" })
