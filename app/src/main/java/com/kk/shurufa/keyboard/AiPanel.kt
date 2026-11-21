@@ -25,22 +25,28 @@ import kotlin.math.max
 import kotlin.math.sin
 
 /**
- * AI 改写. What will be sent and the model it goes to on top; the actions in one row that slides
- * sideways (改写 · 翻译), with 输入指令 always at its end. Once an answer comes the actions fold
- * away and the answer gets the panel: it fills in while it streams (following its last line), the
- * changed characters are marked for 润色 and 纠错, a long one scrolls, and 重试 · 复制 · 插入 ·
- * 替换 sit on its title line; ✕ brings the actions back.
+ * AI 改写. On top, a switch between the kinds of action (改写 · 翻译) and the model they go to;
+ * below, every action of the kind picked, wrapped onto as many lines as they need and ending with
+ * 输入指令, so nothing has to be slid into view. Once an answer comes the actions fold away and the
+ * answer gets the panel: it fills in while it streams (following its last line), the changed
+ * characters are marked for 润色 and 纠错, a long one scrolls, and 重试 · 复制 · 插入 · 替换 sit
+ * on its title line; ✕ brings the actions back.
  */
 @SuppressLint("ViewConstructor")
 class AiPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
     class Act(val id: String, val title: String, val group: String)
 
     var actions: List<Act> = emptyList()
-        set(v) { field = v; invalidate() }
+        set(v) { field = v; if (group !in groups) group = groups.firstOrNull().orEmpty(); invalidate() }
+    /** The kinds of action, in the order they first appear. */
+    private val groups get() = actions.map { it.group }.distinct()
+    /** The kind of action shown. */
+    private var group = ""
     var onAction: ((String) -> Unit)? = null
     var onButton: ((String) -> Unit)? = null     // "replace" "insert" "copy" "retry" "setup" "custom" "target:<id>"
     var onFeedback: (() -> Unit)? = null
 
+    /** What will be sent (the selection, or the whole field) and which of the two it is. */
     var source = ""
     var sourceLabel = ""
     var provider = ""
@@ -88,16 +94,12 @@ class AiPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
     private var pressed: String? = null
     private val pulse = Tween(0f)
     private val r = RectF()
-    /** The action row: where it is on screen, how far it is slid, how wide its content is. */
-    private val row = RectF()
-    private var rowScroll = 0f
-    private var rowContentW = 0f
-    private val scroller = OverScroller(context)
-    private var fadeL: LinearGradient? = null
-    private var fadeR: LinearGradient? = null
+    /** The switch's highlight glides between the kinds. */
+    private val tabPos = Spring(0f, stiffness = 900f, dampingRatio = 0.9f)
+    private val tabBox = RectF()
 
-    override fun onThemeChanged() { resLayout = null; fadeL = null; fadeR = null; resFadeTop = null; resFadeBottom = null }
-    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) { resLayout = null; fadeL = null; fadeR = null; resFadeTop = null; resFadeBottom = null }
+    override fun onThemeChanged() { resLayout = null; resFadeTop = null; resFadeBottom = null }
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) { resLayout = null; resFadeTop = null; resFadeBottom = null }
 
     private val pad get() = dp(Ui.EDGE + 2f)
 
@@ -106,29 +108,17 @@ class AiPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
         c.drawColor(t.background)
         hits.clear()
         var again = false
-        if (scroller.computeScrollOffset()) { rowScroll = scroller.currX.toFloat(); again = true }
         val ch = dp(Ui.CHIP_H)
         var y = dp(10f)
-        // header: what is sent (全文 / 选中), and the model chip
-        val headH = dp(28f)
-        val pw = chipWidth(provider, chevron = true, textSp = Ui.SMALL)
         if (!needsSetup) {
-            r.set(width - pad - pw, y, width - pad, y + headH)
+            // header: 改写 · 翻译 on the left, the model chip on the right
+            val pw = chipWidth(provider, chevron = true, textSp = Ui.SMALL)
+            r.set(width - pad - pw, y, width - pad, y + ch)
             drawChip(c, r, provider, if (picking) ChipStyle.ACTIVE else ChipStyle.SOFT, pressed = pressed == "provider", chevron = true, textSp = Ui.SMALL)
             hits.add("provider", r, slop = dp(6f))
+            again = drawTabs(c, y, ch, r.left - dp(10f)) || again
+            y += ch + dp(10f)
         }
-        val headCy = y + headH / 2
-        tp.textAlign = Paint.Align.LEFT; tp.textSize = sp(Ui.SMALL); tp.typeface = Ui.medium; tp.color = t.accent
-        drawText(c, sourceLabel, pad, headCy, tp)
-        val lx = pad + tp.measureText(sourceLabel) + dp(8f)
-        // an empty field is said quietly, in the hint color, not as if it were the text
-        val blank = source.isBlank()
-        tp.typeface = Ui.regular; tp.color = if (blank) t.hint else t.inkSoft
-        val avail = (if (needsSetup) width - pad else width - pad - pw - dp(10f)) - lx
-        ellipsizer.set(tp)
-        val shown = if (blank) "输入框是空的" else source.replace('\n', ' ')
-        drawText(c, TextUtils.ellipsize(shown, ellipsizer, avail.coerceAtLeast(0f), TextUtils.TruncateAt.END), lx, headCy, tp)
-        y += headH + dp(10f)
         if (needsSetup) { drawSetup(c, y); return }
         if (picking) {
             // 选择模型: every enabled service and model, in a list that scrolls
@@ -140,72 +130,88 @@ class AiPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
         val folded = result.isNotEmpty() || running != null
         if (!folded) {
             again = drawActions(c, y, ch) || again
-            y += ch + dp(10f)
+            y += actionsHeight(ch) + dp(10f)
         }
         again = drawResult(c, y) || again
         if (again) postInvalidateOnAnimation()
     }
 
-    /** One row of actions that slides sideways; 输入指令 stays at its right end. True while animating. */
+    /** The 改写 · 翻译 switch; true while its highlight moves. */
+    private fun drawTabs(c: Canvas, y: Float, h: Float, maxRight: Float): Boolean {
+        val t = theme
+        val names = groups
+        if (names.size < 2) return false
+        val segW = dp(64f)
+        val box = tabBox.apply { set(pad, y, minOf(pad + segW * names.size, maxRight), y + h) }
+        val w = box.width() / names.size
+        val cur = names.indexOf(group).coerceAtLeast(0)
+        if (tabPos.target != cur.toFloat()) tabPos.animateTo(cur.toFloat())
+        if (!Motion.on(prefs)) tabPos.snap(cur.toFloat())
+        val moving = tabPos.running
+        if (moving) tabPos.step()
+        val p = tabPos.value
+        bg.color = t.soft
+        c.drawRoundRect(box, h / 2, h / 2, bg)
+        val inset = dp(3f)
+        bg.color = t.accent
+        val hl = r.apply { set(box.left + p * w + inset, box.top + inset, box.left + (p + 1) * w - inset, box.bottom - inset) }
+        c.drawRoundRect(hl, hl.height() / 2, hl.height() / 2, bg)
+        tp.textAlign = Paint.Align.CENTER; tp.textSize = sp(Ui.BODY)
+        names.forEachIndexed { i, name ->
+            val near = (1f - abs(p - i)).coerceIn(0f, 1f)
+            tp.color = Colors.blend(t.inkSoft, t.onAccent, near)
+            tp.typeface = if (near > 0.5f) Ui.medium else Ui.regular
+            val l = box.left + i * w
+            drawText(c, name, l + w / 2, box.centerY(), tp)
+            hits.add("tab:$name", l, box.top - dp(4f), l + w, box.bottom + dp(4f))
+        }
+        tp.typeface = Ui.regular
+        return moving
+    }
+
+    /** Lays the actions of [kind] and 输入指令 out in lines from [y]; calls [place] for each chip. */
+    private fun flow(kind: String, y: Float, ch: Float, place: (id: String, title: String, l: Float, t: Float, w: Float) -> Unit): Float {
+        val gap = dp(Ui.CHIP_GAP)
+        var x = pad; var top = y
+        val right = width - pad
+        fun put(id: String, title: String, w: Float) {
+            if (x > pad && x + w > right) { x = pad; top += ch + gap }
+            place(id, title, x, top, w)
+            x += w + gap
+        }
+        for (a in actions) if (a.group == kind) put(a.id, a.title, chipWidth(a.title))
+        put("custom", "输入指令", chipWidth("输入指令", icon = "ai"))
+        return top + ch - y
+    }
+
+    /** The height the actions take: the tallest kind, so switching kinds moves nothing below. */
+    private fun actionsHeight(ch: Float): Float = groups.maxOfOrNull { g -> flow(g, 0f, ch) { _, _, _, _, _ -> } } ?: ch
+
+    /** The actions of the kind picked, wrapped onto lines. True while animating. */
     private fun drawActions(c: Canvas, y: Float, ch: Float): Boolean {
         val t = theme
-        val gap = dp(Ui.CHIP_GAP)
-        val customW = chipWidth("输入指令", icon = "ai")
-        r.set(width - pad - customW, y, width - pad, y + ch)
-        drawChip(c, r, "输入指令", ChipStyle.PRIMARY, pressed = pressed == "custom", icon = "ai")
-        hits.add("custom", r, slop = dp(3f))
-        row.set(pad, y, r.left - gap, y + ch)
         val ps = if (running != null) {
             if (!pulse.running) { pulse.set(0f); pulse.animateTo(1f, 1100, Motion.LINEAR) }
             sin(pulse.value * Math.PI).toFloat()
         } else 0f
-        c.save()
-        c.clipRect(row.left - dp(2f), row.top - dp(4f), row.right, row.bottom + dp(4f))
-        var x = row.left - rowScroll
-        var lastGroup = ""
-        for (a in actions) {
-            if (a.group != lastGroup) {
-                if (lastGroup.isNotEmpty()) x += dp(4f)
-                tp.textAlign = Paint.Align.LEFT; tp.textSize = sp(Ui.CAPTION); tp.color = t.hint; tp.typeface = Ui.medium
-                drawText(c, a.group, x, y + ch / 2, tp)
-                tp.typeface = Ui.regular
-                x += tp.measureText(a.group) + dp(8f)
-                lastGroup = a.group
-            }
-            val w = chipWidth(a.title)
-            r.set(x, y, x + w, y + ch)
-            if (r.right > row.left && r.left < row.right) {
-                if (running == a.id) {
+        flow(group, y, ch) { id, title, l, top, w ->
+            r.set(l, top, l + w, top + ch)
+            when {
+                id == "custom" -> drawChip(c, r, title, ChipStyle.PRIMARY, pressed = pressed == id, icon = "ai")
+                running == id -> {
                     // the action at work breathes
                     bg.color = Colors.blend(t.accentSoft, t.accent, 0.12f + 0.18f * ps)
                     c.drawRoundRect(r, ch / 2, ch / 2, bg)
                     chipText.textSize = sp(Ui.BODY); chipText.typeface = Ui.medium; chipText.color = t.accent
                     chipText.textAlign = Paint.Align.CENTER
-                    drawText(c, a.title, r.centerX(), r.centerY(), chipText)
-                } else drawChip(c, r, a.title, ChipStyle.SOFT, pressed = pressed == a.id)
-                // only the part of a chip inside the row takes taps
-                hits.add(a.id, maxOf(r.left, row.left), r.top - dp(3f), minOf(r.right, row.right), r.bottom + dp(3f))
+                    drawText(c, title, r.centerX(), r.centerY(), chipText)
+                }
+                else -> drawChip(c, r, title, ChipStyle.SOFT, pressed = pressed == id)
             }
-            x += w + gap
-        }
-        rowContentW = x - gap + rowScroll - row.left
-        c.restore()
-        // edge fades say the row goes on
-        val fw = dp(16f)
-        if (rowScroll > 1f) {
-            bg.shader = fadeL ?: LinearGradient(row.left, 0f, row.left + fw, 0f, t.background, Colors.alpha(t.background, 0), Shader.TileMode.CLAMP).also { fadeL = it }
-            c.drawRect(row.left - dp(2f), row.top, row.left + fw, row.bottom, bg)
-            bg.shader = null
-        }
-        if (rowScroll < maxRowScroll - 1f) {
-            bg.shader = fadeR ?: LinearGradient(row.right - fw, 0f, row.right, 0f, Colors.alpha(t.background, 0), t.background, Shader.TileMode.CLAMP).also { fadeR = it }
-            c.drawRect(row.right - fw, row.top, row.right, row.bottom, bg)
-            bg.shader = null
+            hits.add(id, r, slop = dp(3f))
         }
         return running != null
     }
-
-    private val maxRowScroll get() = max(0f, rowContentW - row.width())
 
     /** Nothing set up yet: what this panel does, and the way to the settings. */
     private fun drawSetup(c: Canvas, top: Float) {
@@ -246,7 +252,7 @@ class AiPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
             tp.textAlign = Paint.Align.CENTER; tp.textSize = sp(Ui.SMALL + 1f)
             tp.color = if (breathing) Colors.blend(t.hint, t.accent, 0.5f + 0.5f * sin(pulse.value * Math.PI).toFloat()) else t.hint
             if (breathing && !pulse.running) { pulse.set(0f); pulse.animateTo(1f, 1100, Motion.LINEAR) }
-            drawText(c, status.ifEmpty { if (running != null) "正在思考…" else "选一个操作；选中文字时只处理选中的部分" }, card.centerX(), card.centerY(), tp)
+            drawText(c, status.ifEmpty { if (running != null) "正在思考…" else idleNote() }, card.centerX(), card.centerY(), tp)
             return breathing
         }
         // title line: ✕ and what was done on the left, the buttons for the answer on the right
@@ -310,6 +316,13 @@ class AiPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
         return moving
     }
 
+    /** What an action will work on, said where the answer will appear. */
+    private fun idleNote(): String = when {
+        source.isBlank() -> "输入框是空的，可以用「输入指令」直接写"
+        sourceLabel == "选中" -> "将处理选中的 ${source.length} 个字"
+        else -> "将处理输入框里的全部文字；选中一段则只处理那一段"
+    }
+
     /** The result with the characters that are new against [base] tinted. */
     private fun marked(s: String, base: String?): CharSequence {
         if (base == null || base.length > 800 || s.length > 800) return s
@@ -346,10 +359,6 @@ class AiPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
     }
 
     // ---- touch ----
-    private var downX = 0f
-    private var lastX = 0f
-    private var inRow = false
-    private var sliding = false
     private var vt: VelocityTracker? = null
     private val slop = ViewConfiguration.get(context).scaledTouchSlop
 
@@ -399,54 +408,32 @@ class AiPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
             invalidate()
             return true
         }
-        if (vt == null) vt = VelocityTracker.obtain()
-        vt?.addMovement(e)
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                scroller.forceFinished(true)
-                downX = e.x; lastX = e.x; sliding = false
-                inRow = !picking && row.contains(e.x, e.y)
                 pressed = hits.at(e.x, e.y)
                 if (pressed != null) onFeedback?.invoke()
                 invalidate()
             }
             MotionEvent.ACTION_MOVE -> {
-                if (inRow && !sliding && abs(e.x - downX) > slop && maxRowScroll > 0f) { sliding = true; pressed = null; invalidate() }
-                if (sliding) {
-                    var next = rowScroll - (e.x - lastX)
-                    // past either end the row only gives a little
-                    if (next < 0f || next > maxRowScroll) next = rowScroll - (e.x - lastX) * 0.35f
-                    rowScroll = next.coerceIn(-dp(48f), maxRowScroll + dp(48f))
-                    invalidate()
-                }
-                lastX = e.x
+                // a finger that slides off what it pressed lets go of it
+                if (pressed != null && hits.at(e.x, e.y) != pressed) { pressed = null; invalidate() }
             }
             MotionEvent.ACTION_UP -> {
                 val p = pressed
                 pressed = null
-                if (sliding) {
-                    vt?.computeCurrentVelocity(1000)
-                    val m = maxRowScroll.toInt()
-                    if (rowScroll < 0f || rowScroll > m) scroller.springBack(rowScroll.toInt(), 0, 0, m, 0, 0)
-                    else scroller.fling(rowScroll.toInt(), 0, -(vt?.xVelocity ?: 0f).toInt(), 0, 0, m, 0, 0, dp(24f).toInt(), 0)
-                    sliding = false
-                } else when {
+                when {
                     p == null -> picking = false
                     p == "provider" -> { picking = !picking; if (picking) pick.reveal() }
                     picking -> picking = false
+                    p.startsWith("tab:") -> group = p.removePrefix("tab:")
                     // ✕: the answer goes, the actions come back
                     p == "back" -> { result = ""; diffBase = null; resLayout = null; status = "" }
                     p in BUTTON_IDS -> onButton?.invoke(p)
                     running == null -> onAction?.invoke(p)
                 }
-                vt?.recycle(); vt = null
                 invalidate()
             }
-            MotionEvent.ACTION_CANCEL -> {
-                pressed = null; sliding = false; vt?.recycle(); vt = null
-                if (rowScroll < 0f || rowScroll > maxRowScroll) scroller.springBack(rowScroll.toInt(), 0, 0, maxRowScroll.toInt(), 0, 0)
-                invalidate()
-            }
+            MotionEvent.ACTION_CANCEL -> { pressed = null; invalidate() }
         }
         return true
     }

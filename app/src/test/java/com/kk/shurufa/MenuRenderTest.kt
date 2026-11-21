@@ -122,6 +122,10 @@ class MenuRenderTest {
             targets = models.filter { !it.name.contains("Transcribe") }; currentTarget = "gemini|gemini-3.5-flash-lite"
         }
         val f2 = frame(250, CandidateBar(ctx, prefs).apply { activeTool = "ai" }, ap.also { it.layoutParams = LinearLayout.LayoutParams(-1, (240 * d).toInt()) })
+        // the actions of each kind, wrapped onto lines; the switch picks the kind
+        f2.invalidate(); idle(100); save("ai_rewrite", f2)
+        ap.javaClass.getDeclaredField("group").apply { isAccessible = true }.set(ap, "翻译")
+        f2.invalidate(); idle(400); save("ai_translate", f2)
         setPicking(ap, true); f2.invalidate(); save("pick_ai", f2)
         setPicking(ap, false)
         ap.doneTitle = "润色"

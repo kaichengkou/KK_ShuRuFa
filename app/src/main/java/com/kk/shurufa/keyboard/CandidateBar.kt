@@ -206,7 +206,7 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
                 tp.color = if (messageTap) theme.accent else theme.hint; tp.alpha = (255 * a).toInt(); tp.textSize = sp(Ui.BODY); tp.textAlign = Paint.Align.CENTER
                 if (messageTap) tp.typeface = Ui.medium
                 ellipsizer.set(tp)
-                drawText(c, android.text.TextUtils.ellipsize(message, ellipsizer, width - dp(32f), android.text.TextUtils.TruncateAt.END), width / 2f, height / 2f, tp)
+                drawText(c, android.text.TextUtils.ellipsize(message, ellipsizer, width - dp(32f), android.text.TextUtils.TruncateAt.END), width / 2f, lineCy, tp)
                 tp.typeface = Ui.regular
                 if (messageTap) hits.add("message", 0f, 0f, width.toFloat(), height.toFloat())
                 if (messageBusy) { drawBusy(c, a); again = true }
@@ -218,7 +218,7 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
     /** An indeterminate line under a status that is still in progress: a short segment gliding across. */
     private fun drawBusy(c: Canvas, a: Float) {
         val track = dp(120f)
-        val y = height - dp(9f)
+        val y = lineCy + dp(13f)
         val left = (width - track) / 2
         bg.color = Colors.fade(theme.divider, a)
         c.drawRoundRect(left, y - dp(1f), left + track, y + dp(1f), dp(1f), dp(1f), bg)
@@ -232,17 +232,19 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
     }
 
     /** Returns true while the indicator is still moving. */
+    private val lineCy get() = dp(LINE_DP)
+
     private fun drawToolbar(c: Canvas, a: Float): Boolean {
         val list = tools
         val slot = width / list.size.toFloat()
-        val cy = height / 2f
+        val cy = lineCy
         val ia = indicatorAlpha.value
         if (indicator.running) indicator.step()
         // the open panel's button sits on a pill that glides from button to button
         if (ia > 0.01f && activeTool != null) {
             val cx = slot * indicator.value + slot / 2
             val w = minOf(dp(50f), slot - dp(10f)) * (0.85f + 0.15f * ia)
-            val h = dp(34f) * (0.85f + 0.15f * ia)
+            val h = dp(32f) * (0.85f + 0.15f * ia)
             bg.color = Colors.fade(theme.accentSoft, ia * a)
             c.drawRoundRect(cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2, h / 2, h / 2, bg)
         }
@@ -251,7 +253,7 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
             val active = id == activeTool
             if (pressedTool == id && !active) {
                 bg.color = Colors.fade(theme.soft, a)
-                val w = minOf(dp(50f), slot - dp(10f)); val h = dp(34f)
+                val w = minOf(dp(50f), slot - dp(10f)); val h = dp(32f)
                 c.drawRoundRect(cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2, h / 2, h / 2, bg)
             }
             val ink = Colors.fade(if (active) theme.accent else theme.inkSoft, a)
@@ -272,6 +274,12 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
 
     companion object {
         const val HEIGHT_DP = 50f
+        /**
+         * Where everything in the bar is centered: tool icons, words, chips, the end button. The
+         * top 16 dp hold the pinyin while typing; keeping every mode on this one line means the
+         * words come up exactly where the icons were, and nothing jumps when typing starts.
+         */
+        const val LINE_DP = 32f
         /** Tools that show a text glyph instead of a line icon. */
         val TOOL_GLYPHS = mapOf("symbols" to "§", "math" to "π")
         /** Every tool the toolbar can hold: id to name. */
@@ -338,12 +346,12 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
                 tp.textSize = size
                 tp.color = if (i == 0 && composing) theme.accent else theme.ink
                 tp.alpha = (255 * a).toInt()
-                drawText(c, s, x + dp(12f) + (cw - dp(24f) - tw) / 2, cr.centerY() + dp(3f), tp)
+                drawText(c, s, x + dp(12f) + (cw - dp(24f) - tw) / 2, lineCy, tp)
                 if (note.isNotEmpty()) {
                     tp.textSize = noteSize
                     tp.color = if (note.contains('→') || note.contains('⇄')) theme.accent else theme.hint
                     tp.alpha = (255 * a).toInt()
-                    c.drawText(note, x + dp(12f) + (cw - dp(24f) - nw) / 2, cr.top + dp(8.5f), tp)
+                    c.drawText(note, x + dp(12f) + (cw - dp(24f) - nw) / 2, lineCy - dp(9.5f), tp)
                 }
             }
             x += cw
@@ -364,10 +372,10 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
         }
         val ex = width - endW / 2
         ip.color = Colors.fade(theme.inkSoft, a)
-        if (composing) Icons.draw(c, if (expanded) "expand" else "collapse", ex, height / 2f, dp(20f), ip)
-        else Icons.draw(c, "close", ex, height / 2f, dp(18f), ip)
+        if (composing) Icons.draw(c, if (expanded) "expand" else "collapse", ex, lineCy, dp(20f), ip)
+        else Icons.draw(c, "close", ex, lineCy, dp(18f), ip)
         bg.color = Colors.fade(theme.divider, a)
-        c.drawRect(width - endW, dp(14f), width - endW + dp(1f), height - dp(14f), bg)
+        c.drawRect(width - endW, lineCy - dp(11f), width - endW + dp(1f), lineCy + dp(11f), bg)
         hits.add(if (composing) "expand" else "dismiss", width - endW, 0f, width.toFloat(), height.toFloat())
     }
 
@@ -403,7 +411,7 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
         val w = tagW + tp.measureText(shown) + dp(40f)
         // centered in the bar, between equal margins
         val left = (width - w) / 2
-        val r = tmp.apply { set(left, dp(8f), left + w, height - dp(8f)) }
+        val r = tmp.apply { set(left, lineCy - dp(Ui.CHIP_H / 2), left + w, lineCy + dp(Ui.CHIP_H / 2)) }
         bg.color = Colors.fade(if (pressedClip) Colors.blend(theme.accentSoft, theme.accent, 0.2f) else theme.accentSoft, a)
         c.drawRoundRect(r, r.height() / 2, r.height() / 2, bg)
         tp.color = theme.accent; tp.alpha = (255 * a).toInt(); tp.textSize = sp(Ui.SMALL); tp.typeface = Ui.medium
@@ -413,7 +421,7 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
         drawText(c, shown, r.left + dp(26f) + tagW, r.centerY(), tp)
         hits.add("clip", r)
         ip.color = Colors.fade(theme.inkSoft, a)
-        Icons.draw(c, "close", width - closeW / 2, height / 2f, dp(18f), ip)
+        Icons.draw(c, "close", width - closeW / 2, lineCy, dp(18f), ip)
         hits.add("dismiss", width - closeW, 0f, width.toFloat(), height.toFloat())
     }
 
@@ -501,7 +509,7 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
         tp.textSize = size; tp.textAlign = Paint.Align.LEFT; tp.typeface = Ui.regular
         editPos.clear()
         var x = dp(16f)
-        val cy = height / 2f
+        val cy = lineCy
         val gap = dp(9f)
         editPos += x
         tp.color = theme.ink; tp.alpha = (255 * a).toInt()
