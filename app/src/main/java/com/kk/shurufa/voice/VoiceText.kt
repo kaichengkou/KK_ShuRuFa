@@ -46,9 +46,34 @@ object VoiceText {
         return sb.toString()
     }
 
+    private val toFull = mapOf(',' to '，', '.' to '。', '?' to '？', '!' to '！', ':' to '：', ';' to '；', '(' to '（', ')' to '）')
+
+    /**
+     * Chinese takes full-width punctuation: the AI services write , . ? ! as in English. Next to
+     * a Chinese character they become ，。？！; numbers keep theirs (3.5, 9:30, 1,000), and so does
+     * punctuation between Latin words. Straight quotes around Chinese become “ ”.
+     */
+    fun fullWidth(s: String): String {
+        val sb = StringBuilder(s.length)
+        var quoteOpen = false
+        for ((i, c) in s.withIndex()) {
+            // what was written so far, already converted: 。 after a closing ” too
+            val prev = sb.trimEnd().lastOrNull()
+            val next = s.substring(i + 1).trimStart().firstOrNull()
+            val nearZh = (prev != null && (isCjk(prev) || prev in fullPunct)) || (next != null && isCjk(next))
+            val inNumber = prev?.isDigit() == true && next?.isDigit() == true && c in ".:,"
+            when {
+                c == '"' && nearZh -> { sb.append(if (quoteOpen) '”' else '“'); quoteOpen = !quoteOpen }
+                c in toFull && nearZh && !inNumber -> sb.append(toFull[c])
+                else -> sb.append(c)
+            }
+        }
+        return sb.toString()
+    }
+
     fun format(raw: String, before: String, continuing: Boolean, style: String, pangu: Boolean, fillers: Boolean = true): Edit {
         var t = raw.trim()
-        if (t.any { isCjk(it) }) t = tidy(t)
+        if (t.any { isCjk(it) }) t = tidy(fullWidth(t))
         if (fillers) t = dropFillers(t)
         if (t.isEmpty()) return Edit(0, "")
         if (!t.any { isCjk(it) }) return latin(t, before)

@@ -143,6 +143,10 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     private var wordsHere = true
     /** What is typed here may be learned from. */
     private var learnHere = true
+    /** 云联想, and the continuations at the front of the suggestions now. */
+    private val cloud by lazy { CloudPredict(prefs) { syncBar() } }
+    private var cloudShown: List<String> = emptyList()
+
     /** AI 候选, and whether the bar shows it first now. */
     private val aiCand by lazy { AiCandidate(prefs) { syncBar() } }
     private var aiShown = false
@@ -706,7 +710,14 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
                 else bar.showCandidates(pre, cands, notes, zh.caretInPreedit(pre, RimeBridge.cursor()))
                 if (prefs.zhPreeditInline) editor.compose(RimeBridge.input())
             }
-            predictions.isNotEmpty() && letters -> bar.showPredictions(predictions, predictionLabel)
+            predictions.isNotEmpty() && letters -> {
+                // 云联想: the AI's continuations of this text, when they came, go first, marked 云
+                val before = editor.textBefore(CloudPredict.CONTEXT)
+                if (predictionLabel.isEmpty()) cloud.update(before, allowed = learnHere && sink == null)
+                cloudShown = if (predictionLabel.isEmpty()) cloud.answerFor(before) else emptyList()
+                if (cloudShown.isEmpty()) bar.showPredictions(predictions, predictionLabel)
+                else bar.showPredictions(cloudShown + predictions.filter { it !in cloudShown }, predictionLabel, cloudShown.map { "云" })
+            }
             clipboard.pendingChip() != null && letters -> clipboard.chip()?.let { (text, kind) -> bar.showClip(text, kind) }
             else -> {
                 bar.showToolbar()
@@ -1403,6 +1414,15 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     override fun onCandidate(index: Int) {
         if (index < 0 && sink == Sink.AI && !composing) { runInstruction(); return }
         if (index < 0 && sink == Sink.EMOJI && !composing) { searchResults.getOrNull(-1 - index)?.let { emoji.type(it) }; return }
+        if (index < 0 && cloudShown.isNotEmpty()) {
+            // the bar shows the cloud's continuations, then the local suggestions without repeats
+            val i = -1 - index
+            if (i < cloudShown.size) { pickCloud(cloudShown[i]); return }
+            val word = predictions.filter { it !in cloudShown }.getOrNull(i - cloudShown.size) ?: return
+            cloudShown = emptyList()
+            onCandidate(-1 - predictions.indexOf(word))
+            return
+        }
         if (index < 0 && !isZh) { pickWord(-1 - index); return }
         if (index < 0) {
             // an association: commit it and suggest what follows
@@ -1512,6 +1532,26 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         toneIdx = keep.toIntArray()
         val shown = keep.take(n)
         return shown.map { all[it] } to shown.map { comments.getOrElse(it) { "" } }
+    }
+
+    /** A 云联想 continuation taken: typed after the text, then what may follow it. */
+    private fun pickCloud(phrase: String) {
+        cloudShown = emptyList()
+        val before = editor.textBefore(1)
+        val latin = phrase.firstOrNull()?.let { WordPredictor.isWordChar(it) } == true
+        // words in Russian or English: a space before when the last word is not yet closed, and after
+        val text = when {
+            latin && before.isNotEmpty() && WordPredictor.isWordChar(before[0]) -> " $phrase "
+            latin -> "$phrase "
+            else -> pangu(phrase)
+        }
+        editor.type(text, pairable = false, source = TypingStats.Source.AI)
+        autoSpaced = latin
+        predictionLabel = ""
+        predictions = if (isZh) { if (prefs.zhPredict && !prefs.pinyinMode) predictor.suggest(editor.textBefore(20)) else emptyList() }
+            else { suggestWords(); predictions }
+        updateAutoCap()
+        syncBar()
     }
 
     /** AI 候选 taken: it replaces the whole pinyin. */

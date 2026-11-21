@@ -96,6 +96,7 @@ class MenuRenderTest {
         bar.showPredictions(listOf("你好", "拟好", "你号", "泥好"), "按原拼音 ni hao"); f.invalidate(); save("bar_reselect", f)
         bar.showPredictions(listOf("你好", "拟好", "你号", "泥好")); f.invalidate(); save("bar_predict", f)
         bar.showCandidates("ni hao", listOf("你好", "拟好", "你号", "泥好"), emptyList(), -1); f.invalidate(); save("bar_compose", f)
+        bar.showPredictions(listOf("找时间一起去吧", "看看天安门和故宫", "买张高铁票就出发", "玩", "旅游", "看看"), "", listOf("云", "云", "云")); f.invalidate(); save("bar_cloud", f)
         // 声调筛选, now a row in the opened candidates
         run {
             val tabs = com.kk.shurufa.keyboard.TabStrip(ctx, prefs).apply { compact = true; setTabs(com.kk.shurufa.ime.KkImeService.TONE_TABS, "3") }

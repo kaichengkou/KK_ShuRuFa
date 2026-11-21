@@ -46,4 +46,12 @@ class VoiceTextTest {
         assertEquals(0 to "我用 iPhone 拍的", f("我用iPhone 拍的", "", false, pangu = true))
         assertEquals(0 to "他说 good morning 就走了", f("他说 good morning 就走了", "", false, pangu = true))
     }
+
+    /** The AI recognizers write English punctuation; next to Chinese it becomes full-width. */
+    @Test fun fullWidthPunctuation() {
+        assertEquals(0 to "好的，明天见！你几点到？", f("好的, 明天见! 你几点到?", "", false))
+        assertEquals(0 to "下午3.5小时，9:30开会。", f("下午3.5小时, 9:30开会.", "", false))
+        assertEquals(0 to "他说“没问题”。", f("他说\"没问题\".", "", false))
+        assertEquals(0 to "Hello, world.", f("Hello, world.", "", false))
+    }
 }

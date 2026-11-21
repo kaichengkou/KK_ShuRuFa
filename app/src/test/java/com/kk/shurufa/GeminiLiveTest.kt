@@ -64,6 +64,21 @@ class GeminiLiveTest {
         org.junit.Assert.assertNull(ai.answerFor(input))
     }
 
+    /** 云联想: a pause after some text brings three continuations of it. */
+    @Test fun cloudPredict() {
+        val p = prefs(); p.put(Prefs.CLOUD_PREDICT, true); p.put(Prefs.AI_PROVIDER, "gemini|gemini-3.5-flash-lite")
+        val cloud = com.kk.shurufa.ime.CloudPredict(p) {}
+        for (text in listOf("我想去北京", "спасибо за ", "how are ")) {
+            val t0 = System.currentTimeMillis()
+            cloud.update(text, allowed = true)
+            while (cloud.answerFor(text).isEmpty() && System.currentTimeMillis() - t0 < 20_000) {
+                Thread.sleep(40); org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(40))
+            }
+            println("[gemini] 云联想 ${System.currentTimeMillis() - t0} ms  $text → ${cloud.answerFor(text)}")
+            org.junit.Assert.assertTrue(text, cloud.answerFor(text).size in 1..3)
+        }
+    }
+
     @Test fun live() {
         val p = prefs()
         val listed = Llm.listModels(p, "gemini")
