@@ -183,7 +183,10 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         super.onTrimMemory(level)
         // the recognizer's models are by far the biggest thing held; they load again when needed
         @Suppress("DEPRECATION")
-        if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) voice.trimMemory()
+        if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
+            voice.trimMemory()
+            if (sink != Sink.TRANSLATE) translateService.trimMemory()
+        }
     }
 
     private val settingsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key -> onSetting(key) }

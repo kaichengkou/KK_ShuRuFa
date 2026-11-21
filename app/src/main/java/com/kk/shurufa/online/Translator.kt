@@ -13,18 +13,10 @@ class Translator {
     private val cache = HashMap<Pair<String, String>, com.google.mlkit.nl.translate.Translator>()
 
     companion object {
-        val LANGS = listOf("zh" to "中文", "en" to "English", "ru" to "Русский")
         fun mlkit(id: String) = when (id) {
             "zh" -> TranslateLanguage.CHINESE; "ru" -> TranslateLanguage.RUSSIAN; "ja" -> TranslateLanguage.JAPANESE
             "ko" -> TranslateLanguage.KOREAN; "fr" -> TranslateLanguage.FRENCH; "de" -> TranslateLanguage.GERMAN
             "es" -> TranslateLanguage.SPANISH; else -> TranslateLanguage.ENGLISH
-        }
-
-        /** The language a piece of text is written in, by its letters. */
-        fun guess(text: String): String = when {
-            text.any { Character.UnicodeScript.of(it.code) == Character.UnicodeScript.HAN } -> "zh"
-            text.any { it in 'а'..'я' || it in 'А'..'Я' || it == 'ё' || it == 'Ё' } -> "ru"
-            else -> "en"
         }
     }
 

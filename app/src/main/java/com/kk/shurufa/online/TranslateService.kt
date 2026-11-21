@@ -10,10 +10,15 @@ import com.kk.shurufa.Prefs
  */
 class TranslateService(private val prefs: Prefs) {
     private val main = Handler(Looper.getMainLooper())
-    private val mlkit by lazy { Translator() }
+    private var mlkitMade = false
+    private val mlkit by lazy { mlkitMade = true; Translator() }
     @Volatile private var generation = 0
+    /** The on-device models (about 30 MB a language pair) are let go a minute after the last use. */
+    private val release = Runnable { if (mlkitMade) mlkit.close() }
 
     companion object {
+        private const val RELEASE_AFTER_MS = 60_000L
+
         /** Languages offered in the pickers; "auto" only as a source. */
         val LANGS = listOf(
             "zh" to "中文", "en" to "English", "ru" to "Русский", "ja" to "日本語", "ko" to "한국어",
@@ -48,7 +53,11 @@ class TranslateService(private val prefs: Prefs) {
         if (src == to || text.isBlank()) { done(Result.success(text)); return }
         val e = engine
         if (e == "mlkit") {
-            mlkit.translate(text, src, to, prefs.translateWifiOnly) { r -> if (gen == generation) done(r) }
+            main.removeCallbacks(release)
+            mlkit.translate(text, src, to, prefs.translateWifiOnly) { r ->
+                main.removeCallbacks(release); main.postDelayed(release, RELEASE_AFTER_MS)
+                if (gen == generation) done(r)
+            }
             return
         }
         Thread {
@@ -61,4 +70,7 @@ class TranslateService(private val prefs: Prefs) {
     }
 
     fun cancel() { generation++ }
+
+    /** The system is short of memory: free the on-device models now. */
+    fun trimMemory() { main.removeCallbacks(release); release.run() }
 }
