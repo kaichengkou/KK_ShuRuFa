@@ -38,8 +38,13 @@ class AiPanel(context: Context, private val prefs: Prefs) : View(context) {
     var sourceLabel = ""
     var provider = ""
     /** Services and models to pick from (header chip): (target, label). */
-    var targets: List<Pair<String, String>> = emptyList()
-    var currentTarget = ""
+    var targets: List<PickList.Item>
+        get() = pick.items
+        set(v) { pick.items = v }
+    var currentTarget: String
+        get() = pick.current
+        set(v) { pick.current = v }
+    private val pick = PickList(this).apply { title = "改写用的模型 · 在设置里启用更多" }
     private var picking = false
     var needsSetup = false
     var running: String? = null
@@ -101,25 +106,8 @@ class AiPanel(context: Context, private val prefs: Prefs) : View(context) {
         val ch = dp(34f); val gap = dp(6f)
         var x = pad
         if (picking) {
-            // 选择模型: every enabled service and model
-            tp.textAlign = Paint.Align.LEFT; tp.textSize = sp(Ui.CAPTION); tp.color = theme.hint
-            c.drawText("选择用来改写的模型（在设置里启用更多）", pad + dp(2f), y + tp.textSize, tp)
-            y += dp(20f)
-            for ((t, label) in targets) {
-                tp.textSize = sp(Ui.SMALL)
-                val w = tp.measureText(label) + dp(24f)
-                if (x + w > width - pad) { x = pad; y += ch + gap }
-                if (y + ch > height - dp(6f)) break
-                val r = RectF(x, y, x + w, y + ch)
-                val on = t == currentTarget
-                bg.color = if (on) theme.accentSoft else if (pressed == "target:$t") theme.softPressed else theme.soft
-                c.drawRoundRect(r, ch / 2, ch / 2, bg)
-                tp.textAlign = Paint.Align.CENTER; tp.color = if (on) theme.accent else theme.ink; tp.typeface = if (on) Ui.medium else Ui.regular
-                text(c, label, r.centerX(), r.centerY())
-                tp.typeface = Ui.regular
-                hits += r to "target:$t"
-                x += w + gap
-            }
+            // 选择模型: every enabled service and model, in a list that scrolls
+            if (pick.draw(c, RectF(pad, y, width - pad, height - dp(8f)), theme, Ui.radiusLarge(rad, dp(1f)))) postInvalidateOnAnimation()
             return
         }
         // groups of chips, flowing
@@ -264,6 +252,12 @@ class AiPanel(context: Context, private val prefs: Prefs) : View(context) {
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(e: MotionEvent): Boolean {
+        if (picking && (pick.busy || (e.actionMasked == MotionEvent.ACTION_DOWN && pick.contains(e.x, e.y)))) {
+            if (e.actionMasked == MotionEvent.ACTION_DOWN) onFeedback?.invoke()
+            pick.onTouch(e)?.let { t -> picking = false; onButton?.invoke("target:$t") }
+            invalidate()
+            return true
+        }
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 pressed = hits.lastOrNull { it.first.contains(e.x, e.y) }?.second?.removePrefix("act:")
@@ -275,8 +269,8 @@ class AiPanel(context: Context, private val prefs: Prefs) : View(context) {
                 pressed = null
                 when {
                     p == null -> {}
-                    p == "provider" -> { picking = !picking; invalidate() }
-                    p.startsWith("target:") -> { picking = false; onButton?.invoke(p) }
+                    p == "provider" -> { picking = !picking; if (picking) pick.reveal(); invalidate() }
+                    picking -> picking = false
                     p in setOf("replace", "insert", "copy", "retry", "setup", "custom") -> onButton?.invoke(p)
                     running == null -> onAction?.invoke(p)
                 }

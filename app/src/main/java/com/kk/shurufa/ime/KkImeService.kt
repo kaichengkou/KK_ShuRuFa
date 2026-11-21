@@ -1355,8 +1355,8 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
 
     private fun fnOptions(fn: String, key: Key): List<Output> = when (fn) {
         "language", "voice" -> prefs.languages.map { Output(layout(it).label, "§lang:$it") } +
-            listOf(Output("系统切换", "§picker"), Output("设置", "§settings"))
-        "symbols" -> listOf(Output("数字·标准", "§num"), Output("符号", "§sym"), Output("数字·学术", "§科学"), Output("文字编辑", "§cursor"), Output("剪贴板", "§clip"))
+            listOf(Output("切换输入法", "§picker"), Output("设置", "§settings"))
+        "symbols" -> listOf(Output("数字", "§num"), Output("符号", "§sym"), Output("学术键盘", "§科学"), Output("文字编辑", "§cursor"), Output("剪贴板", "§clip"))
         "more_symbols" -> listOf(Output("全部符号", "§sym"), Output("数学", "§math"))
         "sci" -> listOf(Output("全部符号", "§sym"))
         "enter" -> listOf(Output("换行", "§newline"), Output(enterActionName(), "§action"))
@@ -1568,7 +1568,8 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
 
     override fun candidateOptions(index: Int): List<Output> {
         val word = RimeBridge.candidates(index + 1).getOrNull(index) ?: return emptyList()
-        return listOf(Output("取消", "§cancel"), Output("删除「$word」的学习记录", "§forget"))
+        val shown = if (word.codePointCount(0, word.length) > 6) word.substring(0, word.offsetByCodePoints(0, 5)) + "…" else word
+        return listOf(Output("取消", "§cancel"), Output("不再优先「$shown」", "§forget"))
     }
 
     override fun onCandidateOption(index: Int, option: Output) {
@@ -1863,7 +1864,7 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
         st.toName = com.kk.shurufa.online.TranslateService.name(translateTo)
         st.engineName = translateSvc.engineName()
         st.engine = translateSvc.engine
-        st.engines = listOf("mlkit" to "离线（ML Kit）") + com.kk.shurufa.online.Llm.targets(prefs)
+        st.engines = listOf(com.kk.shurufa.keyboard.PickList.Item("mlkit", "离线翻译", "ML Kit")) + aiItems(com.kk.shurufa.online.Llm.targets(prefs))
         st.source = q; st.sourceIsSelection = translateFromSelection
         val fresh = translatedFor == q
         if (!fresh) { st.result = ""; st.busy = q.isNotBlank() }
@@ -1929,10 +1930,9 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
     private fun syncAiHeader() {
         val t = aiTarget()
         aiPanel.needsSetup = t == null
-        aiPanel.targets = com.kk.shurufa.online.Llm.targets(prefs)
+        aiPanel.targets = aiItems(com.kk.shurufa.online.Llm.targets(prefs))
         aiPanel.currentTarget = t.orEmpty()
-        aiPanel.provider = if (t == null) "" else com.kk.shurufa.online.Llm.provider(com.kk.shurufa.online.Llm.targetId(t)).title + " · " +
-            com.kk.shurufa.online.Llm.targetModel(prefs, t).removePrefix("claude-").removePrefix("models/")
+        aiPanel.provider = if (t == null) "" else com.kk.shurufa.online.Llm.targetName(prefs, t)
         aiPanel.actions = com.kk.shurufa.online.AiWriter.ACTIONS.map { com.kk.shurufa.keyboard.AiPanel.Act(it.id, it.title, it.group) }
         aiPanel.invalidate()
     }
@@ -2066,8 +2066,17 @@ class KkImeService : InputMethodService(), KeyboardListener, CandidateBar.Listen
     private fun voiceLang(): String = voiceLangPick ?: prefs.voiceLang.let { if (it == "follow") (if (isZh) "zh" else curLang.takeIf { l -> l == "ru" || l == "en" } ?: "zh") else it }
     private fun voiceLangName(l: String) = when (l) { "zh" -> "中文"; "en" -> "English"; "ru" -> "Русский"; else -> "自动" }
 
+    /** Services' models as list rows: the short model name, and whose it is. */
+    private fun aiItems(targets: List<Pair<String, String>>) = targets.map { (t, _) ->
+        com.kk.shurufa.keyboard.PickList.Item(t, com.kk.shurufa.online.Llm.targetName(prefs, t),
+            com.kk.shurufa.online.Llm.provider(com.kk.shurufa.online.Llm.targetId(t)).title)
+    }
+
     private fun syncVoiceChips() {
-        val engines = listOf("whisper" to "本地模型", "system" to "系统识别") + com.kk.shurufa.online.Llm.speechTargets(prefs)
+        val engines = listOf(
+            com.kk.shurufa.keyboard.PickList.Item("whisper", "本地模型", "SenseVoice · Whisper"),
+            com.kk.shurufa.keyboard.PickList.Item("system", "系统识别", "Android"),
+        ) + aiItems(com.kk.shurufa.online.Llm.speechTargets(prefs))
         val cur = prefs.voiceEngine.let { if (it.contains('|')) com.kk.shurufa.online.Llm.resolve(prefs, it) ?: "whisper" else it }
         voiceView.engines = engines
         voiceView.engine = cur

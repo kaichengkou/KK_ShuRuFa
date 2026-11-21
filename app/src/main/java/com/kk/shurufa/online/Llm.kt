@@ -74,11 +74,47 @@ object Llm {
 
     /** Every service and model that can be picked: ("id|model", "Service · model"). */
     fun targets(prefs: Prefs): List<Pair<String, String>> = configuredIds(prefs).flatMap { id ->
-        enabledModels(prefs, id).map { m -> "$id|$m" to "${provider(id).title} · $m" }
+        enabledModels(prefs, id).map { m -> "$id|$m" to targetLabel(prefs, "$id|$m") }
     }
     fun targetId(t: String) = t.substringBefore('|')
     fun targetModel(prefs: Prefs, t: String) = t.substringAfter('|', "").ifEmpty { model(prefs, targetId(t)) }
-    fun targetLabel(prefs: Prefs, t: String) = "${provider(targetId(t)).title} · ${targetModel(prefs, t)}"
+    fun targetName(prefs: Prefs, t: String) = shortName(targetModel(prefs, t))
+    /** "Gemini 3.5 Flash Lite", or "GPT-5 Mini · OpenAI" when the name does not say whose it is. */
+    fun targetLabel(prefs: Prefs, t: String): String {
+        val n = targetName(prefs, t); val title = provider(targetId(t)).title
+        return if (n.contains(title, ignoreCase = true)) n else "$n · $title"
+    }
+
+    private val WORDS = mapOf("gpt" to "GPT", "deepseek" to "DeepSeek", "glm" to "GLM", "qwen" to "Qwen", "llama" to "Llama",
+        "it" to "", "instruct" to "Instruct", "chat" to "Chat", "tts" to "TTS", "4o" to "4o", "o1" to "o1", "o3" to "o3", "o4" to "o4")
+
+    /**
+     * A model id as people say it: gemini-3.5-flash-lite → Gemini 3.5 Flash Lite,
+     * claude-opus-5-5 → Claude Opus 5.5, gpt-5-mini → GPT-5 Mini, Qwen/Qwen3-8B → Qwen3 8B.
+     * Dates go; previews and "latest" aliases get a short tag.
+     */
+    fun shortName(model: String): String {
+        var m = model.removePrefix("models/").substringAfterLast('/')
+        var tag = ""
+        m = m.replace(Regex("[-@](\\d{8}|\\d{4}-\\d{2}-\\d{2})$"), "")
+        Regex("-preview(-\\d{2}-\\d{4})?").find(m)?.let { tag = "预览"; m = m.replace(it.value, "") }
+        if (m.endsWith("-latest")) { tag = "最新"; m = m.removeSuffix("-latest") }
+        val out = mutableListOf<String>()
+        for (w in m.split('-', '_', ' ').filter { it.isNotEmpty() }) {
+            val low = w.lowercase()
+            val prev = out.lastOrNull()
+            when {
+                // claude-opus-5-5: consecutive bare numbers are one version
+                low.all { it.isDigit() } && prev != null && prev.last().isDigit() && !prev.endsWith("B") -> out[out.size - 1] = "$prev.$low"
+                prev == "GPT" && low.first().isDigit() -> out[out.size - 1] = "GPT-$w"
+                low in WORDS -> WORDS[low]!!.takeIf { it.isNotEmpty() }?.let { out += it }
+                Regex("a?\\d+(\\.\\d+)?[bm]").matches(low) -> out += low.uppercase()
+                else -> out += w.replaceFirstChar { it.uppercase() }
+            }
+        }
+        val name = out.joinToString(" ").ifEmpty { model }
+        return if (tag.isEmpty()) name else "$name（$tag）"
+    }
     /** [t] if it is still usable, else the first usable target (or null). */
     fun resolve(prefs: Prefs, t: String?): String? {
         val all = targets(prefs).map { it.first }

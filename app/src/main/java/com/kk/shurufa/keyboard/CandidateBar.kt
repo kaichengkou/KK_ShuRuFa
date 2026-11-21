@@ -251,15 +251,24 @@ class CandidateBar(context: Context, private val prefs: Prefs) : View(context) {
                 bg.color = theme.accent
                 c.drawRect(cx - dp(0.8f), dp(3f), cx + dp(0.8f), dp(15f), bg)
             }
-        } else if (!composing && predictionLabel.isNotEmpty()) {
-            tp.textAlign = Paint.Align.LEFT; tp.textSize = sp(Ui.CAPTION); tp.color = theme.accent; tp.alpha = (255 * a).toInt()
-            c.drawText(predictionLabel, dp(12f), dp(12f), tp)
         }
         c.save()
         c.clipRect(0f, 0f, width - btnW, height.toFloat())
         candRects.clear()
         var x = dp(4f) - scrollX0
-        val top = if (composing || predictionLabel.isNotEmpty()) dp(15f) else dp(4f)
+        val top = if (composing) dp(15f) else dp(4f)
+        // 按原拼音: a small tag at the head of the row, level with the words, so nothing moves
+        if (!composing && predictionLabel.isNotEmpty()) {
+            tp.textAlign = Paint.Align.LEFT; tp.textSize = sp(Ui.CAPTION); tp.typeface = Ui.medium
+            val tw = tp.measureText(predictionLabel)
+            val cy = (top + height - dp(3f)) / 2 + dp(3f)   // the words' own center line
+            val tag = RectF(x + dp(8f), cy - dp(10f), x + dp(8f) + tw + dp(14f), cy + dp(10f))
+            pill(c, tag, theme.accentSoft)
+            tp.color = theme.accent; tp.alpha = (255 * a).toInt()
+            text(c, predictionLabel, tag.left + dp(7f), tag.centerY())
+            tp.typeface = Ui.regular
+            x = tag.right + dp(2f)
+        }
         tp.textAlign = Paint.Align.LEFT
         val size = sp(18f * prefs.candidateScale)
         val noteSize = sp(Ui.CAPTION)

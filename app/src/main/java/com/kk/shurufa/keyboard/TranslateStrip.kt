@@ -40,8 +40,13 @@ class TranslateStrip(context: Context, private val prefs: Prefs) : View(context)
     /** Languages offered by the picker: (id, name). */
     var languages: List<Pair<String, String>> = emptyList()
     /** Engines offered by the engine chip: (engine, name); the current one is [engine]. */
-    var engines: List<Pair<String, String>> = emptyList()
-    var engine = "mlkit"
+    var engines: List<PickList.Item>
+        get() = pick.items
+        set(v) { pick.items = v }
+    var engine: String
+        get() = pick.current
+        set(v) { pick.current = v }
+    private val pick = PickList(this).apply { rowDp = 34f }
     private var picking: String? = null   // "from" | "to" | "engine"
 
     fun refresh() { srcLayout = null; resLayout = null; invalidate() }
@@ -94,6 +99,10 @@ class TranslateStrip(context: Context, private val prefs: Prefs) : View(context)
         tp.color = if (picking == "engine") theme.accent else theme.inkSoft; text(c, "$engineName ▾", er.centerX(), er.centerY())
         hits += er to "engine"
         val inner = RectF(card.left + dp(12f), hy + hh + dp(4f), card.right - dp(12f), card.bottom - dp(8f))
+        if (picking == "engine") {
+            if (pick.draw(c, RectF(card.left + dp(4f), hy + hh + dp(2f), card.right - dp(4f), card.bottom - dp(4f)), theme, rad)) postInvalidateOnAnimation()
+            return
+        }
         if (picking != null) { drawPicker(c, inner); return }
         // the text and its translation
         val btnW = dp(58f); val btnH = dp(32f)
@@ -132,8 +141,8 @@ class TranslateStrip(context: Context, private val prefs: Prefs) : View(context)
     }
 
     private fun drawPicker(c: Canvas, area: RectF) {
-        val list = when (picking) { "from" -> listOf("auto" to "自动识别") + languages; "engine" -> engines; else -> languages }
-        val cur = when (picking) { "from" -> from; "engine" -> engine; else -> to }
+        val list = when (picking) { "from" -> listOf("auto" to "自动识别") + languages; else -> languages }
+        val cur = when (picking) { "from" -> from; else -> to }
         tp.textSize = sp(Ui.SMALL)
         val h = dp(30f); val gap = dp(6f)
         var x = area.left; var y = area.top + dp(2f)
@@ -179,6 +188,12 @@ class TranslateStrip(context: Context, private val prefs: Prefs) : View(context)
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(e: MotionEvent): Boolean {
+        if (picking == "engine" && (pick.busy || (e.actionMasked == MotionEvent.ACTION_DOWN && pick.contains(e.x, e.y)))) {
+            if (e.actionMasked == MotionEvent.ACTION_DOWN) onFeedback?.invoke()
+            pick.onTouch(e)?.let { id -> picking = null; onPick?.invoke("engine", id) }
+            invalidate()
+            return true
+        }
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 pressed = hits.lastOrNull { it.first.contains(e.x, e.y) }?.second
@@ -190,7 +205,7 @@ class TranslateStrip(context: Context, private val prefs: Prefs) : View(context)
                     null -> {}
                     "from", "to" -> picking = if (picking == p) null else p
                     "swap" -> { picking = null; onSwap?.invoke() }
-                    "engine" -> { picking = if (picking == "engine") null else "engine"; onEngine?.invoke() }
+                    "engine" -> { picking = if (picking == "engine") null else "engine"; if (picking != null) pick.reveal(); onEngine?.invoke() }
                     "close" -> onClose?.invoke()
                     "commit" -> onCommit?.invoke()
                     else -> if (p.startsWith("lang:")) { val w = picking ?: "to"; picking = null; onPick?.invoke(w, p.removePrefix("lang:")) }

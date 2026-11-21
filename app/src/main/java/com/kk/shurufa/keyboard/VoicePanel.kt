@@ -27,8 +27,13 @@ class VoicePanel(context: Context, private val prefs: Prefs) : View(context) {
     var onMode: (() -> Unit)? = null
     var onUndo: (() -> Unit)? = null
     /** 选模型: (engine, name) pairs, the current one, and what happens on a pick. */
-    var engines: List<Pair<String, String>> = emptyList()
-    var engine = ""
+    var engines: List<PickList.Item>
+        get() = pick.items
+        set(v) { pick.items = v }
+    var engine: String
+        get() = pick.current
+        set(v) { pick.current = v }
+    private val pick = PickList(this).apply { title = "识别用" }
     var engineName = ""
         set(v) { field = v; invalidate() }
     var onEngine: ((String) -> Unit)? = null
@@ -132,37 +137,12 @@ class VoicePanel(context: Context, private val prefs: Prefs) : View(context) {
         // bottom right: delete, and taking back the last sentence beside it
         val del = chip(c, "delete", "", "backspace", width - m, height - m - ph, ph, left = false, iconOnly = true)
         if (canUndo) chip(c, "undo", "撤回上一句", "undo", del.left - dp(8f), height - m - ph, ph, left = false)
-        if (picking) drawPicker(c, m + ph + dp(8f))
-        if (again) postInvalidateOnAnimation()
-    }
-
-    /** The list of recognizers, over the middle of the panel. */
-    private fun drawPicker(c: Canvas, top: Float) {
-        val pad = dp(12f)
-        val card = RectF(pad, top, width - pad, height - pad)
-        bg.color = theme.surface
-        val rad = Ui.radiusLarge(dp(prefs.keyRadiusDp), dp(1f))
-        c.drawRoundRect(card, rad, rad, bg)
-        tp.textSize = sp(Ui.CAPTION); tp.color = theme.hint; tp.textAlign = Paint.Align.LEFT
-        c.drawText("识别用", card.left + dp(12f), card.top + dp(18f), tp)
-        tp.textAlign = Paint.Align.CENTER
-        val h = dp(32f); val gap = dp(6f)
-        var x = card.left + dp(12f); var y = card.top + dp(26f)
-        for ((id, name) in engines) {
-            tp.textSize = sp(Ui.SMALL)
-            val w = tp.measureText(name) + dp(24f)
-            if (x + w > card.right - dp(12f)) { x = card.left + dp(12f); y += h + gap }
-            if (y + h > card.bottom - dp(8f)) break
-            val r = RectF(x, y, x + w, y + h)
-            val on = id == engine
-            bg.color = if (on) theme.accentSoft else if (pressed == "eng:$id") theme.softPressed else theme.soft
-            c.drawRoundRect(r, h / 2, h / 2, bg)
-            tp.color = if (on) theme.accent else theme.ink; tp.typeface = if (on) Ui.medium else Ui.regular
-            text(c, name, r.centerX(), r.centerY())
-            tp.typeface = Ui.regular
-            hits += r to "eng:$id"
-            x += w + gap
+        if (picking) {
+            // the list of recognizers, over the middle of the panel
+            val pad = dp(12f)
+            if (pick.draw(c, RectF(pad, m + ph + dp(8f), width - pad, height - pad), theme, Ui.radiusLarge(dp(prefs.keyRadiusDp), dp(1f)))) again = true
         }
+        if (again) postInvalidateOnAnimation()
     }
 
     private fun chip(c: Canvas, id: String, label: String, icon: String?, x: Float, y: Float, h: Float, left: Boolean, on: Boolean = false, iconOnly: Boolean = false): RectF {
@@ -200,6 +180,12 @@ class VoicePanel(context: Context, private val prefs: Prefs) : View(context) {
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(e: MotionEvent): Boolean {
+        if (picking && (pick.busy || (e.actionMasked == MotionEvent.ACTION_DOWN && pick.contains(e.x, e.y)))) {
+            if (e.actionMasked == MotionEvent.ACTION_DOWN) onFeedback?.invoke()
+            pick.onTouch(e)?.let { id -> picking = false; onEngine?.invoke(id) }
+            invalidate()
+            return true
+        }
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 pressed = hits.lastOrNull { it.first.contains(e.x, e.y) }?.second
@@ -212,8 +198,7 @@ class VoicePanel(context: Context, private val prefs: Prefs) : View(context) {
                 val p = pressed
                 when {
                     // while the list is open, anything but a choice (or the chip) just closes it
-                    p != null && p.startsWith("eng:") -> { picking = false; onEngine?.invoke(p.removePrefix("eng:")) }
-                    p == "engine" -> picking = !picking
+                    p == "engine" -> { picking = !picking; if (picking) pick.reveal() }
                     picking -> picking = false
                     p == "mic" -> onMic?.invoke()
                     p == "lang" -> onLanguage?.invoke()

@@ -9,4 +9,4 @@ rows:
   - [q|1, w|2, e|3, r|4, t|5, y|6, u|7, i|8, o|9, p|0]
   - [{spacer: 0.5}, "a|～", "s|！", "d|@", "f|#", "g|%", "h|“", "j|”", "k|*", "l|？", {spacer: 0.5}]
   - [{key: "'", style: soft, w: 1.5, long: [·, "-"]}, "z|（", "x|）", "c|——", "v|_", "b|：", "n|；", "m|、", {fn: backspace, w: 1.5}]
-  - [{fn: symbols, label: "!#1", w: 1.5}, {fn: voice}, {key: "，", up: "、", style: soft, long: [、, ；, ：, ？, ！, ……, ·]}, {fn: space, w: 4.5}, {key: "。", up: "？", style: soft, long: [……, ？, ！, ～, ——]}, {fn: enter, w: 1.5}]
+  - [{fn: symbols, label: "!#1", w: 1.5}, {fn: language}, {key: "，", up: "、", style: soft, long: [、, ；, ：, ？, ！, ……, ·]}, {fn: space, w: 4.5}, {key: "。", up: "？", style: soft, long: [……, ？, ！, ～, ——]}, {fn: enter, w: 1.5}]

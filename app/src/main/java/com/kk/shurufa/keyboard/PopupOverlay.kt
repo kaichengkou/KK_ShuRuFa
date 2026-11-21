@@ -3,6 +3,7 @@ package com.kk.shurufa.keyboard
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Canvas
+import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.Typeface
@@ -81,55 +82,96 @@ class PopupOverlay(context: Context, private val prefs: Prefs) : View(context) {
     // Options come in rows; row 0 is right above the key. On the left half of the keyboard a row
     // runs rightwards from the key, on the right half it runs leftwards, so the finger always
     // slides inwards. The first option of row 0 starts selected (it is the up-flick character).
+    //
+    // Two looks, one type size each: characters (keys, emoji) sit in equal cells at one glyph
+    // size, widened to fit the widest instead of shrinking some; commands and longer text
+    // (取消 · 收藏 · 删除…) are pills as wide as their words, all set at body size.
     private var rows: List<List<Output>> = emptyList()
+    private var cells: List<List<RectF>> = emptyList()
     private var opRect = RectF()
-    private var cellW = 0f
     private var cellH = 0f
-    private var perRow = 1
+    private var minCellW = 0f
     private var mirror = false
+    private var words = false
+    private var fontPx = 0f
     private var selRow = 0
     private var selCol = 0
     private var keyBottom = 0f
     private val opShow = Tween(0f)
     private val selX = Tween(0f)
     private val selY = Tween(0f)
+    private val selW = Tween(0f)
     private val pad get() = dp(5f)
 
     fun showOptions(key: RectF, keyH: Float, options: List<Output>, fingerX: Float, math: Boolean, fingerY: Float? = null) {
-        val usable = ((width - 2 * dp(5f) - dp(8f)) / max(key.width() * 0.92f, dp(40f))).toInt().coerceAtLeast(1)
-        showOptionRows(key, keyH, options.chunked(min(8, usable)), fingerX, fingerY)
+        showOptionRows(key, keyH, listOf(options), fingerX, fingerY)
     }
 
     /** [fingerY]: where the finger really is, when the menu is not anchored on it (the candidate bar). */
     fun showOptionRows(key: RectF, keyH: Float, options: List<List<Output>>, fingerX: Float, fingerY: Float? = null) {
-        cellW = max(key.width() * 0.92f, dp(40f))
+        val all = options.flatten()
+        if (all.isEmpty()) return
+        words = all.any { it.text.startsWith("§") || glyphs(it.label) > 3 }
         cellH = keyH * 1.02f
-        val maxPer = floor((width - 2 * pad - dp(8f)) / cellW).toInt().coerceAtLeast(1)
-        rows = options.flatMap { it.chunked(maxPer) }.filter { it.isNotEmpty() }
-        perRow = rows.maxOf { it.size }
         mirror = key.centerX() > width / 2f
-        val w = perRow * cellW + 2 * pad
+        val avail = width - 2 * pad - dp(8f)
+        val widths: List<List<Float>>
+        if (words) {
+            fontPx = sp(Ui.BODY); text.textSize = fontPx; text.typeface = Ui.regular
+            val padX = dp(15f)
+            // wrap each given row into lines that fit the screen
+            val lines = mutableListOf<List<Output>>(); val lw = mutableListOf<List<Float>>()
+            for (row in options) {
+                var line = mutableListOf<Output>(); var ws = mutableListOf<Float>(); var used = 0f
+                for (o in row) {
+                    val w = (text.measureText(o.label) + 2 * padX).coerceIn(dp(56f), avail)
+                    if (line.isNotEmpty() && used + w > avail) { lines += line; lw += ws; line = mutableListOf(); ws = mutableListOf(); used = 0f }
+                    line += o; ws += w; used += w
+                }
+                if (line.isNotEmpty()) { lines += line; lw += ws }
+            }
+            rows = lines; widths = lw
+        } else {
+            fontPx = sp(22f); text.textSize = fontPx; text.typeface = Ui.regular
+            val widest = all.maxOf { text.measureText(it.label) }
+            var cw = max(max(key.width() * 0.92f, dp(40f)), widest + dp(16f))
+            val per0 = floor(avail / cw).toInt()
+            if (per0 < 1) cw = avail
+            if (widest + dp(16f) > cw) fontPx *= (cw - dp(16f)) / widest
+            val per = max(1, floor(avail / cw).toInt())
+            rows = options.flatMap { it.chunked(per) }.filter { it.isNotEmpty() }
+            widths = rows.map { r -> r.map { cw } }
+        }
+        minCellW = widths.flatten().min()
+        val inner = widths.maxOf { it.sum() }
+        val w = inner + 2 * pad
         val h = rows.size * cellH + 2 * pad
-        var left = if (mirror) key.centerX() + cellW / 2 + pad - w else key.centerX() - cellW / 2 - pad
+        val first = widths[0][0]
+        var left = if (mirror) key.centerX() + first / 2 + pad - w else key.centerX() - first / 2 - pad
         left = left.coerceIn(dp(4f), width - w - dp(4f))
         val top = max(dp(2f), key.top - h - dp(6f))
         opRect = RectF(left, top, left + w, top + h)
+        // lay out the cells: each line starts at the side nearest the key
+        cells = rows.indices.map { r ->
+            val y = opRect.bottom - pad - (r + 1) * cellH
+            var x = if (mirror) opRect.right - pad else opRect.left + pad
+            widths[r].map { cw ->
+                val rect = if (mirror) RectF(x - cw, y, x, y + cellH) else RectF(x, y, x + cw, y + cellH)
+                x += if (mirror) -cw else cw
+                rect
+            }
+        }
         keyBottom = key.bottom
         selRow = 0; selCol = 0
         startX = fingerX
         startY = fingerY ?: key.centerY()
         lastX = fingerX; lastY = startY
         moved = false
-        selX.set(cellLeft(0, 0)); selY.set(cellTop(0))
+        cells[0][0].let { selX.set(it.left); selY.set(it.top); selW.set(it.width()) }
         opShow.set(0f)
         opShow.animateTo(1f, dur(150), Tween.EASE_OUT)
         invalidate()
     }
-
-    /** Display column of option [i] in a row. */
-    private fun colOf(i: Int) = if (mirror) perRow - 1 - i else i
-    private fun cellLeft(row: Int, i: Int) = opRect.left + pad + colOf(i) * cellW
-    private fun cellTop(row: Int) = opRect.bottom - pad - (row + 1) * cellH
 
     private var startX = 0f
     private var startY = 0f
@@ -138,26 +180,36 @@ class PopupOverlay(context: Context, private val prefs: Prefs) : View(context) {
     private var lastX = 0f
     private var lastY = 0f
 
+    /** The option in line [r] under [x], or the nearest end of the line. */
+    private fun colAt(r: Int, x: Float): Int {
+        val line = cells[r]
+        line.indexOfFirst { x >= it.left && x < it.right }.let { if (it >= 0) return it }
+        val leftmost = line.indices.minBy { line[it].left }
+        val rightmost = line.indices.maxBy { line[it].right }
+        return if (x < line[leftmost].left) leftmost else rightmost
+    }
+
+    private fun moveSel(r: Int, c: Int, animate: Boolean) {
+        val rect = cells[r][c]
+        if (animate) { selX.animateTo(rect.left, dur(110)); selY.animateTo(rect.top, dur(110)); selW.animateTo(rect.width(), dur(110)) }
+        else { selX.set(rect.left); selY.set(rect.top); selW.set(rect.width()) }
+    }
+
     fun moveSelection(x: Float, y: Float) {
         if (rows.isEmpty()) return
         lastX = x; lastY = y
         if (!moved) {
-            if (kotlin.math.abs(x - startX) < cellW * 0.6f && kotlin.math.abs(y - startY) < cellH * 0.6f) return
+            if (kotlin.math.abs(x - startX) < minCellW * 0.6f && kotlin.math.abs(y - startY) < cellH * 0.6f) return
             moved = true
         }
         var nr = -1; var nc = -1
         if (y <= keyBottom + cellH * 1.2f) {
             nr = floor((opRect.bottom - pad - y) / cellH).toInt().coerceIn(0, rows.size - 1)
-            val col = floor((x - opRect.left - pad) / cellW).toInt().coerceIn(0, perRow - 1)
-            nc = (if (mirror) perRow - 1 - col else col).coerceIn(0, rows[nr].size - 1)
+            nc = colAt(nr, x)
         }
         if (nr != selRow || nc != selCol) {
             selRow = nr; selCol = nc
-            if (nr >= 0) {
-                selX.animateTo(cellLeft(nr, nc), dur(110))
-                selY.animateTo(cellTop(nr), dur(110))
-                onTick?.invoke()
-            }
+            if (nr >= 0) { moveSel(nr, nc, true); onTick?.invoke() }
             invalidate()
         }
     }
@@ -193,11 +245,8 @@ class PopupOverlay(context: Context, private val prefs: Prefs) : View(context) {
 
     private fun optionAt(x: Float, y: Float): Pair<Int, Int>? {
         if (!opRect.contains(x, y)) return null
-        val row = floor((opRect.bottom - pad - y) / cellH).toInt()
-        if (row !in rows.indices) return null
-        val col = floor((x - opRect.left - pad) / cellW).toInt().coerceIn(0, perRow - 1)
-        val i = if (mirror) perRow - 1 - col else col
-        return if (i in rows[row].indices) row to i else null
+        cells.forEachIndexed { r, line -> line.forEachIndexed { c, rect -> if (rect.contains(x, y)) return r to c } }
+        return null
     }
 
     /** Closes an open menu without a choice (the panel changed under it). */
@@ -220,7 +269,7 @@ class PopupOverlay(context: Context, private val prefs: Prefs) : View(context) {
                 val (r, c) = hit ?: (-1 to -1)
                 if (r != selRow || c != selCol) {
                     selRow = r; selCol = c
-                    if (r >= 0) { selX.set(cellLeft(r, c)); selY.set(cellTop(r)); onTick?.invoke() }
+                    if (r >= 0) { moveSel(r, c, false); onTick?.invoke() }
                     invalidate()
                 }
             }
@@ -245,7 +294,7 @@ class PopupOverlay(context: Context, private val prefs: Prefs) : View(context) {
         }
         val os = opShow.value
         if (os > 0.01f && rows.isNotEmpty()) {
-            again = again || opShow.running || selX.running || selY.running
+            again = again || opShow.running || selX.running || selY.running || selW.running
             drawOptions(c, os)
         }
         if (again) postInvalidateOnAnimation()
@@ -300,24 +349,37 @@ class PopupOverlay(context: Context, private val prefs: Prefs) : View(context) {
         val s = 0.9f + 0.1f * show
         c.scale(s, s, opRect.centerX(), opRect.bottom)
         bubble(c, opRect, show)
+        val alpha = (255 * show).toInt()
+        val inset = dp(1.5f)
+        val rad = if (words) (cellH - 2 * inset) / 2 else dp(prefs.keyRadiusDp)
+        // hairlines between word pills, except beside the highlighted one
+        if (words) {
+            bg.color = theme.divider; bg.alpha = (Color.alpha(theme.divider) * 0.55f * show).toInt()
+            cells.forEachIndexed { r, line ->
+                for (i in 1 until line.size) {
+                    if (r == selRow && (i == selCol || i - 1 == selCol)) continue
+                    val a = line[i - 1]; val b = line[i]
+                    val x = if (mirror) a.left else a.right
+                    c.drawRect(x - dp(0.4f), b.top + cellH * 0.36f, x + dp(0.4f), b.bottom - cellH * 0.36f, bg)
+                }
+            }
+        }
         if (selRow >= 0) {
-            bg.color = theme.accent
-            bg.alpha = (255 * show).toInt()
+            bg.color = theme.accent; bg.alpha = alpha
             val x = selX.value; val y = selY.value
-            c.drawRoundRect(x + dp(1.5f), y + dp(1.5f), x + cellW - dp(1.5f), y + cellH - dp(1.5f), dp(prefs.keyRadiusDp), dp(prefs.keyRadiusDp), bg)
+            c.drawRoundRect(x + inset, y + inset, x + selW.value - inset, y + cellH - inset, rad, rad, bg)
         }
         text.typeface = Ui.regular
+        text.textSize = fontPx
+        val fm = text.fontMetrics
         rows.forEachIndexed { r, row ->
             row.forEachIndexed { i, o ->
-                val x = cellLeft(r, i) + cellW / 2
-                val y = cellTop(r) + cellH / 2
-                text.color = if (r == selRow && i == selCol) theme.onAccent else theme.ink
-                text.alpha = (255 * show).toInt()
-                text.textSize = sp(if (glyphs(o.label) <= 2) 21f else Ui.BODY)
-                val tw = text.measureText(o.label)
-                if (tw > cellW - dp(6f)) text.textSize *= (cellW - dp(6f)) / tw
-                val fm = text.fontMetrics
-                c.drawText(o.label, x, y - (fm.ascent + fm.descent) / 2, text)
+                val rect = cells[r][i]
+                val on = r == selRow && i == selCol
+                // 取消 is the way out, not a choice: quieter
+                text.color = when { on -> theme.onAccent; o.text == "§cancel" -> theme.inkSoft; else -> theme.ink }
+                text.alpha = alpha
+                c.drawText(o.label, rect.centerX(), rect.centerY() - (fm.ascent + fm.descent) / 2, text)
             }
         }
         c.restore()
