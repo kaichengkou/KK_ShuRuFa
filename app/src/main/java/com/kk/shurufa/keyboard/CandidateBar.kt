@@ -3,8 +3,10 @@ package com.kk.shurufa.keyboard
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Canvas
+import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.RectF
+import android.graphics.Shader
 import android.os.Handler
 import android.os.Looper
 import android.view.MotionEvent
@@ -321,6 +323,18 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
         }
         contentW = x + scrollX0
         c.restore()
+        // soft edges where the row goes on past what is shown
+        val fw = dp(18f)
+        val clipR = width - endW
+        if (scrollX0 > 1f) {
+            bg.shader = edgeL ?: LinearGradient(0f, 0f, fw, 0f, theme.background, Colors.alpha(theme.background, 0), Shader.TileMode.CLAMP).also { edgeL = it }
+            c.drawRect(0f, top, fw, height.toFloat(), bg); bg.shader = null
+        }
+        if (scrollX0 < scrollMax - 1f) {
+            if (edgeAt != clipR) { edgeR = null; edgeAt = clipR }
+            bg.shader = edgeR ?: LinearGradient(clipR - fw, 0f, clipR, 0f, Colors.alpha(theme.background, 0), theme.background, Shader.TileMode.CLAMP).also { edgeR = it }
+            c.drawRect(clipR - fw, top, clipR, height.toFloat(), bg); bg.shader = null
+        }
         val ex = width - endW / 2
         ip.color = Colors.fade(theme.inkSoft, a)
         if (composing) Icons.draw(c, if (expanded) "expand" else "collapse", ex, height / 2f, dp(20f), ip)
@@ -329,6 +343,12 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
         c.drawRect(width - endW, dp(14f), width - endW + dp(1f), height - dp(14f), bg)
         hits.add(if (composing) "expand" else "dismiss", width - endW, 0f, width.toFloat(), height.toFloat())
     }
+
+    private var edgeL: LinearGradient? = null
+    private var edgeR: LinearGradient? = null
+    private var edgeAt = 0f
+
+    override fun onThemeChanged() { edgeL = null; edgeR = null }
 
     private fun candRect(i: Int): RectF {
         while (candRects.size <= i) candRects += RectF()
