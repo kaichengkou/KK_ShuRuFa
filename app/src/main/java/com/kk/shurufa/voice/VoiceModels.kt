@@ -108,43 +108,6 @@ object VoiceModels {
      */
     fun download(ctx: Context, m: Model, source: String, progress: (Float) -> Unit, cancelled: () -> Boolean) {
         val base = sources.firstOrNull { it.first == source }?.second ?: sources[0].second
-        val part = File(dir(ctx), m.file + ".part")
-        var url = URL(base + m.file)
-        var conn: HttpURLConnection
-        var redirects = 0
-        while (true) {
-            conn = url.openConnection() as HttpURLConnection
-            conn.instanceFollowRedirects = false
-            conn.connectTimeout = 20000; conn.readTimeout = 30000
-            conn.setRequestProperty("User-Agent", "KK-IME")
-            if (part.length() > 0) conn.setRequestProperty("Range", "bytes=${part.length()}-")
-            val code = conn.responseCode
-            if (code in 300..399 && redirects++ < 8) { url = URL(url, conn.getHeaderField("Location")); conn.disconnect(); continue }
-            if (code !in 200..299) { conn.disconnect(); error("HTTP $code") }
-            break
-        }
-        val resumed = conn.responseCode == 206
-        val start = if (resumed) part.length() else 0L
-        val total = start + conn.contentLengthLong.coerceAtLeast(0L)
-        try {
-            conn.inputStream.use { input ->
-                java.io.FileOutputStream(part, resumed).use { out ->
-                    val buf = ByteArray(256 * 1024)
-                    var done = start
-                    var last = 0L
-                    while (true) {
-                        if (cancelled()) return
-                        val n = input.read(buf)
-                        if (n < 0) break
-                        out.write(buf, 0, n)
-                        done += n
-                        if (total > 0 && done - last > 1_000_000) { last = done; progress(done.toFloat() / total) }
-                    }
-                }
-            }
-        } finally { conn.disconnect() }
-        if (total > 0 && part.length() < total) error("下载不完整")
-        part.renameTo(file(ctx, m))
-        progress(1f)
+        fetch(base + m.file, file(ctx, m), progress, cancelled)
     }
 }
