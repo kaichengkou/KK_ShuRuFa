@@ -175,7 +175,6 @@ class EmojiFeature(private val host: Host) {
      */
     fun startSearch() {
         host.finishComposing()
-        host.haptics.play(HapticEvent.FUNCTION)
         host.openSink(Sink.EMOJI, contextWord())
     }
 

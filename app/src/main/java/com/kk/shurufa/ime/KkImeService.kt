@@ -274,7 +274,8 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         }
         paintNavigationBar()
         show(panel)
-        pendingNotice?.let { bar.flash(it); pendingNotice = null }
+        // a notice raised while building waits for the keyboard to be laid out
+        root.post { pendingNotice?.let { pendingNotice = null; notice(it) } }
         return root
     }
 
@@ -597,8 +598,9 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         }
     }
 
+    /** A short notice floating above the keyboard (instead of a toast over the app). */
     override fun notice(text: String) {
-        if (built) bar.flash(text) else pendingNotice = text
+        if (built && column.height > 0) overlay.toast(text, column.top.toFloat()) else pendingNotice = text
     }
 
     // ---- the candidate grid, symbols, the edit pad, numbers, the quick panel --------------

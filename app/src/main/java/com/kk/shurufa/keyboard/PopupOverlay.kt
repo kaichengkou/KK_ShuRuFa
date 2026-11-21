@@ -283,9 +283,44 @@ class PopupOverlay(context: Context, prefs: Prefs) : KbView(context, prefs) {
         invalidate()
     }
 
+    // ---- notices: a short line floating just above the keyboard, over the app, never in the way
+    // of the keys or the candidates; it goes away by itself ----
+    private var toastText = ""
+    private var toastBottom = 0f
+    private val toastAnim = Tween(0f)
+    private val toastRect = RectF()
+    private val hideToast = Runnable { toastAnim.animateTo(0f, dur(180), Motion.EXIT); invalidate() }
+
+    /** Shows [text] above the keyboard, whose top edge is at [keyboardTop] in this layer. */
+    fun toast(text: String, keyboardTop: Float) {
+        toastText = text
+        toastBottom = keyboardTop - dp(10f)
+        removeCallbacks(hideToast)
+        toastAnim.animateTo(1f, dur(200), Motion.ENTER)
+        postDelayed(hideToast, 1600L + 40L * text.length.coerceAtMost(30))
+        invalidate()
+    }
+
+    private fun drawToast(c: Canvas, a: Float) {
+        text.typeface = Ui.regular; text.textSize = sp(Ui.BODY)
+        val w = minOf(text.measureText(toastText) + dp(36f), width - dp(24f))
+        val h = dp(36f)
+        val rise = (1 - a) * dp(8f)
+        toastRect.set((width - w) / 2, toastBottom - h + rise, (width + w) / 2, toastBottom + rise)
+        bg.color = theme.popup
+        bg.alpha = (255 * a).toInt()
+        bg.setShadowLayer(dp(10f), 0f, dp(3f), Colors.alpha(Color.BLACK, ((if (theme.dark) 0x70 else 0x38) * a).toInt()))
+        c.drawRoundRect(toastRect, h / 2, h / 2, bg)
+        bg.clearShadowLayer()
+        text.color = theme.ink; text.alpha = (255 * a).toInt()
+        drawText(c, toastText, toastRect.centerX(), toastRect.centerY(), text)
+    }
+
     // ---- drawing ----
     override fun onDraw(c: Canvas) {
         var again = false
+        val ta = toastAnim.value
+        if (ta > 0.01f && toastText.isNotEmpty()) { drawToast(c, ta); again = toastAnim.running }
         val pa = pvAlpha.value
         if (pa > 0.01f && opShow.value < 0.5f) {
             if (pvScale.running) pvScale.step()

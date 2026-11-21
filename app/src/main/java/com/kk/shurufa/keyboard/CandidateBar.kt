@@ -18,7 +18,7 @@ import kotlin.math.max
 /**
  * The strip above the keys: the toolbar when idle, pinyin and candidates while composing,
  * associations after a word, a paste chip after copying, the number keyboard's bar, or a
- * status line. A short notice can pass over any of them ([flash]).
+ * status line.
  */
 @SuppressLint("ViewConstructor")
 class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
@@ -170,24 +170,9 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
         switchTo(Mode.EDIT)
     }
 
-    // ---- notices: a short line that passes over the bar and goes away by itself ----
-    private var notice = ""
-    private val noticeAnim = Tween(0f)
-    private val hideNotice = Runnable { noticeAnim.animateTo(0f, dur(220), Motion.EXIT); invalidate() }
-
-    /** Shows [text] over the bar for a moment (instead of a toast over the app). */
-    fun flash(text: String) {
-        notice = text
-        handler.removeCallbacks(hideNotice)
-        noticeAnim.animateTo(1f, dur(180), Motion.ENTER)
-        handler.postDelayed(hideNotice, 1600L + 40L * text.length.coerceAtMost(30))
-        invalidate()
-    }
-
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
         handler.removeCallbacksAndMessages(null)
-        noticeAnim.set(0f)
     }
 
     // ---- drawing ----
@@ -195,12 +180,9 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
     override fun onDraw(c: Canvas) {
         c.drawColor(theme.background)
         hits.clear()
-        var a = fade.value
+        val a = fade.value
         var again = fade.running
         if (scroller.computeScrollOffset()) { scrollX0 = scroller.currX.toFloat(); again = true }
-        val n = noticeAnim.value
-        if (noticeAnim.running) again = true
-        a *= 1f - n
         tp.typeface = Ui.regular
         if (a > 0.01f) when (mode) {
             Mode.TOOLBAR -> again = drawToolbar(c, a) || again
@@ -216,13 +198,6 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
                 tp.typeface = Ui.regular
                 if (messageTap) hits.add("message", 0f, 0f, width.toFloat(), height.toFloat())
             }
-        }
-        if (n > 0.01f) {
-            // the notice slides up a little as it arrives
-            tp.textAlign = Paint.Align.CENTER; tp.textSize = sp(Ui.BODY); tp.typeface = Ui.medium
-            tp.color = theme.inkSoft; tp.alpha = (255 * n).toInt()
-            drawText(c, notice, width / 2f, height / 2f + (1 - n) * dp(6f), tp)
-            tp.typeface = Ui.regular
         }
         if (again) postInvalidateOnAnimation()
     }

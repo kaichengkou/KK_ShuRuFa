@@ -50,7 +50,7 @@ class ImeServiceTest {
         return ime to view
     }
 
-    private fun shot(view: View, name: String) {
+    private fun shot(view: View, name: String, whole: Boolean = false) {
         val w = ctx.resources.displayMetrics.widthPixels
         val screenH = ctx.resources.displayMetrics.heightPixels
         view.measure(View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(screenH, View.MeasureSpec.AT_MOST))
@@ -59,7 +59,7 @@ class ImeServiceTest {
         val column = (view as ViewGroup).getChildAt(0)
         val b = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
         view.draw(Canvas(b))
-        val top = column.top.coerceAtLeast(0)
+        val top = if (whole) (column.top - (ctx.resources.displayMetrics.density * 60).toInt()).coerceAtLeast(0) else column.top.coerceAtLeast(0)
         val out = Bitmap.createBitmap(b, 0, top, b.width, (column.bottom - top).coerceAtLeast(1))
         File("build/screens").mkdirs()
         File("build/screens/$name.png").outputStream().use { out.compress(Bitmap.CompressFormat.PNG, 100, it) }
@@ -112,7 +112,9 @@ class ImeServiceTest {
         shot(view, "${tag}_ai_instruction")
         ime.onDismissSuggestions(); idle()
         assertEquals(Panel.AI, ime.panel)
+        // a notice floats above the keyboard; the window's transparent top is kept in this shot
         ime.notice("已复制"); idle(100)
+        shot(view, "${tag}_notice", whole = true)
         // a panel switch while a query is open closes the query
         ime.openSink(Sink.TRANSLATE); idle()
         ime.onTool("clipboard"); idle()
