@@ -301,26 +301,20 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
                 bg.color = theme.accent
                 c.drawRect(cx - dp(0.8f), dp(3.5f), cx + dp(0.8f), dp(16f), bg)
             }
+        } else if (!composing && predictionLabel.isNotEmpty()) {
+            // 按原拼音 / 查找: on the pinyin line, where what was typed always shows
+            tp.textAlign = Paint.Align.LEFT; tp.textSize = sp(Ui.SMALL); tp.color = theme.accent; tp.alpha = (255 * a).toInt()
+            ellipsizer.set(tp)
+            c.drawText(android.text.TextUtils.ellipsize(predictionLabel, ellipsizer, width - endW - dp(24f), android.text.TextUtils.TruncateAt.END).toString(), dp(12f), dp(14f), tp)
         }
         c.save()
         c.clipRect(0f, 0f, width - endW, height.toFloat())
         candCount = 0
         var x = dp(4f) - scrollX0
-        val top = if (composing) dp(16f) else dp(4f)
+        // one line for the pinyin is always kept, so the words sit at the same height whether they
+        // are candidates, predictions, or follow a deletion
+        val top = dp(16f)
         val bottom = height - dp(3f)
-        // 按原拼音 and 查找: a small tag at the head of the row, level with the words, so nothing moves
-        if (!composing && predictionLabel.isNotEmpty()) {
-            tp.textAlign = Paint.Align.LEFT; tp.textSize = sp(Ui.CAPTION); tp.typeface = Ui.medium
-            val tw = tp.measureText(predictionLabel)
-            val cy = (top + bottom) / 2
-            val tag = tmp.apply { set(x + dp(8f), cy - dp(11f), x + dp(8f) + tw + dp(16f), cy + dp(11f)) }
-            bg.color = Colors.fade(theme.accentSoft, a)
-            c.drawRoundRect(tag, tag.height() / 2, tag.height() / 2, bg)
-            tp.color = theme.accent; tp.alpha = (255 * a).toInt()
-            drawText(c, predictionLabel, tag.left + dp(8f), tag.centerY(), tp)
-            tp.typeface = Ui.regular
-            x = tag.right + dp(2f)
-        }
         tp.textAlign = Paint.Align.LEFT
         val size = sp(Ui.CANDIDATE * prefs.candidateScale)
         val noteSize = sp(Ui.CAPTION)

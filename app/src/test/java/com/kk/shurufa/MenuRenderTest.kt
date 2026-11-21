@@ -95,6 +95,7 @@ class MenuRenderTest {
         // 按原拼音: level with the words
         bar.showPredictions(listOf("你好", "拟好", "你号", "泥好"), "按原拼音 ni hao"); f.invalidate(); save("bar_reselect", f)
         bar.showPredictions(listOf("你好", "拟好", "你号", "泥好")); f.invalidate(); save("bar_predict", f)
+        bar.showCandidates("ni hao", listOf("你好", "拟好", "你号", "泥好"), emptyList(), -1); f.invalidate(); save("bar_compose", f)
     }
 
     private fun setPicking(v: Any, value: Any?) {
@@ -112,7 +113,7 @@ class MenuRenderTest {
             engines = listOf(PickList.Item("whisper", "本地模型", "SenseVoice · Whisper"), PickList.Item("system", "系统识别", "Android")) + models
             engine = "gemini|gemini-3.5-flash-lite"
         }
-        val f1 = frame(250, CandidateBar(ctx, prefs).apply { activeTool = "mic" }, vp.also { it.layoutParams = LinearLayout.LayoutParams(-1, (210 * d).toInt()) })
+        val f1 = frame(250, CandidateBar(ctx, prefs).apply { activeTool = "mic" }, vp.also { it.layoutParams = LinearLayout.LayoutParams(-1, (240 * d).toInt()) })
         setPicking(vp, true); f1.invalidate(); idle(100)
         f1.layout(0, 0, f1.width, f1.height); save("pick_voice", f1)
         val ap = com.kk.shurufa.keyboard.AiPanel(ctx, prefs).apply {
@@ -120,8 +121,19 @@ class MenuRenderTest {
             sourceLabel = "全文"; source = "今天天气真好我门去公园吧"; provider = "Gemini 3.5 Flash Lite"
             targets = models.filter { !it.name.contains("Transcribe") }; currentTarget = "gemini|gemini-3.5-flash-lite"
         }
-        val f2 = frame(250, CandidateBar(ctx, prefs).apply { activeTool = "ai" }, ap.also { it.layoutParams = LinearLayout.LayoutParams(-1, (210 * d).toInt()) })
+        val f2 = frame(250, CandidateBar(ctx, prefs).apply { activeTool = "ai" }, ap.also { it.layoutParams = LinearLayout.LayoutParams(-1, (240 * d).toInt()) })
         setPicking(ap, true); f2.invalidate(); save("pick_ai", f2)
+        setPicking(ap, false)
+        ap.doneTitle = "润色"
+        ap.setResult("我昨天去那家店买东西，发现他们家的东西其实挺贵的，不过质量还行，就是服务态度不太好。".repeat(4), null)
+        f2.invalidate(); save("ai_long_top", f2)
+        val t0 = android.os.SystemClock.uptimeMillis(); val cx = f2.width / 2f; val y0 = 200 * d
+        val loc = IntArray(2); ap.getLocationInWindow(loc)
+        fun ev(a: Int, y: Float, t: Long) = android.view.MotionEvent.obtain(t0, t0 + t, a, cx, y - loc[1], 0).also { ap.dispatchTouchEvent(it) }
+        fun lev(a: Int, y: Float, t: Long) = android.view.MotionEvent.obtain(t0, t0 + t, a, cx, y * d, 0).also { ap.onTouchEvent(it) }
+        lev(0, 170f, 0); lev(2, 160f, 50); lev(2, 130f, 100); lev(2, 100f, 150); lev(1, 100f, 400)
+        assertEquals(true, (ap.javaClass.getDeclaredField("resScroll").apply { isAccessible = true }.get(ap) as Float) > 0f)
+        f2.invalidate(); save("ai_long_scrolled", f2)
         val ts = com.kk.shurufa.keyboard.TranslateStrip(ctx, prefs).apply {
             languages = com.kk.shurufa.online.TranslateService.LANGS; fromName = "自动"; toName = "English"; engineName = "Gemini"
             engines = listOf(PickList.Item("mlkit", "离线翻译", "ML Kit")) + models; engine = "gemini|gemini-3.5-flash"

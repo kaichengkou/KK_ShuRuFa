@@ -26,9 +26,10 @@ import kotlin.math.sin
 
 /**
  * AI 改写. What will be sent and the model it goes to on top; the actions in one row that slides
- * sideways (改写 · 翻译), with 输入指令 always at its end; and a result card that fills in while
- * the answer streams, with the changed characters marked for 润色 and 纠错, and 重试 · 复制 ·
- * 插入 · 替换 on its title line.
+ * sideways (改写 · 翻译), with 输入指令 always at its end. Once an answer comes the actions fold
+ * away and the answer gets the panel: it fills in while it streams (following its last line), the
+ * changed characters are marked for 润色 and 纠错, a long one scrolls, and 重试 · 复制 · 插入 ·
+ * 替换 sit on its title line; ✕ brings the actions back.
  */
 @SuppressLint("ViewConstructor")
 class AiPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
@@ -62,7 +63,21 @@ class AiPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
     private var diffBase: String? = null
 
     /** The answer so far; [base] marks what changed against the original (润色/纠错). */
-    fun setResult(text: String, base: String?) { result = text; diffBase = base; resLayout = null; invalidate() }
+    fun setResult(text: String, base: String?) {
+        // a new answer starts at the top; a streaming one follows its last line unless scrolled
+        if (result.isEmpty() || !text.startsWith(result)) { resScroll = 0f; follow = true; resScroller.forceFinished(true) }
+        result = text; diffBase = base; resLayout = null; invalidate()
+    }
+
+    // a long answer scrolls inside its card
+    private val resView = RectF()
+    private var resScroll = 0f
+    private var resMax = 0f
+    private var follow = true
+    private val resScroller = OverScroller(context)
+    private var resFadeTop: LinearGradient? = null
+    private var resFadeBottom: LinearGradient? = null
+    private var resFadeAt = 0f
 
     private val bg = Paint(Paint.ANTI_ALIAS_FLAG)
     private val tp = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -81,8 +96,8 @@ class AiPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
     private var fadeL: LinearGradient? = null
     private var fadeR: LinearGradient? = null
 
-    override fun onThemeChanged() { resLayout = null; fadeL = null; fadeR = null }
-    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) { resLayout = null; fadeL = null; fadeR = null }
+    override fun onThemeChanged() { resLayout = null; fadeL = null; fadeR = null; resFadeTop = null; resFadeBottom = null }
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) { resLayout = null; fadeL = null; fadeR = null; resFadeTop = null; resFadeBottom = null }
 
     private val pad get() = dp(Ui.EDGE + 2f)
 
@@ -118,9 +133,13 @@ class AiPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
             if (again) postInvalidateOnAnimation()
             return
         }
-        again = drawActions(c, y, ch) || again
-        y += ch + dp(10f)
-        drawResult(c, y)
+        // once there is an answer (or one is on its way) the actions fold away and it gets the panel
+        val folded = result.isNotEmpty() || running != null
+        if (!folded) {
+            again = drawActions(c, y, ch) || again
+            y += ch + dp(10f)
+        }
+        again = drawResult(c, y) || again
         if (again) postInvalidateOnAnimation()
     }
 
@@ -208,48 +227,84 @@ class AiPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
         hits.add("setup", r, slop = dp(6f))
     }
 
-    private fun drawResult(c: Canvas, top0: Float) {
+    /** The answer card; true while something in it moves. */
+    private fun drawResult(c: Canvas, top0: Float): Boolean {
         val t = theme
         val card = r.apply { set(pad, top0, width - pad, height - dp(10f)) }
-        if (card.height() < dp(48f)) return
+        if (card.height() < dp(48f)) return false
         val rad = Ui.radiusLarge(dp(prefs.keyRadiusDp), dp(1f))
         bg.color = t.surface
         c.drawRoundRect(card, rad, rad, bg)
         val cardL = card.left; val cardR = card.right; val cardT = card.top; val cardB = card.bottom
         val inner = dp(12f)
         if (result.isEmpty()) {
-            tp.textAlign = Paint.Align.CENTER; tp.color = t.hint; tp.textSize = sp(Ui.SMALL + 1f)
+            // waiting for the first words: the line breathes
+            val breathing = running != null && status.isEmpty()
+            tp.textAlign = Paint.Align.CENTER; tp.textSize = sp(Ui.SMALL + 1f)
+            tp.color = if (breathing) Colors.blend(t.hint, t.accent, 0.5f + 0.5f * sin(pulse.value * Math.PI).toFloat()) else t.hint
+            if (breathing && !pulse.running) { pulse.set(0f); pulse.animateTo(1f, 1100, Motion.LINEAR) }
             drawText(c, status.ifEmpty { if (running != null) "正在思考…" else "选一个操作；选中文字时只处理选中的部分" }, card.centerX(), card.centerY(), tp)
-            return
+            return breathing
         }
-        // title line: what was done, and the buttons for the answer
+        // title line: ✕ and what was done on the left, the buttons for the answer on the right
         val lineH = dp(28f)
-        val lineCy = cardT + dp(8f) + lineH / 2
+        val lineT = cardT + dp(8f)
+        val lineCy = lineT + lineH / 2
+        var tx = cardL + inner
+        if (running == null) {
+            r.set(cardL + dp(6f), lineT, cardL + dp(6f) + lineH, lineT + lineH)
+            drawChip(c, r, "", ChipStyle.GHOST, pressed = pressed == "back", icon = "close")
+            hits.add("back", r, slop = dp(5f))
+            tx = r.right + dp(4f)
+        }
         tp.textAlign = Paint.Align.LEFT; tp.textSize = sp(Ui.SMALL); tp.color = t.hint; tp.typeface = Ui.medium
-        drawText(c, if (running != null) "$doneTitle · 生成中…" else doneTitle, cardL + inner, lineCy, tp)
+        drawText(c, if (running != null) "$doneTitle · 生成中…" else doneTitle, tx, lineCy, tp)
         tp.typeface = Ui.regular
         if (running == null) {
             var bx = cardR - dp(8f)
             for ((id, label) in BUTTONS) {
                 val primary = id == "replace"
                 val w = chipWidth(label, textSp = Ui.SMALL + 1f)
-                r.set(bx - w, lineCy - lineH / 2, bx, lineCy + lineH / 2)
+                r.set(bx - w, lineT, bx, lineT + lineH)
                 drawChip(c, r, label, if (primary) ChipStyle.PRIMARY else ChipStyle.SOFT, pressed = pressed == id, textSp = Ui.SMALL + 1f)
                 hits.add(id, r, slop = dp(5f))
                 bx = r.left - dp(6f)
             }
         }
-        val top = lineCy + lineH / 2 + dp(6f)
+        // the text, in a window that scrolls when the answer is longer than the card
+        resView.set(cardL + inner, lineT + lineH + dp(6f), cardR - inner, cardB - dp(10f))
         val lay = resLayout ?: run {
             body.textSize = sp(Ui.BODY + 1f); body.color = t.ink
-            val w = (cardR - cardL - 2 * inner).toInt().coerceAtLeast(1)
-            val lines = ((cardB - inner + dp(4f) - top) / (body.fontSpacing * 1.1f)).toInt().coerceAtLeast(1)
             val text = marked(result, diffBase)
-            StaticLayout.Builder.obtain(text, 0, text.length, body, w).setMaxLines(lines)
-                .setEllipsize(TextUtils.TruncateAt.END).setAlignment(Layout.Alignment.ALIGN_NORMAL).setLineSpacing(0f, 1.1f).build()
+            StaticLayout.Builder.obtain(text, 0, text.length, body, resView.width().toInt().coerceAtLeast(1))
+                .setAlignment(Layout.Alignment.ALIGN_NORMAL).setLineSpacing(0f, 1.1f).build()
                 .also { resLayout = it }
         }
-        c.save(); c.translate(cardL + inner, top); lay.draw(c); c.restore()
+        resMax = (lay.height - resView.height()).coerceAtLeast(0f)
+        var moving = false
+        if (resScroller.computeScrollOffset()) { resScroll = resScroller.currY.toFloat(); moving = !resScroller.isFinished }
+        if (running != null && follow) resScroll = resMax
+        resScroll = resScroll.coerceIn(0f, resMax)
+        c.save(); c.clipRect(resView); c.translate(resView.left, resView.top - resScroll); lay.draw(c); c.restore()
+        if (resMax > 0f) {
+            // soft edges where the text goes on, and a thin bar for where we are in it
+            val fade = dp(14f)
+            if (resFadeAt != resView.top) { resFadeTop = null; resFadeBottom = null; resFadeAt = resView.top }
+            val clear = Colors.alpha(t.surface, 0)
+            if (resScroll > 1f) {
+                bg.shader = resFadeTop ?: LinearGradient(0f, resView.top, 0f, resView.top + fade, t.surface, clear, Shader.TileMode.CLAMP).also { resFadeTop = it }
+                c.drawRect(resView.left, resView.top, resView.right, resView.top + fade, bg); bg.shader = null
+            }
+            if (resScroll < resMax - 1f) {
+                bg.shader = resFadeBottom ?: LinearGradient(0f, resView.bottom - fade, 0f, resView.bottom, clear, t.surface, Shader.TileMode.CLAMP).also { resFadeBottom = it }
+                c.drawRect(resView.left, resView.bottom - fade, resView.right, resView.bottom, bg); bg.shader = null
+            }
+            val h = (resView.height() * resView.height() / lay.height).coerceAtLeast(dp(16f))
+            val y = resView.top + (resView.height() - h) * (resScroll / resMax)
+            bg.color = t.divider
+            c.drawRoundRect(cardR - dp(6f), y, cardR - dp(3.5f), y + h, dp(2f), dp(2f), bg)
+        }
+        return moving
     }
 
     /** The result with the characters that are new against [base] tinted. */
@@ -295,8 +350,46 @@ class AiPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
     private var vt: VelocityTracker? = null
     private val slop = ViewConfiguration.get(context).scaledTouchSlop
 
+    private var resDragY = -1f
+    private var resDownY = 0f
+    private var resDragging = false
+
+    /** Drags that start on a long answer scroll it. True when the event was used. */
+    private fun scrollResult(e: MotionEvent): Boolean {
+        when (e.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                if (picking || resMax <= 0f || result.isEmpty() || !resView.contains(e.x, e.y)) { resDragY = -1f; return false }
+                resScroller.forceFinished(true)
+                vt?.recycle(); vt = VelocityTracker.obtain().also { it.addMovement(e) }
+                resDragY = e.y; resDownY = e.y; resDragging = false
+                return true
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (resDragY < 0f) return false
+                vt?.addMovement(e)
+                if (!resDragging && abs(e.y - resDownY) > slop) resDragging = true
+                if (resDragging) { follow = false; resScroll = (resScroll - (e.y - resDragY)).coerceIn(0f, resMax); invalidate() }
+                resDragY = e.y
+                return true
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                if (resDragY < 0f) return false
+                vt?.addMovement(e); vt?.computeCurrentVelocity(1000)
+                val v = vt?.yVelocity ?: 0f
+                if (resDragging && abs(v) > ViewConfiguration.get(context).scaledMinimumFlingVelocity) {
+                    resScroller.fling(0, resScroll.toInt(), 0, -v.toInt(), 0, 0, 0, resMax.toInt())
+                }
+                vt?.recycle(); vt = null; resDragY = -1f; resDragging = false
+                invalidate()
+                return true
+            }
+        }
+        return false
+    }
+
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(e: MotionEvent): Boolean {
+        if (scrollResult(e)) return true
         if (picking && (pick.busy || (e.actionMasked == MotionEvent.ACTION_DOWN && pick.contains(e.x, e.y)))) {
             if (e.actionMasked == MotionEvent.ACTION_DOWN) onFeedback?.invoke()
             pick.onTouch(e)?.let { t -> picking = false; onButton?.invoke("target:$t") }
@@ -338,6 +431,8 @@ class AiPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
                     p == null -> picking = false
                     p == "provider" -> { picking = !picking; if (picking) pick.reveal() }
                     picking -> picking = false
+                    // ✕: the answer goes, the actions come back
+                    p == "back" -> { result = ""; diffBase = null; resLayout = null; status = "" }
                     p in BUTTON_IDS -> onButton?.invoke(p)
                     running == null -> onAction?.invoke(p)
                 }
