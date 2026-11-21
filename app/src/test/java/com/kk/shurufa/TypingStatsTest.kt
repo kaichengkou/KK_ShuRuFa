@@ -20,6 +20,12 @@ class TypingStatsTest {
 
     private fun settle() { repeat(20) { Thread.sleep(25); shadowOf(Looper.getMainLooper()).idle() } }
 
+    /** Waits for the background word counting (shared with other work, slow on CI) until [done], up to ten seconds. */
+    private fun settleUntil(done: () -> Boolean) {
+        val end = System.currentTimeMillis() + 10_000
+        while (!done() && System.currentTimeMillis() < end) { Thread.sleep(25); shadowOf(Looper.getMainLooper()).idle() }
+    }
+
     @Test fun countsAndWords() {
         File(ctx.filesDir, "typing_stats.json").delete()
         TypingStats.reload()
@@ -29,7 +35,7 @@ class TypingStatsTest {
         s.record("刚才说的那家餐厅", TypingStats.Source.VOICE)
         s.record("https://example.com", TypingStats.Source.PASTE)
         s.record("哈哈😂", TypingStats.Source.TYPED)
-        settle()
+        settleUntil { s.snapshot().let { it.words.any { w -> w.first == "餐厅" } && it.emoji.isNotEmpty() } }
         val snap = s.snapshot()
         assertEquals("characters are counted by source, spaces aside", 14 + 9, snap.bySource(TypingStats.Source.TYPED) - 3)
         assertEquals(8, snap.bySource(TypingStats.Source.VOICE))
