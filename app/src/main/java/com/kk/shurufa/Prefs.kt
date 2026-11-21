@@ -95,6 +95,8 @@ class Prefs(context: Context) {
     val wordPredict get() = b(WORD_PREDICT, true)
     /** …and whether it learns from what is typed. */
     val wordLearn get() = b(WORD_LEARN, true)
+    /** 自动纠错 for Russian and English: an obvious slip is corrected when the word is finished. */
+    val wordAutocorrect get() = b(WORD_AUTOCORRECT, true)
     val zhCorrection get() = b(ZH_CORRECTION, true)
     /** 声调筛选: ˉ ˊ ˇ ˋ on the pinyin line. */
     val toneFilter get() = b(TONE_FILTER, true)
@@ -268,6 +270,7 @@ class Prefs(context: Context) {
         const val INCOGNITO = "incognito"
         const val WORD_PREDICT = "word_predict"
         const val WORD_LEARN = "word_learn"
+        const val WORD_AUTOCORRECT = "word_autocorrect"
         const val ZH_CORRECTION = "zh_correction"
         const val TONE_FILTER = "tone_filter"
         const val PANGU = "pangu"

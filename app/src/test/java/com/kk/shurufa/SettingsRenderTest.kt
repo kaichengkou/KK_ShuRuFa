@@ -95,6 +95,6 @@ class SettingsRenderTest {
     }
 
     @Test fun pages() {
-        for (theme in listOf("light", "dark")) for (page in listOf("home", "look", "online", "packs")) render(page, theme)
+        for (theme in listOf("light", "dark")) for (page in listOf("home", "look", "ai", "online", "packs")) render(page, theme)
     }
 }

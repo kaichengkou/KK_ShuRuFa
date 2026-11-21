@@ -97,6 +97,76 @@ class WordPredictor(private val context: Context, val lang: String) {
             .map { w -> forms[w] ?: tableForm(w) ?: if (capital) w.replaceFirstChar { c -> c.uppercase() } else w }
     }
 
+    // ---- 自动纠错 ----
+
+    /** Words put back after a correction (backspace or the 原 chip): never corrected again. */
+    private val kept = HashSet<String>()
+
+    private fun score(word: String): Int? = words?.get(word)?.substringBefore('\t')?.toIntOrNull()
+
+    /**
+     * 自动纠错, on purpose cautious: what [typed] (a word just finished with a space or punctuation)
+     * should become, or null to leave it. It corrects only
+     *  - a word the table does not have that is one slip (a neighbouring key, two letters swapped,
+     *    a letter doubled or missed) away from a common word, and clearly the likeliest one
+     *    (teh → the, рпивет → привет);
+     *  - in English, I and its contractions (i → I, im → I'm, dont → don't).
+     * A word the table has stays, however rare: Басков, взяло and aloe are words too.
+     * Never a word this person has used (or written in their own form), a word put back
+     * after a correction, a capitalised word inside a sentence (a name), or capitals elsewhere (МГУ).
+     */
+    fun correction(typed: String, sentenceStart: Boolean): String? {
+        if (words == null || typed.isEmpty() || typed.length > 24) return null
+        if (!typed.all { isWordChar(it) } || typed.drop(1).any { it.isUpperCase() }) return null
+        if (typed[0].isUpperCase() && !sentenceStart) return null
+        val low = typed.lowercase()
+        synchronized(this) { if (low in kept || used.containsKey(low) || forms.containsKey(low)) return null }
+        val own = score(low)
+        if (lang == "en") {
+            tableForm(low)?.let { f -> if (low.startsWith("i") && (f.length == 1 || f[1] == '\'') && f.startsWith("I")) return f.takeIf { it != typed } }
+            if (own != null && own < 140) for (i in 1 until low.length) {
+                val c = low.substring(0, i) + "'" + low.substring(i)
+                if (!c.contains("n't") && !c.startsWith("i'")) continue
+                val sc = score(c) ?: continue
+                if (sc >= own + 60) return show(c, typed)
+            }
+        }
+        // a word the table has is a word, however rare (Басков, взяло, aloe): never replaced
+        if (own != null || low.length < 3) return null
+        val floor = if (low.length == 3) 150 else 100
+        val found = HashMap<String, Int>()
+        for (c in slips(low)) { if (c == low) continue; val sc = score(c) ?: continue; if (sc >= floor) found[c] = sc }
+        val ranked = found.entries.sortedByDescending { it.value }
+        val best = ranked.firstOrNull() ?: return null
+        if (ranked.size > 1 && ranked[1].value > best.value - 25) return null
+        return show(best.key, typed)
+    }
+
+    /** The word was put back after a correction: it stays as written from now on. */
+    fun keep(word: String, learn: Boolean) {
+        val w = word.lowercase()
+        synchronized(this) {
+            kept += w
+            if (learn) { used[w] = maxOf(2, (used[w] ?: 0) + 1); dirty = true }
+        }
+    }
+
+    /** Every word one slip away from [w]: a neighbouring key, two letters swapped, one too many, one missed. */
+    private fun slips(w: String): Sequence<String> = sequence {
+        val near = NEAR.getValue(lang)
+        val letters = ALPHABET.getValue(lang)
+        for (i in w.indices) {
+            near[w[i]]?.forEach { c -> yield(w.substring(0, i) + c + w.substring(i + 1)) }
+            if (i + 1 < w.length && w[i] != w[i + 1]) yield(w.substring(0, i) + w[i + 1] + w[i] + w.substring(i + 2))
+            // one too many: a letter pressed twice or a neighbour caught with it
+            val prev = w.getOrNull(i - 1); val next = w.getOrNull(i + 1)
+            if (w.length > 3 && (w[i] == prev || w[i] == next || near[w[i]]?.let { n -> (prev != null && prev in n) || (next != null && next in n) } == true))
+                yield(w.removeRange(i, i + 1))
+        }
+        // one missed (only in longer words: in short ones almost anything is a letter away)
+        if (w.length >= 4) for (i in 1..w.length) for (c in letters) yield(w.substring(0, i) + c + w.substring(i))
+    }
+
     /** How the table says a word is written inside a sentence, when not in lowercase (Москва, I, Tom). */
     private fun tableForm(word: String): String? = words?.get(word)?.substringAfter('\t', "")?.takeIf { it.isNotEmpty() }
 
@@ -214,6 +284,23 @@ class WordPredictor(private val context: Context, val lang: String) {
             synchronized(live) { live.toList() }.forEach { it.clearLearned() }
             for (l in LANGS) File(context.filesDir, "learned_$l.tsv").delete()
         }
+        /** Keys next to each key on the layouts (ЙЦУКЕН, QWERTY), rows offset half a key. */
+        private val ROWS = mapOf(
+            "ru" to listOf("йцукенгшщзхъ", "фывапролджэ", "ячсмитьбю"),
+            "en" to listOf("qwertyuiop", "asdfghjkl", "zxcvbnm"),
+        )
+        private val ALPHABET = ROWS.mapValues { (_, r) -> r.joinToString("") }
+        private val NEAR: Map<String, Map<Char, String>> = ROWS.mapValues { (_, rows) ->
+            val m = HashMap<Char, StringBuilder>()
+            fun link(a: Char, b: Char) { m.getOrPut(a) { StringBuilder() }.append(b); m.getOrPut(b) { StringBuilder() }.append(a) }
+            for ((r, row) in rows.withIndex()) for ((i, c) in row.withIndex()) {
+                row.getOrNull(i + 1)?.let { link(c, it) }
+                // the row below sits half a key to the right: under c are its i-1 and i
+                rows.getOrNull(r + 1)?.let { below -> below.getOrNull(i)?.let { link(c, it) }; below.getOrNull(i - 1)?.let { link(c, it) } }
+            }
+            m.mapValues { it.value.toString() }
+        }
+
         /** Languages that have tables. */
         val LANGS = setOf("ru", "en")
 

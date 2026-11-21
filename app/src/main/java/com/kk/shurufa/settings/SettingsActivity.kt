@@ -85,7 +85,8 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material.icons.outlined.Animation
 import androidx.compose.material.icons.outlined.Apps
-import androidx.compose.material.icons.outlined.Cloud
+import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.Key
 import androidx.compose.material.icons.outlined.Insights
 import androidx.compose.material.icons.outlined.Backup
 import androidx.compose.material.icons.outlined.Code
@@ -179,7 +180,8 @@ private data class PageInfo(val id: String, val title: String, val summary: Stri
 private val SECTIONS = listOf(
     "外观与手感" to listOf("look", "motion", "haptics", "gestures"),
     "输入" to listOf("languages", "chinese", "dict", "packs", "keys"),
-    "工具" to listOf("toolbar", "symbols", "clipboard", "voice", "online", "stats"),
+    "工具" to listOf("toolbar", "symbols", "clipboard", "voice", "stats"),
+    "AI" to listOf("ai", "online"),
     "高级" to listOf("backup", "files"),
 )
 
@@ -188,7 +190,7 @@ private val PAGE_ICONS: Map<String, ImageVector> = mapOf(
     "gestures" to Icons.Outlined.Swipe, "languages" to Icons.Outlined.Language, "chinese" to Icons.Outlined.Translate,
     "dict" to Icons.AutoMirrored.Outlined.MenuBook, "packs" to Icons.AutoMirrored.Outlined.LibraryBooks,
     "keys" to Icons.Outlined.Keyboard, "toolbar" to Icons.Outlined.Apps, "symbols" to Icons.Outlined.Functions,
-    "clipboard" to Icons.Outlined.ContentPaste, "voice" to Icons.Outlined.Mic, "online" to Icons.Outlined.Cloud,
+    "clipboard" to Icons.Outlined.ContentPaste, "voice" to Icons.Outlined.Mic, "ai" to Icons.Outlined.Key, "online" to Icons.Outlined.AutoAwesome,
     "files" to Icons.Outlined.Code, "stats" to Icons.Outlined.Insights, "backup" to Icons.Outlined.Backup,
 )
 
@@ -201,12 +203,13 @@ private val PAGES = listOf(
     PageInfo("languages", "语言", "启用的语言、顺序、自动大写、俄语重音"),
     PageInfo("chinese", "中文", "简繁、emoji、联想、纠错、拼音模式"),
     PageInfo("dict", "自定义词库", "添加、修改、删除自己的词"),
-    PageInfo("packs", "扩展词库", "语法模型、导入搜狗词库、古诗文"),
+    PageInfo("packs", "扩展词库", "语法模型、导入搜狗词库、古诗文、雾凇词库更新"),
     PageInfo("symbols", "符号与数学", "括号配对、数字后标点、数学键盘"),
     PageInfo("clipboard", "剪贴板", "保留条数、复制后的粘贴提示"),
     PageInfo("toolbar", "工具栏", "选择和排列键盘上方的按钮"),
     PageInfo("voice", "语音输入", "本地识别模型、识别语言、系统识别"),
-    PageInfo("online", "联网功能", "翻译、词库更新、AI 改写"),
+    PageInfo("ai", "AI 服务", "填 Key、选模型、今天的用量"),
+    PageInfo("online", "AI 功能", "改写、翻译、云联想、AI 候选"),
     PageInfo("backup", "备份与恢复", "设置、学到的词和自定义词库，换手机不丢"),
     PageInfo("files", "布局文件", "导出和重新加载 YAML 布局"),
     PageInfo("stats", "打字数据", "每天的字数、时段、常用词云"),
@@ -244,7 +247,8 @@ private fun SettingsApp(prefs: Prefs, start: String) {
                     "clipboard" -> ClipboardPage(prefs)
                     "voice" -> VoicePage(prefs)
                     "toolbar" -> ToolbarPage(prefs)
-                    "online" -> OnlinePage(prefs)
+                    "ai" -> AiServicesPage(prefs)
+                    "online" -> OnlinePage(prefs) { page = "ai" }
                     "files" -> FilesPage()
                     "backup" -> BackupPage()
                     "stats" -> StatsPage(prefs)
@@ -693,6 +697,7 @@ private fun LanguagesPage(prefs: Prefs) {
         Toggle(prefs, Prefs.DOUBLE_SPACE, "双击空格输入句号", null, true)
         Toggle(prefs, Prefs.DOUBLE_PERIOD, "双击句号输入省略号", "中文「。」点两下变成「……」，俄语和英语「.」点两下变成「…」", true)
         Toggle(prefs, Prefs.STRESS_MODE, "重音模式", "俄语元音上滑输入带重音的字母（а́ е́ и́ …）；不开时长按也有", false)
+        Toggle(prefs, Prefs.WORD_AUTOCORRECT, "自动纠错", "打完一个词按空格或标点时，只改词库里没有、又明显是按错一个键的词（рпивет → привет、teh → the），以及英语的 i → I、dont → don't。词库里有的词再生僻也不动，你用过的词、句中大写的名字、缩写都不碰。改错了紧接着按删除键，或点候选栏第一个标「原」的词，就退回原样，以后不再改它", true)
     }
     Group("俄语和英语联想") {
         Toggle(prefs, Prefs.WORD_PREDICT, "补全和下一个词", "打字时补全正在打的词，打完一个词、空格后推荐接下来的词（俄语 6.7 万词、英语 5.4 万词，按口语频率排序）", true)
@@ -875,6 +880,7 @@ private fun PacksPage(prefs: Prefs) {
     GrammarGroup(prefs)
     PackGroups(prefs)
     ImportGroup()
+    DictUpdateGroup()
     Group("古诗文") {
         Toggle(prefs, Prefs.PACK_POETRY, "启用古诗文词库", "唐诗三百首、宋词三百首、千家诗、诗经、论语、楚辞、古文观止，约 3.8 万句。整句拼音或首字母都能打出（比如 brysj → 白日依山尽），上屏一句后联想栏接出下一句。切换后会重新部署", true)
         Note("数据来自 chinese-poetry 项目（MIT 许可）。")
@@ -1478,19 +1484,35 @@ private fun ProviderCard(prefs: Prefs, p: com.kk.shurufa.online.Llm.Provider, on
 }
 
 @Composable
-private fun OnlinePage(prefs: Prefs) {
-    val ctx = LocalContext.current
-    val main = remember { android.os.Handler(android.os.Looper.getMainLooper()) }
+private fun AiServicesPage(prefs: Prefs) {
     var tick by remember { mutableIntStateOf(0) }
-    Group("AI 服务") {
-        Note("填哪家的 Key 就能用哪家，可以都填。每家可以“获取可用模型”，搜索并勾选启用；启用的模型都能在改写和翻译里选。Key 只保存在这台手机上，只有你点了操作，文字才会发出去。")
+    Group("服务与模型") {
+        Note("填哪家的 Key 就能用哪家，可以都填。每家可以“获取可用模型”，搜索并勾选启用；启用的模型都能在「AI 功能」里选给改写、翻译、云联想用。Key 只保存在这台手机上。")
         for (p in com.kk.shurufa.online.Llm.PROVIDERS) ProviderCard(prefs, p) { tick++ }
     }
+    Group("用量") {
+        Note("今天已请求 ${com.kk.shurufa.online.AiBudget.today(prefs)} 次（改写、翻译、云联想、AI 候选、AI 语音识别合计）。键盘自己每分钟最多问 ${com.kk.shurufa.online.AiBudget.PER_MINUTE} 次、不重试；服务说太频繁就先停一会儿，连着几次就停 30 分钟。Gemini 免费版实测每分钟 15 次（每个模型分开算），每天的上限在 AI Studio 的 rate-limit 页面能看到。国内网络连不上 Gemini 时可以选智谱 GLM-4-Flash（免费）或硅基流动的免费小模型。")
+    }
+}
+
+/** 用 AI 做什么: each feature and the model it uses. The services themselves are on [AiServicesPage]. */
+@Composable
+private fun OnlinePage(prefs: Prefs, openServices: () -> Unit) {
+    var tick by remember { mutableIntStateOf(0) }
     val targets = remember(tick) { com.kk.shurufa.online.Llm.targets(prefs) }
     var pickAi by remember { mutableStateOf(false) }
     var pickTr by remember { mutableStateOf(false) }
+    if (targets.isEmpty()) Group("还没有 AI 服务") {
+        Note("改写、云联想和 AI 候选要先在「AI 服务」里填一个 Key、启用一个模型；翻译不填也能用离线引擎。")
+        Button(onClick = openServices, modifier = Modifier.padding(vertical = 4.dp)) { Text("去填 Key") }
+    } else Group("AI 服务") {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text("已启用 ${targets.size} 个模型，下面每项可以分别选", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+            TextButton(onClick = openServices) { Text("管理") }
+        }
+    }
     Group("AI 改写") {
-        if (targets.isEmpty()) Note("先在上面设置至少一个 AI 服务。")
+        if (targets.isEmpty()) Note("没有可用的模型。")
         else {
             val cur = com.kk.shurufa.online.Llm.resolve(prefs, prefs.aiProvider)
             PickRow("使用", cur?.let { com.kk.shurufa.online.Llm.targetLabel(prefs, it) } ?: "未选择") { pickAi = true }
@@ -1507,7 +1529,7 @@ private fun OnlinePage(prefs: Prefs) {
             if (pickQuick) PickerDialog("云联想和 AI 候选用", listOf("" to "跟 AI 改写相同") + targets, prefs.quickTarget,
                 onPick = { prefs.put(Prefs.QUICK_TARGET, it); tick++ }, onClose = { pickQuick = false })
         }
-        Note("今天已请求 ${com.kk.shurufa.online.AiBudget.today(prefs)} 次（含 AI 语音识别）。键盘自己每分钟最多问 ${com.kk.shurufa.online.AiBudget.PER_MINUTE} 次、不重试；服务说太频繁就先停一会儿，连着几次就停 30 分钟。Gemini 免费版实测每分钟 15 次（每个模型分开算），每天的上限在 AI Studio 的 rate-limit 页面能看到。国内网络连不上 Gemini 时可以选智谱 GLM-4-Flash（免费）或硅基流动的免费小模型。")
+        Note("今天已请求 ${com.kk.shurufa.online.AiBudget.today(prefs)} 次。每分钟最多 ${com.kk.shurufa.online.AiBudget.PER_MINUTE} 次，额度说明见「AI 服务」。")
     }
     Group("AI 候选") {
         Toggle(prefs, Prefs.AI_CANDIDATE, "打长拼音时请 AI 给一个候选", "打了三个音节以上、停顿一下时，把这段拼音和光标前最多 20 个字发给上面选的 AI 服务，它给出的整句排在候选栏第二个，标着 AI。会把你正在打的内容发出去；密码、地址和无痕输入框里不会发。建议用快的模型，比如 Gemini 3.5 Flash Lite（约半秒）", false)
@@ -1521,7 +1543,14 @@ private fun OnlinePage(prefs: Prefs) {
         Toggle(prefs, Prefs.TRANSLATE_WIFI, "离线模型只在 Wi-Fi 下载", "每种语言约 30 MB，下载一次后离线翻译", false)
         Note("点工具栏的翻译按钮，键盘上方会展开翻译栏：可以选语言、⇄ 对调、切换引擎；选中文字时直接翻译并可替换。AI 翻译更地道，离线翻译不联网也能用。")
     }
-    Group("词库更新") {
+}
+
+/** 雾凇词库更新: check and download the latest rime-ice dictionaries. */
+@Composable
+private fun DictUpdateGroup() {
+    val ctx = LocalContext.current
+    val main = remember { android.os.Handler(android.os.Looper.getMainLooper()) }
+    Group("雾凇词库更新") {
         var status by remember { mutableStateOf("词库来自雾凇拼音（rime-ice），可以随时更新到最新版") }
         var plan by remember { mutableStateOf<com.kk.shurufa.online.DictUpdater.Plan?>(null) }
         var busy by remember { mutableStateOf(false) }

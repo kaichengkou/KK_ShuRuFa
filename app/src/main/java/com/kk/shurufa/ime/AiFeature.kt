@@ -34,7 +34,7 @@ class AiFeature(private val host: Host) {
             onAction = { id -> AiWriter.ACTIONS.firstOrNull { it.id == id }?.let { start(it) } }
             onButton = { b ->
                 when (b) {
-                    "setup" -> host.openSettings("online")
+                    "setup" -> host.openSettings("ai")
                     "replace" -> apply(replace = true)
                     "insert" -> apply(replace = false)
                     "retry" -> action?.let { start(it) }

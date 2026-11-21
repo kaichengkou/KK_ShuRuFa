@@ -159,6 +159,9 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
 
     /** A suggestion was just picked and put a space after itself. */
     private var autoSpaced = false
+    /** 自动纠错: the latest correction, which the next backspace (or the 原 chip) undoes. */
+    private class Correction(val word: String, val original: String, val sep: String)
+    private var corrected: Correction? = null
     private var predictionLabel = ""
     private var searchResults: List<String> = emptyList()
     /** A notice raised before the bar existed (a layout file that failed to load). */
@@ -723,13 +726,15 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
             predictions.isNotEmpty() && letters -> {
                 // 云联想: the AI's continuations of this text, when they came, go first, marked 云
                 val before = editor.textBefore(CloudPredict.CONTEXT)
-                if (predictionLabel.isEmpty()) cloud.update(before, allowed = learnHere && sink == null)
+                val revert = revertChip && corrected != null
+                if (predictionLabel.isEmpty() && !revert) cloud.update(before, allowed = learnHere && sink == null)
                 if (com.kk.shurufa.online.AiBudget.justPaused) {
                     com.kk.shurufa.online.AiBudget.justPaused = false
                     notice("AI 服务说请求太多（免费额度可能用完了），云联想先歇 30 分钟")
                 }
-                cloudShown = if (predictionLabel.isEmpty()) cloud.answerFor(before) else emptyList()
-                if (cloudShown.isEmpty()) bar.showPredictions(predictions, predictionLabel)
+                cloudShown = if (predictionLabel.isEmpty() && !revert) cloud.answerFor(before) else emptyList()
+                if (revert) bar.showPredictions(predictions, predictionLabel, listOf("原"))
+                else if (cloudShown.isEmpty()) bar.showPredictions(predictions, predictionLabel)
                 else bar.showPredictions(cloudShown + predictions.filter { it !in cloudShown }, predictionLabel, cloudShown.map { "云" })
             }
             clipboard.pendingChip() != null && letters -> clipboard.chip()?.let { (text, kind) -> bar.showClip(text, kind) }
@@ -1151,6 +1156,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     }
 
     override fun onOutput(key: Key, output: Output) {
+        corrected = null
         if (panel == Panel.MATH) { mathOut(output); return }
         val t = output.text
         val isMain = output === key.main
@@ -1184,11 +1190,13 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         val typed = if (isMain && key.isLetter && shift > 0) t.uppercase() else t
         if (ellipsis(typed)) { autoSpaced = false; updateAutoCap(); if (panel == Panel.LETTERS) { suggestWords(); syncBar() }; return }
         val wordChar = typed.isNotEmpty() && typed.all { WordPredictor.isWordChar(it) }
+        val fix = if (!wordChar && typed.length == 1 && typed[0] in ",.!?;:)…\"") autocorrect() else null
         if (!wordChar) learnWordBefore()
         if (autoSpaced && typed.length == 1 && typed[0] in ",.!?;:)…" && editor.textBefore(1) == " ") {
             // a picked word put a space after itself: punctuation goes before that space
             editor.replaceBefore(1, if (typed[0] == ')') typed else "$typed ")
         } else editor.type(pangu(typed))
+        if (fix != null) corrected = Correction(fix.first, fix.second, typed)
         autoSpaced = false
         if (isMain && key.isLetter && shift == 1) { shift = 0; autoShift = false; keyboard.invalidate() }
         updateAutoCap()
@@ -1239,6 +1247,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
                 when {
                     composing -> rimeKey(RimeBridge.XK_BackSpace)
                     sink != null -> { if (query.isNotEmpty()) query.setLength(query.offsetByCodePoints(query.length, -1)); syncBar() }
+                    revertCorrection() -> {}
                     else -> {
                         learning.deleting { n -> editor.textBefore(n) }
                         editor.deleteBackward(); updateAutoCap(); suggestAfterDelete(); if (panel == Panel.NUM) showMoneyChip(); syncBar()
@@ -1249,6 +1258,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
                 if (composing) { rimeKey(RimeBridge.XK_space); return }
                 if (sink != null) { query.append(' '); syncBar(); return }
                 predictions = emptyList()
+                val fix = autocorrect()
                 learnWordBefore()
                 autoSpaced = false
                 val now = SystemClock.uptimeMillis()
@@ -1257,6 +1267,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
                 if (prefs.doubleSpacePeriod && !isZh && panel == Panel.LETTERS && now - lastSpaceAt < 600 &&
                     before.length == 2 && before[1] == ' ' && before[0].isLetterOrDigit()) editor.replaceBefore(1, ". ")
                 else editor.type(" ")
+                corrected = fix?.let { Correction(it.first, it.second, " ") }
                 lastSpaceAt = now
                 updateAutoCap()
                 suggestWords()
@@ -1527,6 +1538,39 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
             else -> emptyList()
         }
         predictionLabel = ""
+        // right after a correction the word as it was typed comes first, marked 原: a tap puts it back
+        revertChip = corrected?.takeIf { before.endsWith(it.word + it.sep) }?.let { c ->
+            predictions = listOf(c.original) + predictions.filter { it != c.original }
+            true
+        } ?: false
+    }
+    private var revertChip = false
+
+    /**
+     * 自动纠错: the word right before the caret (just finished, a space or punctuation comes next)
+     * is corrected when it is an obvious slip. Returns (correction, what was typed), or null.
+     */
+    private fun autocorrect(): Pair<String, String>? {
+        if (!prefs.wordAutocorrect || panel != Panel.LETTERS || sink != null || editor.secret) return null
+        val p = words() ?: return null
+        val before = editor.textBefore(64)
+        val (typed, _) = WordPredictor.split(before)
+        if (typed.isEmpty()) return null
+        val fix = p.correction(typed, WordPredictor.sentenceStart(before.dropLast(typed.length))) ?: return null
+        editor.replaceBefore(typed.length, fix)
+        return fix to typed
+    }
+
+    /** Backspace right after a correction puts the word back as typed (and it is kept from then on). */
+    private fun revertCorrection(): Boolean {
+        val c = corrected ?: return false
+        corrected = null
+        val tail = c.word + c.sep
+        if (editor.textBefore(tail.length) != tail) return false
+        editor.replaceBefore(tail.length, c.original)
+        words()?.keep(c.original, learn = learnHere && prefs.wordLearn)
+        updateAutoCap(); suggestWords(); syncBar()
+        return true
     }
 
     /** The word right before the caret is finished (a space or punctuation follows): learn it. */
@@ -1540,6 +1584,16 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
 
     /** A suggestion was tapped: it replaces the letters typed so far, followed by a space. */
     private fun pickWord(i: Int) {
+        if (i == 0 && revertChip && corrected != null) {
+            // 原: back to the word as typed, the space or punctuation after it kept
+            val c = corrected ?: return
+            corrected = null; revertChip = false
+            val tail = c.word + c.sep
+            if (editor.textBefore(tail.length) == tail) editor.replaceBefore(tail.length, c.original + c.sep)
+            words()?.keep(c.original, learn = learnHere && prefs.wordLearn)
+            suggestWords(); syncBar()
+            return
+        }
         val word = predictions.getOrNull(i) ?: return
         val p = words()
         val before = editor.textBefore(64)

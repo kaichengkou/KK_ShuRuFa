@@ -1,3 +1,4 @@
+import java.security.MessageDigest
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -18,8 +19,8 @@ android {
         applicationId = "com.kk.shurufa"
         minSdk = 26
         targetSdk = 35
-        versionCode = 37
-        versionName = "0.12.1"
+        versionCode = 38
+        versionName = "0.13.0"
         ndk { abiFilters += abis }
         externalNativeBuild {
             cmake { arguments += listOf("-DANDROID_STL=c++_static", "-DCMAKE_BUILD_TYPE=Release") }
@@ -87,6 +88,17 @@ val prepareRimeData by tasks.registering(Sync::class) {
         into("rime/opencc")
     }
     into(layout.buildDirectory.dir("generated/rimeAssets"))
+    // 词库清单: every file with a hash of its content, so an update copies (and Rime rebuilds)
+    // only what really changed instead of redeploying everything
+    doLast {
+        val root = destinationDir.resolve("rime")
+        val lines = root.walkTopDown().filter { it.isFile && it.name != "kk_manifest.txt" }.map { f ->
+            val md = MessageDigest.getInstance("SHA-1")
+            f.inputStream().use { i -> val b = ByteArray(1 shl 16); while (true) { val n = i.read(b); if (n < 0) break; md.update(b, 0, n) } }
+            md.digest().joinToString("") { "%02x".format(it) } + "\t" + f.relativeTo(root).invariantSeparatorsPath
+        }.sorted().toList()
+        root.resolve("kk_manifest.txt").writeText(lines.joinToString("\n", postfix = "\n"))
+    }
 }
 // Word-association index (联想) and the pinyin tone table (拼音模式), generated from the data sources.
 val extraAssets = layout.buildDirectory.dir("generated/extraAssets")
