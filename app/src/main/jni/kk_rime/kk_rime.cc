@@ -301,6 +301,15 @@ FN(jboolean, selectCandidateGlobal)(JNIEnv*, jobject, jint index) {
   return r;
 }
 
+// Highlight a candidate (index in the whole menu) without choosing it, for keys that act on the
+// highlighted one (以词定字's [ and ]).
+FN(jboolean, highlightCandidate)(JNIEnv*, jobject, jint index) {
+  std::lock_guard<std::mutex> lock(g_mutex);
+  bool r = api()->highlight_candidate(session(), index);
+  refreshLocked();
+  return r;
+}
+
 // Forget a learned candidate (index in the whole menu); system words lose their learned weight.
 FN(jboolean, deleteCandidate)(JNIEnv*, jobject, jint index) {
   std::lock_guard<std::mutex> lock(g_mutex);

@@ -69,6 +69,16 @@ int main(int argc, char** argv) {
       show(api, s, "  main still");
       continue;
     }
+    if (strncmp(seq, "@hl=", 4) == 0) {  // highlight a candidate of the current input (0-based)
+      printf("  highlight %d -> %d\n", atoi(seq + 4), api->highlight_candidate(s, atoi(seq + 4)));
+      show(api, s, seq);
+      continue;
+    }
+    if (strncmp(seq, "@key=", 5) == 0) {  // a key by its code (0x5b is [), the input kept
+      api->process_key(s, (int)strtol(seq + 5, nullptr, 0), 0);
+      show(api, s, seq);
+      continue;
+    }
     if (strcmp(seq, "SPACE") == 0) { api->process_key(s, 0x20, 0); show(api, s, "[space]"); continue; }
     for (const char* p = seq; *p; p++) api->process_key(s, *p, 0);
     show(api, s, seq);

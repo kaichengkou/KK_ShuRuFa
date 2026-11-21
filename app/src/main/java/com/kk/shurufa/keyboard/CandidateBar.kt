@@ -31,6 +31,8 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
         fun onExpand()
         fun onMathFormat(format: String)
         fun onResultChip(text: String)
+        /** 大写金额: the chip offering [number] written out as [words] was tapped. */
+        fun onMoneyChip(number: String, words: String) {}
         fun onClipChip(text: String) {}
         fun onNumMode(mode: String) {}
         fun onDismissSuggestions() {}
@@ -168,6 +170,10 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
     }
 
     fun showResult(text: String?) { resultChip = text; invalidate() }
+
+    private var moneyChip: Pair<String, String>? = null
+    /** 大写金额 for the number before the caret (number to words), or null. */
+    fun showMoney(m: Pair<String, String>?) { if (m != moneyChip) { moneyChip = m; invalidate() } }
 
     /**
      * A status line; with [tappable] the whole bar answers a tap ([Listener.onMessageTap]); with
@@ -586,6 +592,28 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
             if (r.right + dp(74f) < right) drawText(c, "点一下上屏", r.right + dp(10f), height / 2f, tp)
             return segPos.running || fmtPos.running
         }
+        moneyChip?.let { (_, words) ->
+            // 大写 · 壹佰贰拾叁元整, quiet until tapped
+            tp.textSize = sp(Ui.BODY); tp.typeface = Ui.regular
+            val tag = "大写"
+            tp.typeface = Ui.medium
+            val tagW = tp.measureText(tag)
+            tp.typeface = Ui.regular
+            val avail = right - midL - dp(8f)
+            val full = tagW + tp.measureText(words) + dp(38f)
+            val w = full.coerceAtMost(avail)
+            val r = tmp.apply { set(midL, top, midL + w, top + h) }
+            bg.color = Colors.fade(theme.accentSoft, a)
+            c.drawRoundRect(r, r.height() / 2, r.height() / 2, bg)
+            tp.textAlign = Paint.Align.LEFT; tp.color = theme.accent; tp.alpha = (255 * a).toInt(); tp.typeface = Ui.medium
+            drawText(c, tag, r.left + dp(14f), r.centerY(), tp)
+            tp.typeface = Ui.regular; tp.color = theme.ink; tp.alpha = (255 * a).toInt()
+            ellipsizer.set(tp)
+            val shown = android.text.TextUtils.ellipsize(words, ellipsizer, w - tagW - dp(38f), android.text.TextUtils.TruncateAt.END).toString()
+            drawText(c, shown, r.left + dp(24f) + tagW, r.centerY(), tp)
+            hits.add("money", r)
+            return segPos.running || fmtPos.running
+        }
         // the calculator line (标准) or how the academic keys work (学术), until tapped once
         val key = if (simpleNum) "hint_num" else "hint_sci"
         if (!hintSeen(key)) {
@@ -803,6 +831,7 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
             id == "fmt:0" -> l.onMathFormat("uni")
             id == "fmt:1" -> l.onMathFormat("tex")
             id == "result" -> resultChip?.let { l.onResultChip(it) }
+            id == "money" -> moneyChip?.let { (n, w) -> l.onMoneyChip(n, w) }
             id == "done" -> l.onEditDone()
             id == "message" -> l.onMessageTap()
             id.startsWith("tone:") -> id.removePrefix("tone:").toInt().let { t -> l.onToneFilter(if (t == toneFilter) 0 else t) }

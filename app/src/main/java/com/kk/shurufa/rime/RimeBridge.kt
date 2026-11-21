@@ -19,6 +19,7 @@ object RimeBridge {
     external fun selectSchema(id: String): Boolean
     external fun candidates(limit: Int): Array<String>
     external fun deleteCandidate(index: Int): Boolean
+    external fun highlightCandidate(index: Int): Boolean
     external fun setInput(input: String): Boolean
     external fun candidateComments(limit: Int): Array<String>
     external fun caretPos(): Int

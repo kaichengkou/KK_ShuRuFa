@@ -191,6 +191,7 @@ class QuickPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
             "ai" to "ai", "mic" to "mic", "translate" to "translate", "cursor" to "cursor", "clipboard" to "clipboard",
             "symbols" to "§", "math" to "π", "undo" to "undo", "emoji_panel" to "emoji",
             "picker" to "abc", "settings" to "settings", "toolbar" to "grid",
+            "date" to "日", "time" to "时", "week" to "周", "lunar" to "农", "calc" to "壹",
         )
     }
 }

@@ -542,7 +542,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
                 refreshMath(slide = 0)
                 content.addView(mathPanel, fixed)
             }
-            Panel.NUM -> { numPad.keys.setRows(layout("num").rows); numPad.setItems(NUM_OPS); content.addView(numPad, fixed) }
+            Panel.NUM -> { numPad.keys.setRows(layout("num").rows); numPad.setItems(NUM_OPS); content.addView(numPad, fixed); showMoneyChip() }
             Panel.CURSOR -> { syncEditPanel(); content.addView(editPanel, fixed) }
             Panel.SYMBOLS -> { refreshSymbols(); content.addView(symbolPanel, fixed) }
             Panel.CLIPBOARD -> { clipboard.refresh(); content.addView(clipPanel, fixed) }
@@ -824,6 +824,30 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         finishComposing()
         editor.type(op, pairable = op == "(")
         if (op == "=") showCalcResult() else bar.showResult(null)
+        showMoneyChip()
+    }
+
+    /** 大写金额: after a number on the number pad, a chip offers it written out (壹佰贰拾叁元整). */
+    private fun showMoneyChip() {
+        val num = Regex("(\\d{1,16}(?:\\.\\d{1,2})?)$").find(editor.textBefore(24))?.value
+        val before = editor.textBefore(26).dropLast(num?.length ?: 0)
+        // not the digits of a longer expression's result or a date
+        bar.showMoney(if (num != null && !before.endsWith("=") && !before.endsWith(".")) ZhNumber.money(num)?.let { num to it } else null)
+    }
+
+    override fun onMoneyChip(number: String, words: String) {
+        if (editor.textBefore(number.length) == number) editor.replaceBefore(number.length, words)
+        bar.showMoney(null)
+    }
+
+    /** 日期 · 时间 · 农历: types 雾凇's trigger, whose candidates then fill the bar. */
+    private fun rimeTool(code: String) {
+        if (!RimeEngine.ready) { notice("中文引擎还没准备好"); return }
+        if (!isZh) setLanguage(prefs.languages.firstOrNull { layout(it).engine == "rime" } ?: "zh")
+        finishComposing()
+        showPanel(Panel.LETTERS)
+        RimeBridge.setInput(code)
+        flushRime()
     }
 
     private fun buildMathPanel() {
@@ -875,6 +899,12 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
             QuickPanel.Tile("sound", "按键音", on = prefs.sound),
             QuickPanel.Tile("theme", "主题", themeName),
         ) + tools + listOf(
+            QuickPanel.Tile("date", "日期"),
+            QuickPanel.Tile("time", "时间"),
+            QuickPanel.Tile("week", "星期"),
+            QuickPanel.Tile("lunar", "农历"),
+            QuickPanel.Tile("calc", "计算 · 大写"),
+        ) + listOf(
             QuickPanel.Tile("toolbar", "工具栏"),
             QuickPanel.Tile("picker", "切换输入法"),
             QuickPanel.Tile("settings", "设置"),
@@ -883,6 +913,8 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
 
     private fun onQuickTile(id: String) {
         when (id) {
+            in RIME_TOOLS -> rimeTool(RIME_TOOLS[id]!!)
+            "calc" -> { prefs.put(Prefs.NUM_MODE, "simple"); showPanel(Panel.NUM) }
             "trad" -> prefs.put(Prefs.ZH_TRAD, !prefs.zhTraditional)
             "emoji" -> prefs.put(Prefs.ZH_EMOJI, !prefs.zhEmoji)
             "predict" -> if (isZh) prefs.put(Prefs.ZH_PREDICT, !prefs.zhPredict) else prefs.put(Prefs.WORD_PREDICT, !prefs.wordPredict)
@@ -1032,6 +1064,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         if (panel == Panel.NUM) {
             editor.type(t, pairable = t.length > 1)
             if (t == "=") showCalcResult() else bar.showResult(null)
+            showMoneyChip()
             return
         }
         predictions = emptyList()
@@ -1074,7 +1107,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
                 when {
                     composing -> rimeKey(RimeBridge.XK_BackSpace)
                     sink != null -> { if (query.isNotEmpty()) query.setLength(query.offsetByCodePoints(query.length, -1)); syncBar() }
-                    else -> { editor.deleteBackward(); updateAutoCap(); suggestAfterDelete(); syncBar() }
+                    else -> { editor.deleteBackward(); updateAutoCap(); suggestAfterDelete(); if (panel == Panel.NUM) showMoneyChip(); syncBar() }
                 }
             }
             "space" -> {
@@ -1405,10 +1438,23 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     override fun candidateOptions(index: Int): List<Output> {
         val word = RimeBridge.candidates(rimeIndex(index) + 1).getOrNull(rimeIndex(index)) ?: return emptyList()
         val shown = if (word.codePointCount(0, word.length) > 6) word.substring(0, word.offsetByCodePoints(0, 5)) + "…" else word
-        return listOf(Output("取消", "§cancel"), Output("不再优先「$shown」", "§forget"))
+        val chars = word.codePoints().toArray().filter { Character.UnicodeScript.of(it) == Character.UnicodeScript.HAN }
+        // 以词定字: a character of a word, the rest of the pinyin stays
+        val pick = if (word.codePointCount(0, word.length) >= 2 && chars.size >= 2) listOf(
+            Output("取首字「${String(Character.toChars(chars.first()))}」", "§first"),
+            Output("取末字「${String(Character.toChars(chars.last()))}」", "§last")) else emptyList()
+        return listOf(Output("取消", "§cancel")) + pick + Output("不再优先「$shown」", "§forget")
     }
 
     override fun onCandidateOption(index: Int, option: Output) {
+        if (option.text == "§first" || option.text == "§last") {
+            // 雾凇's 以词定字 acts on the highlighted candidate with [ and ]
+            // (false when it already is highlighted, as the first one is)
+            RimeBridge.highlightCandidate(rimeIndex(index))
+            zh.track(RimeBridge.preedit())
+            rimeKey(if (option.text == "§first") XK_BRACKETLEFT else XK_BRACKETRIGHT)
+            return
+        }
         if (option.text != "§forget") return
         val ok = RimeBridge.deleteCandidate(rimeIndex(index))
         flushRime()
@@ -1519,6 +1565,10 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         const val VOWELS = "аеёиоуыэюя"
         /** Candidates fetched for the bar: more than fit, so a swipe finds more without a pause. */
         const val CANDIDATES_ON_BAR = 60
+        const val XK_BRACKETLEFT = 0x5b
+        const val XK_BRACKETRIGHT = 0x5d
+        /** Quick-panel tools that open 雾凇's own candidates: tile → what is typed for them. */
+        val RIME_TOOLS = linkedMapOf("date" to "rq", "time" to "sj", "week" to "xq", "lunar" to "nl")
         val PASSWORDS = setOf(InputType.TYPE_TEXT_VARIATION_PASSWORD, InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD, InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD)
         val ADDRESSES = setOf(InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS, InputType.TYPE_TEXT_VARIATION_URI, InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS)
     }
