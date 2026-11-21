@@ -964,7 +964,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
                 if (prev.isNotEmpty() && prev[0].isLetterOrDigit() && !isCjk(prev[0])) out = " $out"
             }
             zh.reset()
-            editor.type(out, pairable = false, syllables = if (out == commit) syl else null)
+            editor.type(pangu(out), pairable = false, syllables = if (out == commit) syl else null)
             predictions = if (prefs.zhPredict && !prefs.pinyinMode && out.any { isCjk(it) })
                 predictor.suggest(editor.textBefore(20).ifEmpty { out }) else emptyList()
             predictionLabel = ""
@@ -1075,7 +1075,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
                 if (!RimeEngine.ready) { editor.type(t); return }
             }
             finishComposing()
-            editor.type(smartPunct(t))
+            editor.type(pangu(smartPunct(t)))
             syncBar()
             return
         }
@@ -1085,11 +1085,24 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         if (autoSpaced && typed.length == 1 && typed[0] in ",.!?;:)…" && editor.textBefore(1) == " ") {
             // a picked word put a space after itself: punctuation goes before that space
             editor.replaceBefore(1, if (typed[0] == ')') typed else "$typed ")
-        } else editor.type(typed)
+        } else editor.type(pangu(typed))
         autoSpaced = false
         if (isMain && key.isLetter && shift == 1) { shift = 0; autoShift = false; keyboard.invalidate() }
         updateAutoCap()
         if (panel == Panel.LETTERS) { suggestWords(); syncBar() }
+    }
+
+    /**
+     * 盘古之白: a space between Chinese and Latin letters or digits ("用 iPhone 拍了 3 张"), put in
+     * front of [t] when the character before the caret and [t]'s first one are of the two kinds.
+     * Off by default; never in 拼音模式, which spaces its own syllables.
+     */
+    private fun pangu(t: String): String {
+        if (!prefs.pangu || prefs.pinyinMode || t.isEmpty() || !wordsHere) return t
+        val prev = editor.textBefore(1).firstOrNull() ?: return t
+        val first = t[0]
+        fun latin(c: Char) = c in 'a'..'z' || c in 'A'..'Z' || c in '0'..'9'
+        return if ((isCjk(prev) && latin(first)) || (latin(prev) && isCjk(first))) " $t" else t
     }
 
     /** 数字后的标点保持半角: after a digit, Chinese punctuation that would break a number is typed half-width. */
@@ -1340,7 +1353,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
             // an association: commit it and suggest what follows
             val word = predictions.getOrNull(-1 - index) ?: return
             val run = editor.deletedRun.toList()
-            editor.type(word, pairable = false, syllables = run.takeIf { it.size == word.count { c -> isCjk(c) } })
+            editor.type(pangu(word), pairable = false, syllables = run.takeIf { it.size == word.count { c -> isCjk(c) } })
             predictions = predictor.suggest(editor.textBefore(20).ifEmpty { word })
             predictionLabel = ""
             syncBar()

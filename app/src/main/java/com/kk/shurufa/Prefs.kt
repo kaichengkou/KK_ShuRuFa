@@ -94,6 +94,8 @@ class Prefs(context: Context) {
     val zhCorrection get() = b(ZH_CORRECTION, true)
     /** 声调筛选: ˉ ˊ ˇ ˋ on the pinyin line. */
     val toneFilter get() = b(TONE_FILTER, true)
+    /** 盘古之白: a space between Chinese and Latin letters or digits. */
+    val pangu get() = b(PANGU, false)
     val pinyinMode get() = b(PINYIN_MODE, false)
     val backspaceReselect get() = b(BACKSPACE_RESELECT, true)
     val typoMark get() = b(TYPO_MARK, true)
@@ -256,6 +258,7 @@ class Prefs(context: Context) {
         const val WORD_LEARN = "word_learn"
         const val ZH_CORRECTION = "zh_correction"
         const val TONE_FILTER = "tone_filter"
+        const val PANGU = "pangu"
         const val PINYIN_MODE = "pinyin_mode"
         const val BACKSPACE_RESELECT = "backspace_reselect"
         const val TYPO_MARK = "typo_mark"
