@@ -8,6 +8,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
 import androidx.test.core.app.ApplicationProvider
+import com.kk.shurufa.ime.ClipboardFeature
 import com.kk.shurufa.ime.KkImeService
 import com.kk.shurufa.ime.Panel
 import com.kk.shurufa.ime.Sink
@@ -72,11 +73,22 @@ class ImeServiceTest {
         val tag = "ime_${theme}"
         assertEquals(Panel.LETTERS, ime.panel)
         shot(view, "${tag}_letters")
+        // a few copies, so the clipboard has something to sort
+        val clip = KkImeService::class.java.getDeclaredField("clipboard").apply { isAccessible = true }.get(ime) as ClipboardFeature
+        for (t in listOf("莫斯科市特维尔大街 7 号", "【银行】您的验证码是482913，5分钟内有效。", "https://github.com/kaichengkou/KK_ShuRuFa", "好的，明天见", "x^2 + 2x + 1 = 0"))
+            clip.clips.add(t)
         for ((tool, panel) in listOf("emoji" to Panel.EMOJI, "clipboard" to Panel.CLIPBOARD, "quick" to Panel.QUICK,
             "cursor" to Panel.CURSOR, "mic" to Panel.VOICE, "ai" to Panel.AI)) {
             ime.onTool(tool); idle()
             assertEquals(tool, panel, ime.panel)
             shot(view, "${tag}_$tool")
+            if (tool == "clipboard") {
+                // the 验证码 filter: only the code, out of its message
+                ClipboardFeature::class.java.getDeclaredField("filter").apply { isAccessible = true }.set(clip, "验证码")
+                clip.refresh(); idle()
+                shot(view, "${tag}_clipboard_codes")
+                ClipboardFeature::class.java.getDeclaredField("filter").apply { isAccessible = true }.set(clip, "")
+            }
             // a second tap on the same button closes it again
             ime.onTool(tool); idle()
             assertEquals(Panel.LETTERS, ime.panel)
