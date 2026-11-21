@@ -191,6 +191,9 @@ class ImeServiceTest {
         val (ime, view) = start("light")
         Prefs(ctx).put(Prefs.ANIMATIONS, true)
         ime.onSwitchLanguage(1)
+        val kb0 = KkImeService::class.java.getDeclaredField("keyboard").apply { isAccessible = true }.get(ime)
+        // swiped left (the next language): the keys leave to the left, like the space label
+        assertEquals(1, kb0.javaClass.getDeclaredField("swapDir").apply { isAccessible = true }.get(kb0))
         shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(110))
         shot(view, "lang_slide_mid")
         shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(600))

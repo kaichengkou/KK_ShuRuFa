@@ -94,6 +94,38 @@ class TsvIndex(private val bytes: ByteArray) {
         return null
     }
 
+    /**
+     * Calls [f] with (key, value) for each line whose key starts with [prefix], in key order,
+     * at most [limit] lines.
+     */
+    fun prefix(prefix: String, limit: Int, f: (String, String) -> Unit) {
+        val pb = prefix.toByteArray(Charsets.UTF_8)
+        // first line whose key is not below the prefix
+        var lo = 0
+        var hi = starts.size
+        while (lo < hi) {
+            val mid = (lo + hi) ushr 1
+            val s = starts[mid]
+            var tab = s
+            while (tab < bytes.size && bytes[tab] != TAB && bytes[tab] != NL) tab++
+            if (compare(s, tab, pb) < 0) lo = mid + 1 else hi = mid
+        }
+        var i = lo
+        var n = 0
+        while (i < starts.size && n < limit) {
+            val s = starts[i]
+            var tab = s
+            while (tab < bytes.size && bytes[tab] != TAB && bytes[tab] != NL) tab++
+            if (tab - s < pb.size) break
+            for (j in pb.indices) if (bytes[s + j] != pb[j]) return
+            var e = tab
+            while (e < bytes.size && bytes[e] != NL) e++
+            val v = if (tab < e) String(bytes, tab + 1, e - tab - 1, Charsets.UTF_8) else ""
+            f(String(bytes, s, tab - s, Charsets.UTF_8), v)
+            i++; n++
+        }
+    }
+
     private fun compare(from: Int, to: Int, key: ByteArray): Int {
         val len = to - from
         val m = minOf(len, key.size)

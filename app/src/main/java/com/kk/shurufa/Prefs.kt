@@ -87,6 +87,10 @@ class Prefs(context: Context) {
     val zhEmoji get() = b(ZH_EMOJI, true)
     val zhPreeditInline get() = b(ZH_PREEDIT_INLINE, false)
     val zhPredict get() = b(ZH_PREDICT, true)
+    /** 俄语联想: completions and next words for languages written in words. */
+    val wordPredict get() = b(WORD_PREDICT, true)
+    /** …and whether it learns from what is typed. */
+    val wordLearn get() = b(WORD_LEARN, true)
     val zhCorrection get() = b(ZH_CORRECTION, true)
     val pinyinMode get() = b(PINYIN_MODE, false)
     val backspaceReselect get() = b(BACKSPACE_RESELECT, true)
@@ -246,6 +250,8 @@ class Prefs(context: Context) {
         const val ZH_EMOJI = "zh_emoji"
         const val ZH_PREEDIT_INLINE = "zh_preedit_inline"
         const val ZH_PREDICT = "zh_predict"
+        const val WORD_PREDICT = "word_predict"
+        const val WORD_LEARN = "word_learn"
         const val ZH_CORRECTION = "zh_correction"
         const val PINYIN_MODE = "pinyin_mode"
         const val BACKSPACE_RESELECT = "backspace_reselect"

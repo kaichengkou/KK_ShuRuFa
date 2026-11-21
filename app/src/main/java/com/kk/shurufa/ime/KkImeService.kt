@@ -136,6 +136,14 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     /** 拼音编辑: the bar shows the typed letters large, with a caret that can be placed precisely. */
     private var pinyinEdit = false
     private var predictions: List<String> = emptyList()
+    /** 俄语联想, one per language that has word tables. */
+    private val wordPredictors = HashMap<String, WordPredictor>()
+    /** Word suggestions make sense in this field (not passwords, addresses, numbers). */
+    private var wordsHere = true
+    /** What is typed here may be learned from. */
+    private var learnHere = true
+    /** A suggestion was just picked and put a space after itself. */
+    private var autoSpaced = false
     private var predictionLabel = ""
     private var searchResults: List<String> = emptyList()
     /** A notice raised before the bar existed (a layout file that failed to load). */
@@ -369,6 +377,10 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         // 打字数据: never from passwords, addresses or fields that ask not to be learned from
         editor.recording = prefs.typingStats && !isPassword && !isAddress &&
             (info.imeOptions and EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING) == 0
+        wordsHere = cls == InputType.TYPE_CLASS_TEXT && !isPassword && !isAddress &&
+            (info.inputType and InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS) == 0
+        learnHere = wordsHere && (info.imeOptions and EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING) == 0
+        autoSpaced = false
         panel = when {
             cls == InputType.TYPE_CLASS_PHONE -> Panel.PHONE
             (cls == InputType.TYPE_CLASS_NUMBER || cls == InputType.TYPE_CLASS_DATETIME) && prefs.numberFieldMath -> { mathTab = "basic"; numPanel() }
@@ -394,6 +406,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     override fun onWindowHidden() {
         super.onWindowHidden()
         stopBackgroundWork()
+        wordPredictors.values.forEach { it.save() }
         Background.run { TypingStats.get(this).save() }
     }
 
@@ -850,7 +863,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
             .filter { it.first !in onBar }
             .map { (id, name) -> QuickPanel.Tile("tool:$id", name) }
         quickPanel.tiles = listOf(
-            QuickPanel.Tile("predict", "联想", on = prefs.zhPredict),
+            QuickPanel.Tile("predict", "联想", on = if (isZh) prefs.zhPredict else prefs.wordPredict),
             QuickPanel.Tile("correct", "纠错", on = prefs.zhCorrection),
             QuickPanel.Tile("trad", "繁体", on = prefs.zhTraditional),
             QuickPanel.Tile("emoji", "候选表情", on = prefs.zhEmoji),
@@ -870,7 +883,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         when (id) {
             "trad" -> prefs.put(Prefs.ZH_TRAD, !prefs.zhTraditional)
             "emoji" -> prefs.put(Prefs.ZH_EMOJI, !prefs.zhEmoji)
-            "predict" -> prefs.put(Prefs.ZH_PREDICT, !prefs.zhPredict)
+            "predict" -> if (isZh) prefs.put(Prefs.ZH_PREDICT, !prefs.zhPredict) else prefs.put(Prefs.WORD_PREDICT, !prefs.wordPredict)
             "correct" -> { prefs.put(Prefs.ZH_CORRECTION, !prefs.zhCorrection); notice("正在重新部署词库…") }
             "pinyin" -> prefs.put(Prefs.PINYIN_MODE, !prefs.pinyinMode)
             "stress" -> prefs.put(Prefs.STRESS_MODE, !prefs.stressMode)
@@ -940,7 +953,9 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
      */
     private fun suggestAfterDelete() {
         predictions = emptyList(); predictionLabel = ""
-        if (!isZh || panel != Panel.LETTERS) return
+        autoSpaced = false
+        if (!isZh) { suggestWords(); return }
+        if (panel != Panel.LETTERS) return
         val run = editor.deletedRun
         if (prefs.backspaceReselect && run.isNotEmpty() && RimeEngine.ready) {
             predictions = RimeBridge.query(run.joinToString(""), 24).filter { it.isNotEmpty() }.distinct()
@@ -1029,10 +1044,17 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
             syncBar()
             return
         }
-        editor.type(if (isMain && key.isLetter && shift > 0) t.uppercase() else t)
+        val typed = if (isMain && key.isLetter && shift > 0) t.uppercase() else t
+        val wordChar = typed.isNotEmpty() && typed.all { WordPredictor.isWordChar(it) }
+        if (!wordChar) learnWordBefore()
+        if (autoSpaced && typed.length == 1 && typed[0] in ",.!?;:)…" && editor.textBefore(1) == " ") {
+            // a picked word put a space after itself: punctuation goes before that space
+            editor.replaceBefore(1, if (typed[0] == ')') typed else "$typed ")
+        } else editor.type(typed)
+        autoSpaced = false
         if (isMain && key.isLetter && shift == 1) { shift = 0; autoShift = false; keyboard.invalidate() }
         updateAutoCap()
-        if (panel == Panel.LETTERS) syncBar()
+        if (panel == Panel.LETTERS) { suggestWords(); syncBar() }
     }
 
     /** 数字后的标点保持半角: after a digit, Chinese punctuation that would break a number is typed half-width. */
@@ -1057,6 +1079,8 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
                 if (composing) { rimeKey(RimeBridge.XK_space); return }
                 if (sink != null) { query.append(' '); syncBar(); return }
                 predictions = emptyList()
+                learnWordBefore()
+                autoSpaced = false
                 val now = SystemClock.uptimeMillis()
                 val before = editor.textBefore(2)
                 // 双击空格: a full stop after a word
@@ -1065,6 +1089,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
                 else editor.type(" ")
                 lastSpaceAt = now
                 updateAutoCap()
+                suggestWords()
                 syncBar()
             }
             "enter" -> when {
@@ -1222,8 +1247,9 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         shift = 0; autoShift = false
         predictions = emptyList()
         currentInputEditorInfo?.packageName?.let { if (prefs.perAppLanguage) prefs.setAppLanguage(it, id) }
-        // the old keys slide out the way the finger went, the new ones follow
-        if (panel != Panel.LETTERS) showPanel(Panel.LETTERS) else { keyboard.setRows(lettersRows(), slide = if (direction < 0) 1 else if (direction > 0) -1 else 0); syncBar() }
+        // the whole keyboard moves with the finger, as the space label does: swiped left, the
+        // old keys leave to the left and the new ones come in from the right
+        if (panel != Panel.LETTERS) showPanel(Panel.LETTERS) else { keyboard.setRows(lettersRows(), slide = direction.coerceIn(-1, 1)); syncBar() }
         updateAutoCap()
     }
 
@@ -1274,6 +1300,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     override fun onCandidate(index: Int) {
         if (index < 0 && sink == Sink.AI && !composing) { runInstruction(); return }
         if (index < 0 && sink == Sink.EMOJI && !composing) { searchResults.getOrNull(-1 - index)?.let { emoji.type(it) }; return }
+        if (index < 0 && !isZh) { pickWord(-1 - index); return }
         if (index < 0) {
             // an association: commit it and suggest what follows
             val word = predictions.getOrNull(-1 - index) ?: return
@@ -1288,6 +1315,52 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         zh.track(RimeBridge.preedit())
         RimeBridge.selectCandidateGlobal(index)
         flushRime()
+    }
+
+    // ---- 俄语联想 ----------------------------------------------------------------------------
+
+    /** The word predictor for the language in use, when it has one and it makes sense here. */
+    private fun words(): WordPredictor? {
+        if (isZh || !prefs.wordPredict || !wordsHere || curLang !in WordPredictor.LANGS) return null
+        return wordPredictors.getOrPut(curLang) { WordPredictor(this, curLang) }.also { it.load() }
+    }
+
+    /** Completions of the word being typed, or after a space what may come next. */
+    private fun suggestWords() {
+        val p = words() ?: return
+        if (panel != Panel.LETTERS || sink != null) return
+        val before = editor.textBefore(64)
+        val (typed, ctx) = WordPredictor.split(before)
+        predictions = when {
+            typed.isNotEmpty() -> p.complete(typed, ctx)
+            // after a word and a space, or once a sentence has ended
+            before.endsWith(" ") && (ctx.isNotEmpty() || (before.isNotBlank() && WordPredictor.sentenceStart(before))) ->
+                p.following(ctx, capital = WordPredictor.sentenceStart(before))
+            else -> emptyList()
+        }
+        predictionLabel = ""
+    }
+
+    /** The word right before the caret is finished (a space or punctuation follows): learn it. */
+    private fun learnWordBefore() {
+        if (!learnHere || !prefs.wordLearn) return
+        val p = words() ?: return
+        val (typed, ctx) = WordPredictor.split(editor.textBefore(64))
+        if (typed.length >= 2) p.learn(ctx, typed)
+    }
+
+    /** A suggestion was tapped: it replaces the letters typed so far, followed by a space. */
+    private fun pickWord(i: Int) {
+        val word = predictions.getOrNull(i) ?: return
+        val p = words()
+        val (typed, ctx) = WordPredictor.split(editor.textBefore(64))
+        editor.replaceBefore(typed.length, "$word ")
+        autoSpaced = true
+        if (learnHere && prefs.wordLearn) p?.learn(ctx, word)
+        updateAutoCap()
+        predictions = p?.following(ctx + word, capital = false).orEmpty()
+        predictionLabel = ""
+        syncBar()
     }
 
     override fun candidateOptions(index: Int): List<Output> {
