@@ -251,6 +251,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         val isAddress = cls == InputType.TYPE_CLASS_TEXT && variation in ADDRESSES
         val noLearning = (info.imeOptions and EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING) != 0 || prefs.incognito
         editor.recording = prefs.typingStats && !isPassword && !isAddress && !noLearning
+        editor.secret = isPassword
         wordsHere = cls == InputType.TYPE_CLASS_TEXT && !isPassword && !isAddress &&
             (info.inputType and InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS) == 0
         learnHere = wordsHere && !noLearning
@@ -407,6 +408,8 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         super.onStartInputView(info, restarting)
         // Rime's session can have been made anew (a backup's sync): its options with it
         applyRimeOptions()
+        // a selection already in the field (made before the keyboard came) counts from the start
+        editor.onSelection(info.initialSelStart.coerceAtLeast(0), info.initialSelEnd.coerceAtLeast(0))
         tempLang = null
         predictions = emptyList()
         editor.reset()
@@ -583,7 +586,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
                 content.addView(mathPanel, fixed)
             }
             Panel.NUM -> { numPad.keys.setRows(layout("num").rows); numPad.setItems(NUM_OPS); content.addView(numPad, fixed); showMoneyChip() }
-            Panel.CURSOR -> { syncEditPanel(); content.addView(editPanel, fixed) }
+            Panel.CURSOR -> { editor.refreshSelection(); syncEditPanel(); content.addView(editPanel, fixed) }
             Panel.SYMBOLS -> { refreshSymbols(); content.addView(symbolPanel, fixed) }
             Panel.CLIPBOARD -> { clipboard.refresh(); content.addView(clipPanel, fixed) }
             Panel.QUICK -> { refreshQuick(); content.addView(quickPanel, fixed); if (entering) quickPanel.animateIn() }
@@ -841,6 +844,14 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         }
     }
 
+    /** A short word that the copy worked, with how much went. */
+    private fun copied(text: String?, what: String) {
+        if (text == null) return
+        haptics.play(HapticEvent.OPTION)
+        val n = text.codePointCount(0, text.length)
+        notice(if (n <= 12) "$what「${text.replace('\n', ' ')}」" else "$what $n 个字")
+    }
+
     private fun syncEditPanel() {
         editPanel.selecting = editor.selectMode
         editPanel.hasSelection = editor.hasSelection
@@ -862,8 +873,8 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
             "end" -> editor.sendKey(KeyEvent.KEYCODE_MOVE_END, editor.shiftMeta())
             "select_all" -> { editor.contextMenu(android.R.id.selectAll); editor.selectMode = true }
             "backspace" -> { haptics.play(HapticEvent.REPEAT); editor.deleteBackward() }
-            "copy" -> { editor.contextMenu(android.R.id.copy); editor.selectMode = false; editor.collapseSelection() }
-            "cut" -> { editor.contextMenu(android.R.id.cut); editor.selectMode = false }
+            "copy" -> { copied(editor.copySelection(cut = false), "已复制"); editor.selectMode = false; editor.collapseSelection() }
+            "cut" -> { copied(editor.copySelection(cut = true), "已剪切"); editor.selectMode = false }
             "paste" -> { editor.contextMenu(android.R.id.paste); editor.selectMode = false }
         }
         syncEditPanel()
@@ -1260,8 +1271,8 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
             "home" -> editor.sendKey(KeyEvent.KEYCODE_MOVE_HOME, editor.shiftMeta())
             "end" -> editor.sendKey(KeyEvent.KEYCODE_MOVE_END, editor.shiftMeta())
             "select_all" -> editor.contextMenu(android.R.id.selectAll)
-            "copy" -> { editor.contextMenu(android.R.id.copy); editor.selectMode = false }
-            "cut" -> { editor.contextMenu(android.R.id.cut); editor.selectMode = false }
+            "copy" -> { copied(editor.copySelection(cut = false), "已复制"); editor.selectMode = false }
+            "cut" -> { copied(editor.copySelection(cut = true), "已剪切"); editor.selectMode = false }
             "paste" -> editor.contextMenu(android.R.id.paste)
             "next_slot" -> editor.nextSlot()
         }

@@ -264,6 +264,32 @@ class Editor(private val ime: InputMethodService, private val prefs: Prefs) {
 
     fun contextMenu(id: Int) = ic?.performContextMenuAction(id)
 
+    /** The field is a password: nothing is copied out of it. */
+    var secret = false
+
+    /** Reads where the selection is from the field itself (one that was there before the keyboard came). */
+    fun refreshSelection() { selection()?.let { (s, e) -> onSelection(s, e) } }
+
+    /**
+     * 复制 / 剪切: the selected text onto the clipboard. The keyboard copies it itself: some apps
+     * (web pages, chat apps) only copy from their own menu and ignore the request. Nothing is
+     * copied out of a password field. Returns what was copied, or null when nothing was selected.
+     */
+    fun copySelection(cut: Boolean): String? {
+        val ic = ic ?: return null
+        if (secret) return null
+        val text = ic.getSelectedText(0)?.toString().orEmpty()
+        if (text.isEmpty()) {
+            // no selection we can read: let the app try with its own
+            ic.performContextMenuAction(if (cut) android.R.id.cut else android.R.id.copy)
+            return null
+        }
+        ime.getSystemService(android.content.ClipboardManager::class.java)
+            ?.setPrimaryClip(android.content.ClipData.newPlainText("KK输入法", text))
+        if (cut) { history.push(EditHistory.Op.Delete(text)); ic.commitText("", 1) }
+        return text
+    }
+
     // ---- the caret ----
 
     fun sendKey(code: Int, meta: Int = 0) {
