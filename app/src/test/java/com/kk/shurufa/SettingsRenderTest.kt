@@ -34,6 +34,8 @@ class SettingsRenderTest {
         v.draw(Canvas(b))
         File("build/screens").mkdirs()
         File("build/screens/settings_${theme}_$page.png").outputStream().use { b.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        b.recycle()
+        activity.finish()
     }
 
     /** The launcher icon as a launcher draws it (a circle mask), large and small, and its themed layer. */

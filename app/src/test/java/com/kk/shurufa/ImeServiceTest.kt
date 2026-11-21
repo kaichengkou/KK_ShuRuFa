@@ -63,6 +63,8 @@ class ImeServiceTest {
         val out = Bitmap.createBitmap(b, 0, top, b.width, (column.bottom - top).coerceAtLeast(1))
         File("build/screens").mkdirs()
         File("build/screens/$name.png").outputStream().use { out.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        // the window-sized pixels are native memory the JVM does not see: free them now, not at some GC
+        out.recycle(); b.recycle()
     }
 
     private fun tour(theme: String) {
