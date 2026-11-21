@@ -17,10 +17,14 @@ object Background {
     private val main = Handler(Looper.getMainLooper())
     private val pool = serial("kk-bg")
 
-    /** One job after another on a thread of its own, which ends after a few idle seconds. */
-    fun serial(name: String): ExecutorService = ThreadPoolExecutor(0, 1, 3, TimeUnit.SECONDS, LinkedBlockingQueue()) { r ->
-        Thread({ Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND); r.run() }, name).apply { isDaemon = true }
-    }
+    /**
+     * One job after another on a thread of its own, which ends after a few idle seconds. Work the
+     * user is waiting for (deploying the dictionaries) keeps the normal [priority].
+     */
+    fun serial(name: String, priority: Int = Process.THREAD_PRIORITY_BACKGROUND): ExecutorService =
+        ThreadPoolExecutor(0, 1, 3, TimeUnit.SECONDS, LinkedBlockingQueue()) { r ->
+            Thread({ Process.setThreadPriority(priority); r.run() }, name).apply { isDaemon = true }
+        }
 
     fun run(job: () -> Unit) = pool.execute { runCatching(job) }
 

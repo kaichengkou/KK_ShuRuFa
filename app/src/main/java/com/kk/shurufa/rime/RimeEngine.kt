@@ -21,7 +21,7 @@ object RimeEngine {
         private set
 
     /** Deployment and shutdown, one after another; the thread goes away when idle. */
-    private val exec = Background.serial("kk-rime")
+    private val exec = Background.serial("kk-rime", android.os.Process.THREAD_PRIORITY_DEFAULT)
     private val main = Handler(Looper.getMainLooper())
     private val listeners = mutableListOf<(State) -> Unit>()
 

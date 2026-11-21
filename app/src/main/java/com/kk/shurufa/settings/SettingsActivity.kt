@@ -77,6 +77,23 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.material.icons.outlined.Animation
+import androidx.compose.material.icons.outlined.Apps
+import androidx.compose.material.icons.outlined.Cloud
+import androidx.compose.material.icons.outlined.Code
+import androidx.compose.material.icons.outlined.ContentPaste
+import androidx.compose.material.icons.outlined.Functions
+import androidx.compose.material.icons.outlined.Keyboard
+import androidx.compose.material.icons.outlined.Language
+import androidx.compose.material.icons.outlined.Mic
+import androidx.compose.material.icons.outlined.Palette
+import androidx.compose.material.icons.outlined.Swipe
+import androidx.compose.material.icons.outlined.Translate
+import androidx.compose.material.icons.outlined.Vibration
+import androidx.compose.material.icons.automirrored.outlined.LibraryBooks
+import androidx.compose.material.icons.automirrored.outlined.MenuBook
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -112,11 +129,7 @@ class SettingsActivity : ComponentActivity() {
             }
             val dark = when (prefs.theme) { "dark" -> true; "light" -> false; else -> isSystemInDarkTheme() }
             val kb = remember(accentTick, dark) { KbTheme.resolve(this, prefs) }
-            val accent = Color(kb.accent)
-            val scheme = if (dark) darkColorScheme(primary = accent, onPrimary = Color(kb.onAccent), background = Color(0xFF111316), surface = Color(0xFF111316),
-                surfaceContainer = Color(0xFF1C1F23), surfaceContainerHigh = Color(0xFF24282D))
-            else lightColorScheme(primary = accent, onPrimary = Color(kb.onAccent), background = Color(0xFFF3F4F7), surface = Color(0xFFF3F4F7),
-                surfaceContainer = Color.White, surfaceContainerHigh = Color(0xFFE9ECF0))
+            val scheme = remember(kb) { settingsColors(kb) }
             MaterialTheme(colorScheme = scheme) {
                 Surface(color = MaterialTheme.colorScheme.background) { SettingsApp(prefs, intent.getStringExtra("page") ?: "home") }
             }
@@ -124,7 +137,53 @@ class SettingsActivity : ComponentActivity() {
     }
 }
 
+/**
+ * The settings in the keyboard's own colors: every Material role is derived from the same theme,
+ * so no component falls back to a default hue of its own.
+ */
+private fun settingsColors(kb: KbTheme): androidx.compose.material3.ColorScheme {
+    val accent = Color(kb.accent)
+    val bg = if (kb.dark) Color(0xFF111316) else Color(0xFFF3F4F7)
+    val card = if (kb.dark) Color(0xFF1C1F23) else Color.White
+    val high = if (kb.dark) Color(0xFF262A30) else Color(0xFFE9ECF0)
+    val ink = Color(kb.ink)
+    val inkSoft = Color(kb.inkSoft)
+    // a container is the accent laid thinly over the card
+    val tint = Color(com.kk.shurufa.keyboard.Colors.blend(card.toArgb(), kb.accent, if (kb.dark) 0.22f else 0.14f))
+    val base = if (kb.dark) darkColorScheme() else lightColorScheme()
+    return base.copy(
+        primary = accent, onPrimary = Color(kb.onAccent),
+        primaryContainer = tint, onPrimaryContainer = accent,
+        secondary = accent, onSecondary = Color(kb.onAccent),
+        secondaryContainer = tint, onSecondaryContainer = if (kb.dark) ink else accent,
+        tertiary = accent, onTertiary = Color(kb.onAccent), tertiaryContainer = tint, onTertiaryContainer = accent,
+        background = bg, onBackground = ink, surface = bg, onSurface = ink,
+        surfaceVariant = high, onSurfaceVariant = inkSoft,
+        surfaceContainerLowest = card, surfaceContainerLow = card, surfaceContainer = card,
+        surfaceContainerHigh = high, surfaceContainerHighest = high,
+        outline = Color(kb.hint), outlineVariant = Color(com.kk.shurufa.keyboard.Colors.blend(card.toArgb(), kb.ink, 0.12f)),
+        inverseSurface = ink, inverseOnSurface = bg,
+    )
+}
+
 private data class PageInfo(val id: String, val title: String, val summary: String)
+
+/** The home page in sections, each page with its icon. */
+private val SECTIONS = listOf(
+    "外观与手感" to listOf("look", "motion", "haptics", "gestures"),
+    "输入" to listOf("languages", "chinese", "dict", "packs", "keys"),
+    "工具" to listOf("toolbar", "symbols", "clipboard", "voice", "online"),
+    "高级" to listOf("files"),
+)
+
+private val PAGE_ICONS: Map<String, ImageVector> = mapOf(
+    "look" to Icons.Outlined.Palette, "motion" to Icons.Outlined.Animation, "haptics" to Icons.Outlined.Vibration,
+    "gestures" to Icons.Outlined.Swipe, "languages" to Icons.Outlined.Language, "chinese" to Icons.Outlined.Translate,
+    "dict" to Icons.AutoMirrored.Outlined.MenuBook, "packs" to Icons.AutoMirrored.Outlined.LibraryBooks,
+    "keys" to Icons.Outlined.Keyboard, "toolbar" to Icons.Outlined.Apps, "symbols" to Icons.Outlined.Functions,
+    "clipboard" to Icons.Outlined.ContentPaste, "voice" to Icons.Outlined.Mic, "online" to Icons.Outlined.Cloud,
+    "files" to Icons.Outlined.Code,
+)
 
 private val PAGES = listOf(
     PageInfo("look", "外观", "主题、主体色、按键尺寸与字号"),
@@ -267,10 +326,10 @@ private fun IntSlider(prefs: Prefs, key: String, title: String, def: Int, range:
             }
         }
         if (sub != null) Text(sub, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        // the value snaps to tidy steps by itself; the track stays clean, without tick marks
         Slider(value = v.toFloat(), onValueChange = { v = (range.first + ((it - range.first) / step).roundToInt() * step).coerceIn(range) },
             onValueChangeFinished = { prefs.put(key, v); onDone?.invoke() },
-            valueRange = range.first.toFloat()..range.last.toFloat(),
-            steps = ((range.last - range.first) / step - 1).coerceIn(0, 200))
+            valueRange = range.first.toFloat()..range.last.toFloat(), colors = cleanSlider())
     }
 }
 
@@ -289,10 +348,12 @@ private fun FloatSlider(prefs: Prefs, key: String, title: String, def: Float, ra
         }
         if (sub != null) Text(sub, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Slider(value = v, onValueChange = { v = (range.start + ((it - range.start) / step).roundToInt() * step).coerceIn(range.start, range.endInclusive) },
-            onValueChangeFinished = { prefs.put(key, v) }, valueRange = range,
-            steps = (((range.endInclusive - range.start) / step).roundToInt() - 1).coerceIn(0, 200))
+            onValueChangeFinished = { prefs.put(key, v) }, valueRange = range, colors = cleanSlider())
     }
 }
+
+@Composable
+private fun cleanSlider() = androidx.compose.material3.SliderDefaults.colors(activeTickColor = Color.Transparent, inactiveTickColor = Color.Transparent)
 
 @Composable
 private fun Choice(prefs: Prefs, key: String, title: String, options: List<Pair<String, String>>, def: String = options.first().first) {
@@ -327,10 +388,16 @@ private fun Home(prefs: Prefs, open: (String) -> Unit) {
         }
         item { Setup(tick) }
         item { RimeStatus() }
-        item {
-            Group {
-                PAGES.forEachIndexed { i, p ->
-                    Row(Modifier.fillMaxWidth().clickable { open(p.id) }.padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+        for ((title, ids) in SECTIONS) item {
+            Group(title) {
+                for (id in ids) {
+                    val p = PAGES.first { it.id == id }
+                    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable { open(p.id) }.padding(vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(38.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primaryContainer), contentAlignment = Alignment.Center) {
+                            Icon(PAGE_ICONS.getValue(id), null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                        }
+                        Spacer(Modifier.width(14.dp))
                         Column(Modifier.weight(1f)) {
                             Text(p.title, fontWeight = FontWeight.Medium)
                             Text(p.summary, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -398,7 +465,8 @@ private fun LookPage(prefs: Prefs) {
         Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), horizontalArrangement = Arrangement.SpaceBetween) {
             KbTheme.ACCENTS.forEach { (id, v) ->
                 val name = v.first
-                val dark = isSystemInDarkTheme()
+                // the swatches show each color as the keyboard would, in the theme it is in now
+                val dark = KbTheme.isDark(ctx, prefs)
                 val c = if (id == "system" && android.os.Build.VERSION.SDK_INT < 31) Color.Gray else Color(KbTheme.accentFor(ctx, id, dark))
                 Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { accent = id; prefs.put(Prefs.ACCENT, id) }) {
                     Box(Modifier.size(36.dp).clip(CircleShape).background(c)

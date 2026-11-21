@@ -397,7 +397,17 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
 
     // ---- panels -------------------------------------------------------------------------
 
+    private var lettersKey = ""
+    private var lettersCache: List<List<Key>> = emptyList()
+
+    /** The letter rows with the switches that change them applied; the same list while nothing changed. */
     private fun lettersRows(): List<List<Key>> {
+        val key = "$curLang|${prefs.stressMode}|${prefs.topRowScripts}|${prefs.numberRow}|${System.identityHashCode(layout(curLang))}"
+        if (key != lettersKey) { lettersCache = buildLettersRows(); lettersKey = key }
+        return lettersCache
+    }
+
+    private fun buildLettersRows(): List<List<Key>> {
         var base = layout(curLang).rows
         if (curLang == "ru" && prefs.stressMode) {
             // 重音模式: every Russian vowel flicks up to its stressed form
