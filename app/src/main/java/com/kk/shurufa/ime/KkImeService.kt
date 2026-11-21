@@ -459,7 +459,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
 
     private fun kbHeight(rows: Int): Int {
         val keyH = dp(prefs.keyHeightDp.toFloat())
-        return (dp(6f) + dp(prefs.bottomPaddingDp + 2f) + rows * keyH + (rows - 1) * dp(prefs.keyGapDp)).toInt()
+        return (dp(6f) + dp(prefs.bottomPaddingDp + 2f) + rows * keyH + (rows - 1) * dp(prefs.rowGapDp)).toInt()
     }
 
     private val barH get() = dp(CandidateBar.HEIGHT_DP).toInt()
@@ -467,7 +467,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     /** 学术 is taller than the letters: a tab row, four rows of keys and the bottom row. */
     private fun mathH(): Int {
         val kh = dp(prefs.keyHeightDp.toFloat())
-        val g = dp(prefs.keyGapDp)
+        val g = dp(prefs.rowGapDp)
         return (dp(40f) + dp(2f) + 4 * kh * MathPanel.ROW + 3 * g + g + kh + dp(prefs.bottomPaddingDp + 2f)).toInt()
     }
     private fun tallH() = maxOf(baseH + dp(40f).toInt(), (resources.displayMetrics.heightPixels * 0.56f).toInt() - barH)
@@ -992,7 +992,13 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     // ---- keys ---------------------------------------------------------------------------
 
     override fun shiftState() = shift
-    override fun spaceLabel(): String = if (panel == Panel.LETTERS) layout(curLang).label else "空格"
+    override fun spaceLabel(): String {
+        if (panel != Panel.LETTERS) return "空格"
+        val name = layout(curLang).label
+        // 节气: on the day of a solar term the space key names it, quietly
+        val term = if (prefs.solarTerms) SolarTerms.on() else null
+        return if (term != null) "$name · $term" else name
+    }
 
     override fun onOutput(key: Key, output: Output) {
         if (panel == Panel.MATH) { mathOut(output); return }

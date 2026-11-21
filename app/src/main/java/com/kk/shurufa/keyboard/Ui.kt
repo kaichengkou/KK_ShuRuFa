@@ -11,6 +11,8 @@ import android.graphics.Typeface
 object Ui {
     val regular: Typeface = Typeface.create("sans-serif", Typeface.NORMAL)
     val medium: Typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+    /** 宋体 for candidates: the serif family, which Android pairs with Noto Serif CJK for Chinese. */
+    val serif: Typeface = Typeface.create(Typeface.SERIF, Typeface.NORMAL)
 
     // ---- type (sp) ----
     /** Hints in key corners. */

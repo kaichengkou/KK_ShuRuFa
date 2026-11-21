@@ -23,12 +23,23 @@ class Prefs(context: Context) {
 
     // Appearance
     val theme get() = s(THEME, "system")                 // system | light | dark
-    val keyHeightDp get() = i(KEY_HEIGHT, 46)
+    /** 风格: modern (cool grey, sans) or paper (纸墨: rice paper and ink, 宋体 candidates). */
+    val style get() = s(STYLE, "modern")
+    val keyHeightDp get() = i(KEY_HEIGHT, 48)
+    /** Between keys of a row. */
     val keyGapDp get() = f(KEY_GAP, 5f)
+    /** Between rows: wider than between keys, so each row reads as one band. */
+    val rowGapDp get() = f(ROW_GAP, 8f)
     val keyRadiusDp get() = f(KEY_RADIUS, 8f)
     val labelScale get() = f(LABEL_SCALE, 1f)
     val hintScale get() = f(HINT_SCALE, 1f)
-    val showHints get() = b(SHOW_HINTS, true)
+    val showHints get() = hintMode != "none"
+    /** 角标: all (every key's slide characters), digits (the top row's numbers only), none. */
+    val hintMode get() = s(HINT_MODE, if (b(SHOW_HINTS, true)) "all" else "none")
+    /** 候选字体: sans (黑体) or serif (宋体); the paper style defaults to 宋体. */
+    val candFont get() = s(CAND_FONT, if (style == "paper") "serif" else "sans")
+    /** 节气: the space key names the solar term on its day. */
+    val solarTerms get() = b(SOLAR_TERMS, true)
     val showAllHints get() = b(SHOW_ALL_HINTS, false)
     val keyBorders get() = b(KEY_BORDERS, true)
     val numberRow get() = b(NUMBER_ROW, false)
@@ -176,7 +187,7 @@ class Prefs(context: Context) {
         fun rebuildsKeyboard(key: String) = key in LOOK || key.startsWith("key_ovr_")
 
         private val LOOK by lazy {
-            setOf(THEME, ACCENT, KEY_HEIGHT, KEY_GAP, KEY_RADIUS, LABEL_SCALE, HINT_SCALE, SHOW_HINTS, SHOW_ALL_HINTS,
+            setOf(THEME, STYLE, ACCENT, KEY_HEIGHT, KEY_GAP, ROW_GAP, KEY_RADIUS, LABEL_SCALE, HINT_SCALE, SHOW_HINTS, SHOW_ALL_HINTS, HINT_MODE, CAND_FONT,
                 KEY_BORDERS, NUMBER_ROW, CAND_SCALE, BOTTOM_PADDING, CURSOR_LABELS, LANGUAGES, TOP_ROW_SCRIPTS, LAYOUT_RELOAD)
         }
 
@@ -189,6 +200,11 @@ class Prefs(context: Context) {
         const val THEME = "theme"
         const val KEY_HEIGHT = "key_height"
         const val KEY_GAP = "key_gap"
+        const val ROW_GAP = "row_gap"
+        const val STYLE = "style"
+        const val HINT_MODE = "hint_mode"
+        const val CAND_FONT = "cand_font"
+        const val SOLAR_TERMS = "solar_terms"
         const val KEY_RADIUS = "key_radius"
         const val LABEL_SCALE = "label_scale"
         const val HINT_SCALE = "hint_scale"

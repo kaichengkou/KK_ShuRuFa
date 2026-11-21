@@ -103,13 +103,14 @@ class KeyboardView(context: Context, prefs: Prefs) : KbView(context, prefs) {
 
     private val keyH get() = dp(prefs.keyHeightDp.toFloat() * heightScale)
     private val gap get() = dp(prefs.keyGapDp)
+    private val rowGap get() = dp(prefs.rowGapDp)
     private val padTop get() = dp(padTopDp)
     private val padBottomPx get() = if (padBottom) dp(prefs.bottomPaddingDp.toFloat() + 2f) else 0f
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val w = MeasureSpec.getSize(widthMeasureSpec)
         val n = rows.size
-        val natural = (padTop + padBottomPx + n * keyH + max(0, n - 1) * gap).roundToInt()
+        val natural = (padTop + padBottomPx + n * keyH + max(0, n - 1) * rowGap).roundToInt()
         val h = if (MeasureSpec.getMode(heightMeasureSpec) == MeasureSpec.EXACTLY) MeasureSpec.getSize(heightMeasureSpec) else natural
         setMeasuredDimension(w, h)
     }
@@ -122,7 +123,8 @@ class KeyboardView(context: Context, prefs: Prefs) : KbView(context, prefs) {
         val g = gap
         // keys fill the height the parent gives: taller than natural stretches them, shorter (five
         // number rows in the letters' height) makes them a little shorter instead of cutting a row off
-        val kh = if (n > 0 && height > 0) ((height - padTop - padBottomPx - (n - 1) * g) / n).coerceAtLeast(dp(24f)) else keyH
+        val rg = rowGap
+        val kh = if (n > 0 && height > 0) ((height - padTop - padBottomPx - (n - 1) * rg) / n).coerceAtLeast(dp(24f)) else keyH
         var y = padTop
         for (row in rows) {
             val total = row.sumOf { it.width.toDouble() }.toFloat()
@@ -133,8 +135,9 @@ class KeyboardView(context: Context, prefs: Prefs) : KbView(context, prefs) {
                 if (!k.spacer) { keys += k; rects += RectF(x, y, x + w, y + kh) } else spacerRects += RectF(x, y, x + w, y + kh)
                 x += w + g
             }
-            y += kh + g
+            y += kh + rg
         }
+        surfaceShader = null
         onLaidOut?.invoke()
     }
 
@@ -151,9 +154,28 @@ class KeyboardView(context: Context, prefs: Prefs) : KbView(context, prefs) {
     private val tmpRect = RectF()
     private val bounds = Rect()
 
+    /**
+     * The keys' material: light from above, so a key's face is a touch brighter at the top than
+     * at the bottom (a few percent, felt more than seen), with a hairline of light along its top
+     * edge at night. One shader serves every key of a row height; it is moved to each key.
+     */
+    private var surfaceShader: android.graphics.LinearGradient? = null
+    private var shaderFor = 0
+    private val shaderMatrix = android.graphics.Matrix()
+
+    private fun surfaceShader(t: KbTheme, h: Float): android.graphics.Shader {
+        val key = t.surface * 31 + h.toInt()
+        surfaceShader?.let { if (shaderFor == key) return it }
+        val top = if (t.dark) Colors.blend(t.surface, android.graphics.Color.WHITE, 0.045f) else t.surface
+        val bottom = if (t.dark) t.surface else Colors.blend(t.surface, t.background, 0.22f)
+        return android.graphics.LinearGradient(0f, 0f, 0f, h, top, bottom, android.graphics.Shader.TileMode.CLAMP)
+            .also { surfaceShader = it; shaderFor = key }
+    }
+
     override fun onDraw(c: Canvas) {
         val t = theme
         c.drawColor(t.background)
+        if (prefs.style == "paper") Paper.grain(c, width, height, t.dark)
         val r = dp(prefs.keyRadiusDp)
         val borders = prefs.keyBorders
         val shadowDy = dp(1.2f)
@@ -186,7 +208,18 @@ class KeyboardView(context: Context, prefs: Prefs) : KbView(context, prefs) {
                 c.drawRoundRect(kr.left, kr.top + shadowDy, kr.right, kr.bottom + shadowDy, r, r, keyPaint)
             }
             keyPaint.color = fill
-            c.drawRoundRect(kr, r, r, keyPaint)
+            if (style == KeyStyle.NORMAL && pv < 0.01f && tp < 0.01f) {
+                // at rest, a solid key shows its material; pressed or melting, the plain fill
+                val sh = surfaceShader(t, rect.height())
+                shaderMatrix.setTranslate(0f, rect.top); sh.setLocalMatrix(shaderMatrix)
+                keyPaint.shader = sh
+                c.drawRoundRect(kr, r, r, keyPaint)
+                keyPaint.shader = null
+                if (t.dark) {
+                    keyPaint.color = Colors.alpha(android.graphics.Color.WHITE, 0x12)
+                    c.drawRoundRect(kr.left + r * 0.6f, kr.top, kr.right - r * 0.6f, kr.top + dp(1f), dp(0.5f), dp(0.5f), keyPaint)
+                }
+            } else c.drawRoundRect(kr, r, r, keyPaint)
             val ink = when (style) {
                 KeyStyle.ACTION -> t.onAccent
                 KeyStyle.TINT -> t.accent
@@ -247,7 +280,9 @@ class KeyboardView(context: Context, prefs: Prefs) : KbView(context, prefs) {
         }
         val label = displayLabel(k)
         val single = label.codePointCount(0, label.length) <= 1
-        val hints = prefs.showHints
+        val mode = prefs.hintMode
+        // 只第一排数字: a key's corner shows its digit only
+        val hints = mode == "all" || (mode == "digits" && k.flicks[Dir.UP]?.label?.singleOrNull()?.isDigit() == true)
         textPaint.typeface = Ui.regular
         textPaint.textSize = sp(
             when {
@@ -269,7 +304,7 @@ class KeyboardView(context: Context, prefs: Prefs) : KbView(context, prefs) {
         hintPaint.textSize = sp(Ui.HINT * prefs.hintScale)
         hintPaint.typeface = Ui.regular
         val fl = k.flicks
-        if (prefs.showAllHints) {
+        if (prefs.showAllHints && mode == "all") {
             fl[Dir.UP]?.let { drawText(c, hintLabel(it.label), cx, rect.top + hintPaint.textSize * 0.75f, hintPaint) }
             fl[Dir.DOWN]?.let { drawText(c, hintLabel(it.label), cx, rect.bottom - hintPaint.textSize * 0.75f, hintPaint) }
             fl[Dir.LEFT]?.let { drawText(c, hintLabel(it.label), rect.left + hintPaint.measureText(it.label) / 2 + dp(4f), cy, hintPaint) }

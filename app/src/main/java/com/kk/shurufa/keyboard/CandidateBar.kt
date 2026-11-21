@@ -351,9 +351,10 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
         val size = sp(Ui.CANDIDATE * prefs.candidateScale)
         val noteSize = sp(Ui.CAPTION)
         val r = dp(prefs.keyRadiusDp)
+        val face = if (prefs.candFont == "serif") Ui.serif else Ui.regular
         for (i in candidates.indices) {
             val s = candidates[i]
-            tp.textSize = size
+            tp.textSize = size; tp.typeface = face
             val note = notes.getOrNull(i).orEmpty()
             val tw = tp.measureText(s)
             val nw = if (note.isNotEmpty()) { tp.textSize = noteSize; tp.measureText(note) } else 0f
@@ -363,12 +364,12 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
             if (x + cw > 0 && x < width) {
                 val cr = tmp.apply { set(rect); offset(-scrollX0, 0f) }
                 if (i == pressedCand) { bg.color = theme.soft; c.drawRoundRect(cr, r, r, bg) }
-                tp.textSize = size
+                tp.textSize = size; tp.typeface = face
                 tp.color = if (i == 0 && composing) theme.accent else theme.ink
                 tp.alpha = (255 * a).toInt()
                 drawText(c, s, x + dp(12f) + (cw - dp(24f) - tw) / 2, lineCy, tp)
                 if (note.isNotEmpty()) {
-                    tp.textSize = noteSize
+                    tp.textSize = noteSize; tp.typeface = Ui.regular
                     tp.color = if (note.contains('→') || note.contains('⇄')) theme.accent else theme.hint
                     tp.alpha = (255 * a).toInt()
                     c.drawText(note, x + dp(12f) + (cw - dp(24f) - nw) / 2, lineCy - dp(9.5f), tp)
@@ -377,6 +378,7 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
             x += cw
         }
         contentW = x + scrollX0
+        tp.typeface = Ui.regular
         c.restore()
         // soft edges where the row goes on past what is shown
         val fw = dp(18f)

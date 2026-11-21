@@ -480,6 +480,8 @@ private fun RimeStatus() {
 private fun LookPage(prefs: Prefs) {
     val ctx = LocalContext.current
     Group("主题") {
+        Choice(prefs, Prefs.STYLE, "风格", listOf("modern" to "简约", "paper" to "纸墨"), def = "modern")
+        Note(if (prefs.style == "paper") "纸墨：宣纸色的底、细微的纸纹，墨色的字，候选用宋体，默认朱砂色。" else "简约：冷灰的底、白色的键，候选用黑体。")
         Choice(prefs, Prefs.THEME, "明暗", listOf("system" to "跟随系统", "light" to "浅色", "dark" to "深色"))
         var accent by remember { mutableStateOf(prefs.accent) }
         Text("主体色", modifier = Modifier.padding(top = 6.dp))
@@ -501,8 +503,9 @@ private fun LookPage(prefs: Prefs) {
         }
     }
     Group("按键") {
-        IntSlider(prefs, Prefs.KEY_HEIGHT, "按键高度", 46, 36..64, "dp")
-        FloatSlider(prefs, Prefs.KEY_GAP, "按键间距", 5f, 2f..10f, "dp")
+        IntSlider(prefs, Prefs.KEY_HEIGHT, "按键高度", 48, 36..64, "dp")
+        FloatSlider(prefs, Prefs.KEY_GAP, "键间距（左右）", 5f, 2f..10f, "dp")
+        FloatSlider(prefs, Prefs.ROW_GAP, "行间距（上下）", 8f, 2f..16f, "dp", "比键间距宽一些，每一排键读起来是一条")
         FloatSlider(prefs, Prefs.KEY_RADIUS, "按键圆角", 8f, 0f..18f, "dp")
         IntSlider(prefs, Prefs.BOTTOM_PADDING, "键盘底部留白", 4, 0..24, "dp")
         Toggle(prefs, Prefs.KEY_BORDERS, "实心键的投影", "字母、数字键下方的一道浅影", true)
@@ -515,8 +518,10 @@ private fun LookPage(prefs: Prefs) {
         FloatSlider(prefs, Prefs.LABEL_SCALE, "按键字号", 1f, 0.8f..1.3f, "×")
         FloatSlider(prefs, Prefs.HINT_SCALE, "角标字号", 1f, 0.7f..1.4f, "×")
         FloatSlider(prefs, Prefs.CAND_SCALE, "候选字号", 1f, 0.8f..1.4f, "×")
-        Toggle(prefs, Prefs.SHOW_HINTS, "显示角标", "按键右上角的滑动字符", true)
-        Toggle(prefs, Prefs.SHOW_ALL_HINTS, "显示四个方向的角标", "下滑、左滑、右滑的字符也画出来", false)
+        Choice(prefs, Prefs.HINT_MODE, "角标", listOf("all" to "全部", "digits" to "只有数字", "none" to "不显示"), def = "all")
+        Toggle(prefs, Prefs.SHOW_ALL_HINTS, "显示四个方向的角标", "下滑、左滑、右滑的字符也画出来（角标选“全部”时）", false)
+        Choice(prefs, Prefs.CAND_FONT, "候选字体", listOf("sans" to "黑体", "serif" to "宋体"), def = if (prefs.style == "paper") "serif" else "sans")
+        Toggle(prefs, Prefs.SOLAR_TERMS, "节气", "二十四节气当天，空格键上写出节气的名字，比如“中文 · 小雪”", true)
     }
 }
 
@@ -536,7 +541,7 @@ private fun HapticsPage(prefs: Prefs) {
     DisposableEffect(haptics) { onDispose { haptics.release() } }
     Group {
         Toggle(prefs, Prefs.VIBRATE, "振动", "总开关", true)
-        Note("每类事件单独选效果。轻触、点击、重击、双击是系统内置的触感；自定义可以调强度和时长。")
+        Note("每类事件单独选效果。清脆和轻点是手机为自己的马达调好的触感，可以调力度；轻触、点击、重击、双击是系统内置效果；自定义可以调强度和时长。")
     }
     HapticEvent.values().forEach { e ->
         var type by remember { mutableStateOf(haptics.type(e)) }
@@ -544,22 +549,26 @@ private fun HapticsPage(prefs: Prefs) {
         var ms by remember { mutableIntStateOf(haptics.ms(e)) }
         Group(e.title) {
             Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                HapticEvent.TYPES.take(3).forEach { (id, name) ->
-                    FilterChip(selected = type == id, onClick = { type = id; prefs.put("hap_${e.id}_type", id); haptics.play(e) }, label = { Text(name) })
+                HapticEvent.TYPES.take(4).forEach { (id, name) ->
+                    FilterChip(selected = type == id, onClick = { type = id; prefs.put("hap_${e.id}_type", id); haptics.invalidate(); haptics.play(e) }, label = { Text(name) })
                 }
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                HapticEvent.TYPES.drop(3).forEach { (id, name) ->
-                    FilterChip(selected = type == id, onClick = { type = id; prefs.put("hap_${e.id}_type", id); haptics.play(e) }, label = { Text(name) })
+                HapticEvent.TYPES.drop(4).forEach { (id, name) ->
+                    FilterChip(selected = type == id, onClick = { type = id; prefs.put("hap_${e.id}_type", id); haptics.invalidate(); haptics.play(e) }, label = { Text(name) })
                 }
                 Spacer(Modifier.weight(1f))
                 TextButton(onClick = { haptics.play(e) }) { Text("试一下") }
             }
+            if (type == "prim_click" || type == "prim_tick") {
+                Row { Text("力度", Modifier.weight(1f)); Text("${amp * 100 / 255}%", color = MaterialTheme.colorScheme.primary) }
+                Slider(value = amp.toFloat(), onValueChange = { amp = it.roundToInt() }, onValueChangeFinished = { prefs.put("hap_${e.id}_amp", amp); haptics.invalidate(); haptics.play(e) }, valueRange = 13f..255f)
+            }
             if (type == "custom") {
                 Row { Text("强度", Modifier.weight(1f)); Text("$amp", color = MaterialTheme.colorScheme.primary) }
-                Slider(value = amp.toFloat(), onValueChange = { amp = it.roundToInt() }, onValueChangeFinished = { prefs.put("hap_${e.id}_amp", amp); haptics.play(e) }, valueRange = 1f..255f)
+                Slider(value = amp.toFloat(), onValueChange = { amp = it.roundToInt() }, onValueChangeFinished = { prefs.put("hap_${e.id}_amp", amp); haptics.invalidate(); haptics.play(e) }, valueRange = 1f..255f)
                 Row { Text("时长", Modifier.weight(1f)); Text("${ms}ms", color = MaterialTheme.colorScheme.primary) }
-                Slider(value = ms.toFloat(), onValueChange = { ms = it.roundToInt() }, onValueChangeFinished = { prefs.put("hap_${e.id}_ms", ms); haptics.play(e) }, valueRange = 3f..60f)
+                Slider(value = ms.toFloat(), onValueChange = { ms = it.roundToInt() }, onValueChangeFinished = { prefs.put("hap_${e.id}_ms", ms); haptics.invalidate(); haptics.play(e) }, valueRange = 3f..60f)
             }
         }
     }

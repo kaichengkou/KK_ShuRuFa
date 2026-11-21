@@ -36,3 +36,16 @@ class ClipKindTest {
         assertNull(kind("今天下午三点开会"))
     }
 }
+
+/** 二十四节气 against published dates. */
+class SolarTermsTest {
+    @org.junit.Test fun knownDates() {
+        fun d(y: Int, m: Int, day: Int) = java.time.LocalDate.of(y, m, day)
+        assertEquals("立春", com.kk.shurufa.ime.SolarTerms.on(d(2025, 2, 3)))
+        assertEquals("清明", com.kk.shurufa.ime.SolarTerms.on(d(2026, 4, 5)))
+        assertEquals("小雪", com.kk.shurufa.ime.SolarTerms.on(d(2026, 11, 22)))
+        assertEquals("冬至", com.kk.shurufa.ime.SolarTerms.on(d(2024, 12, 21)))
+        assertEquals("小寒", com.kk.shurufa.ime.SolarTerms.on(d(2024, 1, 6)))
+        assertNull(com.kk.shurufa.ime.SolarTerms.on(d(2026, 11, 21)))
+    }
+}

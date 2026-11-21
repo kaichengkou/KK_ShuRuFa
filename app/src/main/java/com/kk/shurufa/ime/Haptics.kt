@@ -13,19 +13,22 @@ import java.util.concurrent.ConcurrentHashMap
 
 /** Every moment the keyboard can vibrate for; each one has its own effect, strength and length. */
 enum class HapticEvent(val id: String, val title: String, val defType: String, val defAmp: Int, val defMs: Int) {
-    LETTER("letter", "字母和字符键", "custom", 60, 14),
-    FUNCTION("function", "功能键", "custom", 70, 16),
-    SPACE("space", "空格", "custom", 70, 16),
-    BACKSPACE("backspace", "删除", "custom", 80, 18),
-    REPEAT("repeat", "长按连续删除（每删一个字）", "custom", 45, 7),
+    // The keys use the phone's own tuned click (a haptic primitive) at a strength [defAmp]/255:
+    // crisp where a short buzz is soft and dull, and never a full-strength jolt on motors without
+    // amplitude control. Backspace a little firmer than letters, a held one a light tick per step.
+    LETTER("letter", "字母和字符键", "prim_click", 140, 14),
+    FUNCTION("function", "功能键", "prim_click", 155, 16),
+    SPACE("space", "空格", "prim_click", 140, 16),
+    BACKSPACE("backspace", "删除", "prim_click", 180, 18),
+    REPEAT("repeat", "长按连续删除（每删一个字）", "prim_tick", 100, 7),
     ENTER("enter", "回车", "click", 90, 20),
-    POPUP("popup", "长按弹出选项", "heavy", 120, 24),
+    POPUP("popup", "长按弹出选项", "prim_click", 215, 24),
     OPTION("option", "在选项间滑动", "tick", 40, 8),
     CURSOR("cursor", "拖动光标", "tick", 35, 6),
     GESTURE("gesture", "手势生效（切换语言、清空、撤销）", "double", 120, 20);
 
     companion object {
-        val TYPES = listOf("off" to "关", "tick" to "轻触", "click" to "点击", "heavy" to "重击", "double" to "双击", "custom" to "自定义")
+        val TYPES = listOf("off" to "关", "prim_click" to "清脆", "prim_tick" to "轻点", "tick" to "轻触", "click" to "点击", "heavy" to "重击", "double" to "双击", "custom" to "自定义")
     }
 }
 
@@ -78,6 +81,7 @@ class Haptics(context: Context, private val prefs: Prefs) {
     private fun build(e: HapticEvent): VibrationEffect? = when (type(e)) {
         "off" -> null
         "custom" -> custom(e)
+        "prim_click", "prim_tick" -> primitive(e, if (type(e) == "prim_tick") 2 else 1)
         else -> if (Build.VERSION.SDK_INT >= 29) VibrationEffect.createPredefined(
             when (type(e)) {
                 "tick" -> VibrationEffect.EFFECT_TICK
@@ -86,6 +90,19 @@ class Haptics(context: Context, private val prefs: Prefs) {
                 else -> VibrationEffect.EFFECT_CLICK
             }
         ) else custom(e)
+    }
+
+    /**
+     * A haptic primitive (Android 11+, where the phone supports it) at the event's strength;
+     * otherwise the predefined tick or click, and on old phones the custom pulse.
+     */
+    private fun primitive(e: HapticEvent, kind: Int): VibrationEffect {
+        val prim = if (kind == 2) VibrationEffect.Composition.PRIMITIVE_TICK else VibrationEffect.Composition.PRIMITIVE_CLICK
+        if (Build.VERSION.SDK_INT >= 30 && vib.areAllPrimitivesSupported(prim)) {
+            return VibrationEffect.startComposition().addPrimitive(prim, (amp(e) / 255f).coerceIn(0.05f, 1f)).compose()
+        }
+        if (Build.VERSION.SDK_INT >= 29) return VibrationEffect.createPredefined(if (kind == 2) VibrationEffect.EFFECT_TICK else VibrationEffect.EFFECT_CLICK)
+        return custom(e)
     }
 
     private fun custom(e: HapticEvent): VibrationEffect =

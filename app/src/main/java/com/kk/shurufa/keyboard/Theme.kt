@@ -36,14 +36,18 @@ data class KbTheme(
     val divider: Int,
 ) {
     companion object {
-        /** Accent presets: id to (name, (light, dark)). */
+        /**
+         * Accent presets: id to (name, (light, dark)). Named and mixed after 中国传统色; each dark
+         * form is a lighter, quieter tone of the same color, so the enter key does not glare at night.
+         */
         val ACCENTS = linkedMapOf(
-            "teal" to ("青" to (0xFF0E6A73.toInt() to 0xFF5BC3CB.toInt())),
-            "indigo" to ("靛蓝" to (0xFF4652C2.toInt() to 0xFF9CA6FF.toInt())),
-            "coral" to ("珊瑚" to (0xFFD35A3A.toInt() to 0xFFFF9C82.toInt())),
-            "green" to ("松绿" to (0xFF2D7A4F.toInt() to 0xFF7ED39D.toInt())),
-            "violet" to ("紫" to (0xFF7650C4.toInt() to 0xFFC2A5FF.toInt())),
-            "graphite" to ("石墨" to (0xFF30363E.toInt() to 0xFFD2D7DE.toInt())),
+            "teal" to ("石青" to (0xFF0E6A73.toInt() to 0xFF5AAFB5.toInt())),
+            "indigo" to ("黛蓝" to (0xFF3A4C7A.toInt() to 0xFF97A6CF.toInt())),
+            "cinnabar" to ("朱砂" to (0xFFB0382B.toInt() to 0xFFE08876.toInt())),
+            "rouge" to ("胭脂" to (0xFF9A2E4D.toInt() to 0xFFDB93A8.toInt())),
+            "gamboge" to ("藤黄" to (0xFFA8720E.toInt() to 0xFFE2B866.toInt())),
+            "green" to ("竹青" to (0xFF3B6E52.toInt() to 0xFF8EC0A2.toInt())),
+            "graphite" to ("墨" to (0xFF2F3237.toInt() to 0xFFD6D1C8.toInt())),
             "system" to ("系统取色" to (0 to 0)),
         )
 
@@ -64,7 +68,10 @@ data class KbTheme(
 
         fun resolve(context: Context, prefs: Prefs): KbTheme {
             val night = isDark(context, prefs)
-            val accent = accentFor(context, prefs.accent, night)
+            // 纸墨 starts in 朱砂, the color of a seal on paper, until another accent is picked
+            val id = if (prefs.style == "paper" && !prefs.sp.contains(Prefs.ACCENT)) "cinnabar" else prefs.accent
+            val accent = accentFor(context, id, night)
+            if (prefs.style == "paper") return paper(night, accent)
             return if (night) {
                 val ink = Color.parseColor("#ECEEF1")
                 KbTheme(
@@ -108,6 +115,53 @@ data class KbTheme(
             }
         }
     }
+}
+
+/**
+ * 纸墨: rice paper and ink. Warm paper under keys of a lighter, smoother paper, brown-black ink,
+ * hints in the grey of diluted ink; at night, ink-stone black with keys like a wet brush stroke.
+ * The views add a faint paper grain to its background.
+ */
+private fun paper(night: Boolean, accent: Int): KbTheme = if (night) {
+    val ink = Color.parseColor("#ECE5D8")
+    KbTheme(
+        dark = true,
+        background = Color.parseColor("#191816"),
+        surface = Color.parseColor("#2C2A27"),
+        surfacePressed = Color.parseColor("#3C3935"),
+        soft = Colors.alpha(ink, 0x16),
+        softPressed = Colors.alpha(ink, 0x2E),
+        ink = ink,
+        inkSoft = Color.parseColor("#BDB5A8"),
+        hint = Color.parseColor("#877F74"),
+        accent = accent,
+        accentPressed = Colors.blend(accent, Color.WHITE, 0.2f),
+        onAccent = Color.parseColor("#1A1513"),
+        accentSoft = Colors.alpha(accent, 0x30),
+        popup = Color.parseColor("#36332F"),
+        shadow = Colors.alpha(Color.BLACK, 0x48),
+        divider = Colors.alpha(ink, 0x14),
+    )
+} else {
+    val ink = Color.parseColor("#2A2521")
+    KbTheme(
+        dark = false,
+        background = Color.parseColor("#E9E3D7"),
+        surface = Color.parseColor("#FBF8F2"),
+        surfacePressed = Color.parseColor("#E5DED0"),
+        soft = Colors.alpha(Color.parseColor("#5B4A36"), 0x14),
+        softPressed = Colors.alpha(Color.parseColor("#5B4A36"), 0x28),
+        ink = ink,
+        inkSoft = Color.parseColor("#5A5149"),
+        hint = Color.parseColor("#9C9184"),
+        accent = accent,
+        accentPressed = Colors.blend(accent, Color.BLACK, 0.18f),
+        onAccent = Color.parseColor("#FFF9F0"),
+        accentSoft = Colors.alpha(accent, 0x24),
+        popup = Color.parseColor("#FBF8F2"),
+        shadow = Colors.alpha(Color.parseColor("#4A3A28"), 0x22),
+        divider = Colors.alpha(ink, 0x14),
+    )
 }
 
 /** Color arithmetic on packed ARGB ints, shared by every view. */

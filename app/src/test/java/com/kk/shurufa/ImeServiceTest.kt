@@ -172,6 +172,19 @@ class ImeServiceTest {
         ime.onDestroy()
     }
 
+    /** 纸墨 in both lights: the keyboard, the emoji panel and the AI panel. */
+    @Test fun paper() {
+        for (theme in listOf("light", "dark")) {
+            Prefs(ctx).put(Prefs.STYLE, "paper")
+            val (ime, view) = start(theme)
+            shot(view, "paper_${theme}_letters")
+            ime.onTool("emoji"); idle(); shot(view, "paper_${theme}_emoji")
+            ime.onTool("quick"); idle(); shot(view, "paper_${theme}_quick")
+            ime.onDestroy()
+        }
+        Prefs(ctx).put(Prefs.STYLE, "modern")
+    }
+
     @Test fun lightTour() = tour("light")
 
     @Test fun darkTour() = tour("dark")
