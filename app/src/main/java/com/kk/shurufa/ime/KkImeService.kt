@@ -625,17 +625,15 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
             s == Sink.TRANSLATE && !composing && letters -> { bar.showToolbar(); translate.sync() }
             s == Sink.AI && !composing && letters -> {
                 val q = query.toString()
-                bar.showPredictions(if (q.isBlank()) emptyList() else listOf("▶ 执行"),
-                    if (q.isBlank()) "AI 指令：输入你想怎么改（如“改成适合发朋友圈的语气”）" else "AI 指令：$q")
+                bar.showQuery("AI 指令", q, "说说想怎么改，比如“改成适合发朋友圈的语气”", if (q.isBlank()) null else "执行")
             }
             s == Sink.EMOJI && !composing && letters -> {
                 val q = query.toString().trim()
                 searchResults = emoji.search(q)
-                bar.showPredictions(searchResults, when {
-                    q.isEmpty() -> "查找表情：输入中文或英文关键词"
-                    searchResults.isEmpty() -> "没有找到和「$q」相关的表情"
-                    else -> "查找「$q」· 点按发送"
-                })
+                when {
+                    q.isEmpty() -> bar.showQuery("查找表情", "", "输入中文或英文关键词，比如 开心、cat", null)
+                    else -> bar.showPredictions(searchResults, if (searchResults.isEmpty()) "没有找到和「$q」相关的表情" else "查找「$q」· 点按发送")
+                }
             }
             isZh && RimeEngine.state == RimeEngine.State.DEPLOYING && letters -> bar.showMessage("正在部署雾凇拼音词库，首次约需一分钟…", busy = true)
             isZh && RimeEngine.state == RimeEngine.State.PREPARING && letters -> bar.showMessage("正在准备中文词库…", busy = true)
@@ -1330,6 +1328,8 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         clipboard.pasteChip()
         syncBar()
     }
+
+    override fun onQueryAction() { if (sink == Sink.AI) runInstruction() }
 
     override fun onDismissSuggestions() {
         if (sink != null) { closeSink(); return }

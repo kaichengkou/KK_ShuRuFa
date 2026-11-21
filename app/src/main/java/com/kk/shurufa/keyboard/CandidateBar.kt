@@ -41,6 +41,8 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
         /** In pinyin editing, the caret was moved to [pos] (a position in the typed letters). */
         fun onEditCaret(pos: Int) {}
         fun onEditDone() {}
+        /** The action button of an open query (执行) was tapped. */
+        fun onQueryAction() {}
         /** The status line was tapped (it offered an action, like 重试). */
         fun onMessageTap() {}
         /** "press" when a candidate, chip or button is touched, "popup" when a menu opens. */
@@ -66,7 +68,7 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
             invalidate()
         }
 
-    enum class Mode { TOOLBAR, CANDIDATES, PREDICTIONS, CLIP, MATH, MESSAGE, EDIT }
+    enum class Mode { TOOLBAR, CANDIDATES, PREDICTIONS, CLIP, MATH, MESSAGE, EDIT, QUERY }
 
     /** When set, vertical drags on the toolbar resize the open panel (phase 0 start, 1 move, 2 end). */
     var onVerticalDrag: ((phase: Int, rawY: Float, velocityY: Float) -> Unit)? = null
@@ -165,6 +167,23 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
      * A status line; with [tappable] the whole bar answers a tap ([Listener.onMessageTap]); with
      * [busy] a thin line under it says the work is still going.
      */
+    private var queryLabel = ""
+    private var queryText = ""
+    private var queryHint = ""
+    private var queryAction: String? = null
+    private var queryChanged = 0L
+
+    /**
+     * A query typed with the keys below (AI 指令, 查找表情): its name small on the pinyin line, and on
+     * the words' line a field — the text with a blinking caret, or [hint] while empty — with the
+     * [action] button on the right when there is something to act on.
+     */
+    fun showQuery(label: String, text: String, hint: String, action: String?) {
+        if (text != queryText) queryChanged = Motion.now()
+        queryLabel = label; queryText = text; queryHint = hint; queryAction = action
+        switchTo(Mode.QUERY)
+    }
+
     fun showMessage(text: String, tappable: Boolean = false, busy: Boolean = false) {
         message = text; messageTap = tappable
         if (busy && !messageBusy) busySince = Motion.now()
@@ -202,6 +221,7 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
             Mode.CLIP -> drawClip(c, a)
             Mode.MATH -> again = drawMath(c, a) || again
             Mode.EDIT -> drawEdit(c, a)
+            Mode.QUERY -> drawQuery(c, a)
             Mode.MESSAGE -> {
                 tp.color = if (messageTap) theme.accent else theme.hint; tp.alpha = (255 * a).toInt(); tp.textSize = sp(Ui.BODY); tp.textAlign = Paint.Align.CENTER
                 if (messageTap) tp.typeface = Ui.medium
@@ -378,6 +398,51 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
         c.drawRect(width - endW, lineCy - dp(11f), width - endW + dp(1f), lineCy + dp(11f), bg)
         hits.add(if (composing) "expand" else "dismiss", width - endW, 0f, width.toFloat(), height.toFloat())
     }
+
+    private fun drawQuery(c: Canvas, a: Float) {
+        val endW = dp(END_DP)
+        // the name of what is being typed, on the pinyin line
+        tp.textAlign = Paint.Align.LEFT; tp.textSize = sp(Ui.SMALL); tp.typeface = Ui.medium
+        tp.color = theme.accent; tp.alpha = (255 * a).toInt()
+        c.drawText(queryLabel, dp(12f), dp(14f), tp)
+        tp.typeface = Ui.regular
+        // the action, then the close button
+        var right = width - endW
+        val act = queryAction
+        if (act != null) {
+            val w = chipWidth(act)
+            val r = tmp.apply { set(right - w - dp(4f), lineCy - dp(Ui.CHIP_H / 2), right - dp(4f), lineCy + dp(Ui.CHIP_H / 2)) }
+            drawChip(c, r, act, ChipStyle.PRIMARY, pressed = pressedQuery, alpha = a)
+            hits.add("query", r, slop = dp(4f))
+            right = r.left - dp(8f)
+        }
+        // the field: text and caret, or the hint after the caret
+        val x0 = dp(12f)
+        val empty = queryText.isEmpty()
+        tp.textSize = sp(if (empty) Ui.BODY else Ui.TITLE)
+        tp.color = if (empty) theme.hint else theme.ink; tp.alpha = (255 * a).toInt()
+        ellipsizer.set(tp)
+        val room = (right - x0 - dp(10f)).coerceAtLeast(0f)
+        val shown = android.text.TextUtils.ellipsize(if (empty) queryHint else queryText, ellipsizer, room,
+            if (empty) android.text.TextUtils.TruncateAt.END else android.text.TextUtils.TruncateAt.START).toString()
+        val textX = if (empty) x0 + dp(6f) else x0
+        drawText(c, shown, textX, lineCy, tp)
+        val since = Motion.now() - queryChanged
+        if ((since / 530) % 2 == 0L) {
+            val cx = if (empty) x0 else x0 + tp.measureText(shown) + dp(1.5f)
+            bg.color = Colors.fade(theme.accent, a)
+            val h = sp(Ui.TITLE) * 0.62f
+            c.drawRect(cx, lineCy - h, cx + dp(1.6f), lineCy + h, bg)
+        }
+        postInvalidateDelayed(530 - since % 530)
+        ip.color = Colors.fade(theme.inkSoft, a)
+        Icons.draw(c, "close", width - endW / 2, lineCy, dp(18f), ip)
+        bg.color = Colors.fade(theme.divider, a)
+        c.drawRect(width - endW, lineCy - dp(11f), width - endW + dp(1f), lineCy + dp(11f), bg)
+        hits.add("dismiss", width - endW, 0f, width.toFloat(), height.toFloat())
+    }
+
+    private var pressedQuery = false
 
     private var edgeL: LinearGradient? = null
     private var edgeR: LinearGradient? = null
@@ -602,6 +667,7 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
                 pressedTool = hit?.takeIf { mode == Mode.TOOLBAR && it.startsWith("tool:") }?.removePrefix("tool:")
                 pressedClip = hit == "clip"
                 pressedDone = hit == "done"
+                pressedQuery = hit == "query"
                 if (pressedCand >= 0 || hit != null || preeditRect.contains(e.x, e.y)) listener?.onFeedback("press")
                 invalidate()
             }
@@ -677,7 +743,7 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
                     }
                     else -> hits.at(e.x, e.y)?.let { tap(it) }
                 }
-                pressedCand = -1; pressedTool = null; pressedClip = false; pressedDone = false
+                pressedCand = -1; pressedTool = null; pressedClip = false; pressedDone = false; pressedQuery = false
                 vt?.recycle(); vt = null
                 invalidate()
             }
@@ -685,7 +751,7 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
                 handler.removeCallbacks(longRunnable)
                 if (menuOpen) { overlay?.hideOptions(); menuOpen = false }
                 if (dragging) { scroller.springBack(scrollX0.toInt(), 0, 0, scrollMax.toInt(), 0, 0); postInvalidateOnAnimation() }
-                pressedCand = -1; pressedTool = null; pressedClip = false; pressedDone = false
+                pressedCand = -1; pressedTool = null; pressedClip = false; pressedDone = false; pressedQuery = false
                 vt?.recycle(); vt = null; invalidate()
             }
         }
@@ -698,6 +764,7 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
             id.startsWith("tool:") -> l.onTool(id.removePrefix("tool:"))
             id == "expand" -> l.onExpand()
             id == "dismiss" -> l.onDismissSuggestions()
+            id == "query" -> l.onQueryAction()
             id == "clip" -> l.onClipChip(clipText)
             id == "seg:0" -> l.onNumMode("simple")
             id == "seg:1" -> l.onNumMode("sci")
