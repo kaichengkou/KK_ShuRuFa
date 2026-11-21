@@ -54,7 +54,23 @@ class AiPanel(context: Context, private val prefs: Prefs) : View(context) {
     private var diffBase: String? = null
 
     /** The answer so far; [base] marks what changed against the original (润色/纠错). */
-    fun setResult(text: String, base: String?) { result = text; diffBase = base; resLayout = null; invalidate() }
+    fun setResult(text: String, base: String?) {
+        // a new answer starts at the top; a streaming one follows its last line unless scrolled
+        if (!text.startsWith(result) || result.isEmpty()) { resScroll = 0f; follow = true; resScroller.forceFinished(true) }
+        result = text; diffBase = base; resLayout = null; invalidate()
+    }
+
+    // the result scrolls when it is longer than the card
+    private var resView = RectF()
+    private var resScroll = 0f
+    private var resMax = 0f
+    private var follow = true
+    private val resScroller = android.widget.OverScroller(context)
+    private var vt: android.view.VelocityTracker? = null
+    private var dragY = -1f
+    private var downY = 0f
+    private var dragging = false
+    private val slop = android.view.ViewConfiguration.get(context).scaledTouchSlop
     fun refresh() { resLayout = null; invalidate() }
 
     private fun dp(v: Float) = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, resources.displayMetrics)
@@ -110,53 +126,56 @@ class AiPanel(context: Context, private val prefs: Prefs) : View(context) {
             if (pick.draw(c, RectF(pad, y, width - pad, height - dp(8f)), theme, Ui.radiusLarge(rad, dp(1f)))) postInvalidateOnAnimation()
             return
         }
-        // groups of chips, flowing
+        // once there is an answer the chips fold away and the answer gets the panel (✕ brings them back)
         if (running != null) { if (!pulse.running) { pulse.set(0f); pulse.animateTo(1f, 1000) }; postInvalidateOnAnimation() }
-        var lastGroup = ""
-        for (a in actions) {
-            tp.textSize = sp(Ui.BODY)
-            val w = tp.measureText(a.title) + dp(24f)
-            var labelW = 0f
-            if (a.group != lastGroup) {
-                tp.textSize = sp(Ui.CAPTION)
-                labelW = tp.measureText(a.group) + dp(8f)
-                if (x > pad) x += dp(6f)
+        val folded = result.isNotEmpty() || running != null
+        if (!folded) {
+            var lastGroup = ""
+            for (a in actions) {
+                tp.textSize = sp(Ui.BODY)
+                val w = tp.measureText(a.title) + dp(24f)
+                var labelW = 0f
+                if (a.group != lastGroup) {
+                    tp.textSize = sp(Ui.CAPTION)
+                    labelW = tp.measureText(a.group) + dp(8f)
+                    if (x > pad) x += dp(6f)
+                }
+                if (x + labelW + w > width - pad) { x = pad; y += ch + gap }
+                if (a.group != lastGroup) {
+                    tp.textAlign = Paint.Align.LEFT; tp.textSize = sp(Ui.CAPTION); tp.color = theme.hint
+                    c.drawText(a.group, x, y + ch / 2 + tp.textSize * 0.36f, tp)
+                    x += labelW; lastGroup = a.group
+                }
+                val r = RectF(x, y, x + w, y + ch)
+                val on = running == a.id
+                bg.color = when {
+                    on -> blend(theme.accentSoft, theme.accent, 0.15f + 0.2f * kotlin.math.sin(pulse.value * Math.PI).toFloat())
+                    pressed == a.id -> theme.softPressed
+                    else -> theme.soft
+                }
+                c.drawRoundRect(r, ch / 2, ch / 2, bg)
+                tp.textAlign = Paint.Align.CENTER; tp.textSize = sp(Ui.BODY)
+                tp.color = if (on) theme.accent else theme.ink
+                text(c, a.title, r.centerX(), r.centerY())
+                hits += r to "act:${a.id}"
+                x += w + gap
             }
-            if (x + labelW + w > width - pad) { x = pad; y += ch + gap }
-            if (a.group != lastGroup) {
-                tp.textAlign = Paint.Align.LEFT; tp.textSize = sp(Ui.CAPTION); tp.color = theme.hint
-                c.drawText(a.group, x, y + ch / 2 + tp.textSize * 0.36f, tp)
-                x += labelW; lastGroup = a.group
+            // 输入指令: type your own instruction
+            run {
+                tp.textSize = sp(Ui.BODY)
+                val label = "输入指令"
+                val w = tp.measureText(label) + dp(24f)
+                if (x + w > width - pad) { x = pad; y += ch + gap }
+                val r = RectF(x, y, x + w, y + ch)
+                bg.color = if (pressed == "custom") theme.accentPressed else theme.accent
+                c.drawRoundRect(r, ch / 2, ch / 2, bg)
+                tp.textAlign = Paint.Align.CENTER; tp.color = theme.onAccent; tp.typeface = Ui.medium
+                text(c, label, r.centerX(), r.centerY())
+                tp.typeface = Ui.regular
+                hits += r to "custom"
             }
-            val r = RectF(x, y, x + w, y + ch)
-            val on = running == a.id
-            bg.color = when {
-                on -> blend(theme.accentSoft, theme.accent, 0.15f + 0.2f * kotlin.math.sin(pulse.value * Math.PI).toFloat())
-                pressed == a.id -> theme.softPressed
-                else -> theme.soft
-            }
-            c.drawRoundRect(r, ch / 2, ch / 2, bg)
-            tp.textAlign = Paint.Align.CENTER; tp.textSize = sp(Ui.BODY)
-            tp.color = if (on) theme.accent else theme.ink
-            text(c, a.title, r.centerX(), r.centerY())
-            hits += r to "act:${a.id}"
-            x += w + gap
+            y += ch + dp(10f)
         }
-        // 输入指令: type your own instruction
-        run {
-            tp.textSize = sp(Ui.BODY)
-            val label = "输入指令"
-            val w = tp.measureText(label) + dp(24f)
-            if (x + w > width - pad) { x = pad; y += ch + gap }
-            val r = RectF(x, y, x + w, y + ch)
-            bg.color = if (pressed == "custom") theme.accentPressed else theme.accent
-            c.drawRoundRect(r, ch / 2, ch / 2, bg)
-            tp.textAlign = Paint.Align.CENTER; tp.color = theme.onAccent; tp.typeface = Ui.medium
-            text(c, label, r.centerX(), r.centerY())
-            tp.typeface = Ui.regular
-            hits += r to "custom"
-        }
-        y += ch + dp(10f)
         // the result card
         val card = RectF(pad, y, width - pad, height - dp(8f))
         if (card.height() < dp(48f)) return
@@ -168,25 +187,55 @@ class AiPanel(context: Context, private val prefs: Prefs) : View(context) {
             text(c, status.ifEmpty { if (running != null) "正在思考…" else "选一个操作；选中文字时只处理选中的部分" }, card.centerX(), card.centerY())
             return
         }
-        tp.textAlign = Paint.Align.LEFT; tp.textSize = sp(Ui.CAPTION); tp.color = theme.hint; tp.typeface = Ui.medium
-        c.drawText(if (running != null) "$doneTitle · 生成中…" else doneTitle, card.left + inner, card.top + inner + tp.textSize * 0.8f, tp)
-        tp.typeface = Ui.regular
+        // header: what was done on the left, the buttons on the right; the text gets the rest
         val btnH = dp(30f)
-        val top = card.top + inner + dp(16f)
+        val headTop = card.top + dp(8f)
+        var tx = card.left + inner
+        if (running == null) {
+            val xr = RectF(card.left + dp(6f), headTop, card.left + dp(6f) + btnH, headTop + btnH)
+            if (pressed == "back") { bg.color = theme.softPressed; c.drawRoundRect(xr, btnH / 2, btnH / 2, bg) }
+            ip.color = theme.inkSoft; Icons.draw(c, "close", xr.centerX(), xr.centerY(), dp(14f), ip)
+            hits += RectF(xr).apply { inset(-dp(4f), -dp(4f)) } to "back"
+            tx = xr.right + dp(2f)
+        }
+        tp.textAlign = Paint.Align.LEFT; tp.textSize = sp(Ui.SMALL); tp.color = theme.hint; tp.typeface = Ui.medium
+        text(c, if (running != null) "$doneTitle · 生成中…" else doneTitle, tx, headTop + btnH / 2)
+        tp.typeface = Ui.regular
+        val top = headTop + btnH + dp(6f)
         val lay = resLayout ?: run {
             body.textSize = sp(Ui.BODY + 1f); body.color = theme.ink
             val w = (card.width() - 2 * inner).toInt().coerceAtLeast(1)
-            val lines = ((card.bottom - inner - btnH - dp(6f) - top) / (body.fontSpacing * 1.1f)).toInt().coerceAtLeast(1)
             val text = marked(result, diffBase)
-            StaticLayout.Builder.obtain(text, 0, text.length, body, w).setMaxLines(lines)
-                .setEllipsize(TextUtils.TruncateAt.END).setAlignment(Layout.Alignment.ALIGN_NORMAL).setLineSpacing(0f, 1.1f).build()
+            StaticLayout.Builder.obtain(text, 0, text.length, body, w)
+                .setAlignment(Layout.Alignment.ALIGN_NORMAL).setLineSpacing(0f, 1.1f).build()
                 .also { resLayout = it }
         }
-        c.save(); c.translate(card.left + inner, top); lay.draw(c); c.restore()
+        // the visible window: above the buttons (the whole card while it is still writing)
+        resView = RectF(card.left + inner, top, card.right - inner, card.bottom - dp(10f))
+        resMax = (lay.height - resView.height()).coerceAtLeast(0f)
+        if (resScroller.computeScrollOffset()) { resScroll = resScroller.currY.toFloat(); if (!resScroller.isFinished) postInvalidateOnAnimation() }
+        if (running != null && follow) resScroll = resMax
+        resScroll = resScroll.coerceIn(0f, resMax)
+        c.save(); c.clipRect(resView); c.translate(resView.left, resView.top - resScroll); lay.draw(c); c.restore()
+        if (resMax > 0f) {
+            // soft edges where text continues, and a thin bar
+            val fade = dp(14f)
+            fun edge(y0: Float, y1: Float, from: Int, to: Int) {
+                bg.shader = android.graphics.LinearGradient(0f, y0, 0f, y1, from, to, android.graphics.Shader.TileMode.CLAMP)
+                c.drawRect(resView.left, y0, resView.right, y1, bg); bg.shader = null
+            }
+            val clear = theme.surface and 0x00FFFFFF
+            if (resScroll > 1f) edge(resView.top, resView.top + fade, theme.surface, clear)
+            if (resScroll < resMax - 1f) edge(resView.bottom - fade, resView.bottom, clear, theme.surface)
+            val h = (resView.height() * resView.height() / lay.height).coerceAtLeast(dp(16f))
+            val y = resView.top + (resView.height() - h) * (resScroll / resMax)
+            bg.color = theme.divider
+            c.drawRoundRect(card.right - dp(6f), y, card.right - dp(3.5f), y + h, dp(2f), dp(2f), bg)
+        }
         if (running != null) return
         // buttons, right to left
-        var bx = card.right - inner
-        val by = card.bottom - inner - btnH
+        var bx = card.right - dp(8f)
+        val by = headTop
         for ((id, label, primary) in listOf(Triple("replace", "替换", true), Triple("insert", "插入", false), Triple("copy", "复制", false), Triple("retry", "重试", false))) {
             tp.textSize = sp(Ui.SMALL)
             val w = tp.measureText(label) + dp(26f)
@@ -251,7 +300,41 @@ class AiPanel(context: Context, private val prefs: Prefs) : View(context) {
     }
 
     @SuppressLint("ClickableViewAccessibility")
+    /** Drags that start on the result scroll it. True when the event was used. */
+    private fun scrollResult(e: MotionEvent): Boolean {
+        when (e.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                if (picking || resMax <= 0f || !resView.contains(e.x, e.y)) { dragY = -1f; return false }
+                resScroller.forceFinished(true)
+                vt?.recycle(); vt = android.view.VelocityTracker.obtain().also { it.addMovement(e) }
+                dragY = e.y; downY = e.y; dragging = false
+                return true
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (dragY < 0f) return false
+                vt?.addMovement(e)
+                if (!dragging && kotlin.math.abs(e.y - downY) > slop) dragging = true
+                if (dragging) { follow = false; resScroll = (resScroll - (e.y - dragY)).coerceIn(0f, resMax); invalidate() }
+                dragY = e.y
+                return true
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                if (dragY < 0f) return false
+                vt?.addMovement(e); vt?.computeCurrentVelocity(1000)
+                val v = vt?.yVelocity ?: 0f
+                if (dragging && kotlin.math.abs(v) > android.view.ViewConfiguration.get(context).scaledMinimumFlingVelocity) {
+                    resScroller.fling(0, resScroll.toInt(), 0, -v.toInt(), 0, 0, 0, resMax.toInt())
+                }
+                vt?.recycle(); vt = null; dragY = -1f; dragging = false
+                invalidate()
+                return true
+            }
+        }
+        return false
+    }
+
     override fun onTouchEvent(e: MotionEvent): Boolean {
+        if (scrollResult(e)) return true
         if (picking && (pick.busy || (e.actionMasked == MotionEvent.ACTION_DOWN && pick.contains(e.x, e.y)))) {
             if (e.actionMasked == MotionEvent.ACTION_DOWN) onFeedback?.invoke()
             pick.onTouch(e)?.let { t -> picking = false; onButton?.invoke("target:$t") }
@@ -271,6 +354,7 @@ class AiPanel(context: Context, private val prefs: Prefs) : View(context) {
                     p == null -> {}
                     p == "provider" -> { picking = !picking; if (picking) pick.reveal(); invalidate() }
                     picking -> picking = false
+                    p == "back" -> { result = ""; diffBase = null; resLayout = null; status = "" }
                     p in setOf("replace", "insert", "copy", "retry", "setup", "custom") -> onButton?.invoke(p)
                     running == null -> onAction?.invoke(p)
                 }
