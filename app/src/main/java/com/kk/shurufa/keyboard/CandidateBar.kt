@@ -471,7 +471,7 @@ class CandidateBar(context: Context, private val prefs: Prefs) : View(context) {
         val r = RectF(candRects[i]).apply { offset(-scrollX0, 0f) }
         val (ox, oy) = overlayOffset()
         r.offset(ox, oy)
-        overlay?.showOptions(RectF(r.left, r.bottom + r.height(), r.right, r.bottom + r.height() * 2), r.height(), opts, downX + ox, false)
+        overlay?.showOptions(RectF(r.left, r.bottom + r.height(), r.right, r.bottom + r.height() * 2), r.height(), opts, downX + ox, false, fingerY = downY + oy)
         menuOpen = true
         listener?.onFeedback("popup")
     }

@@ -1,0 +1,62 @@
+package com.kk.shurufa
+
+import androidx.test.core.app.ApplicationProvider
+import com.kk.shurufa.online.AiWriter
+import com.kk.shurufa.online.Llm
+import org.junit.Assume.assumeTrue
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+import java.io.File
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
+
+/**
+ * Talks to the real Gemini API through the same code the keyboard uses. Needs a key in
+ * KK_GEMINI_KEY (never stored in the repository); skipped otherwise. KK_GEMINI_MODELS picks
+ * the models to compare (comma separated).
+ */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34])
+class GeminiLiveTest {
+    private val key = System.getenv("KK_GEMINI_KEY")
+    private val models = (System.getenv("KK_GEMINI_MODELS") ?: "gemini-2.5-flash").split(',').map { it.trim() }
+
+    private fun prefs(): Prefs {
+        assumeTrue("KK_GEMINI_KEY not set", !key.isNullOrBlank())
+        return Prefs(ApplicationProvider.getApplicationContext()).also { it.put("llm_gemini_key", key!!) }
+    }
+
+    private fun timed(label: String, f: () -> String) {
+        val t = System.currentTimeMillis()
+        val out = runCatching(f).getOrElse { "!! ${it.message}" }
+        println("[gemini] $label  ${System.currentTimeMillis() - t} ms  →  ${out.replace("\n", "⏎")}")
+    }
+
+    /** A phone set up before the old default was retired still gets answers, and moves on. */
+    @Test fun retiredDefault() {
+        val p = prefs(); p.put("llm_gemini_model", "gemini-2.5-flash")
+        timed("旧默认 gemini-2.5-flash") { Llm.complete(p, "gemini", AiWriter.SYSTEM, AiWriter.prompt(AiWriter.ACTIONS[1], "我今天很高心")) }
+        println("[gemini] default now: ${Llm.model(p, "gemini")}")
+        org.junit.Assert.assertNotEquals("gemini-2.5-flash", Llm.model(p, "gemini"))
+    }
+
+    @Test fun live() {
+        val p = prefs()
+        val listed = Llm.listModels(p, "gemini")
+        println("[gemini] listModels: ${listed.size} models, e.g. ${listed.take(8)}")
+        val text = "我昨天去那个店里面买东西，然后发现他们家的东西其实挺贵的，但是质量还行吧，就是服务态度不咋地。"
+        for (m in models) {
+            var first = -1L; val t0 = System.currentTimeMillis()
+            timed("$m 润色") { Llm.complete(p, "gemini", AiWriter.SYSTEM, AiWriter.prompt(AiWriter.ACTIONS[0], text), onText = { if (first < 0) first = System.currentTimeMillis() - t0 }, model = m) }
+            println("[gemini]   first token after $first ms")
+            timed("$m 俄语") { Llm.complete(p, "gemini", AiWriter.translateSystem("Chinese", "Russian"), "我昨天很累，所以早早就睡了。", model = m) }
+            timed("$m 指令") { Llm.complete(p, "gemini", AiWriter.SYSTEM, AiWriter.prompt(AiWriter.custom("改成一句道歉的话"), "明天的会我去不了"), model = m) }
+            val b = File(javaClass.classLoader!!.getResource("voice/zh.wav")!!.toURI()).readBytes()
+            val bb = ByteBuffer.wrap(b, 44, b.size - 44).order(ByteOrder.LITTLE_ENDIAN)
+            val pcm = FloatArray((b.size - 44) / 2) { bb.short / 32768f }
+            timed("$m 语音") { Llm.transcribe(p, "gemini|$m", pcm, "zh") }
+        }
+    }
+}

@@ -95,12 +95,13 @@ class PopupOverlay(context: Context, private val prefs: Prefs) : View(context) {
     private val selY = Tween(0f)
     private val pad get() = dp(5f)
 
-    fun showOptions(key: RectF, keyH: Float, options: List<Output>, fingerX: Float, math: Boolean) {
+    fun showOptions(key: RectF, keyH: Float, options: List<Output>, fingerX: Float, math: Boolean, fingerY: Float? = null) {
         val usable = ((width - 2 * dp(5f) - dp(8f)) / max(key.width() * 0.92f, dp(40f))).toInt().coerceAtLeast(1)
-        showOptionRows(key, keyH, options.chunked(min(8, usable)), fingerX)
+        showOptionRows(key, keyH, options.chunked(min(8, usable)), fingerX, fingerY)
     }
 
-    fun showOptionRows(key: RectF, keyH: Float, options: List<List<Output>>, fingerX: Float) {
+    /** [fingerY]: where the finger really is, when the menu is not anchored on it (the candidate bar). */
+    fun showOptionRows(key: RectF, keyH: Float, options: List<List<Output>>, fingerX: Float, fingerY: Float? = null) {
         cellW = max(key.width() * 0.92f, dp(40f))
         cellH = keyH * 1.02f
         val maxPer = floor((width - 2 * pad - dp(8f)) / cellW).toInt().coerceAtLeast(1)
@@ -116,7 +117,8 @@ class PopupOverlay(context: Context, private val prefs: Prefs) : View(context) {
         keyBottom = key.bottom
         selRow = 0; selCol = 0
         startX = fingerX
-        startY = key.centerY()
+        startY = fingerY ?: key.centerY()
+        lastX = fingerX; lastY = startY
         moved = false
         selX.set(cellLeft(0, 0)); selY.set(cellTop(0))
         opShow.set(0f)
@@ -133,8 +135,12 @@ class PopupOverlay(context: Context, private val prefs: Prefs) : View(context) {
     private var startY = 0f
     private var moved = false
 
+    private var lastX = 0f
+    private var lastY = 0f
+
     fun moveSelection(x: Float, y: Float) {
         if (rows.isEmpty()) return
+        lastX = x; lastY = y
         if (!moved) {
             if (kotlin.math.abs(x - startX) < cellW * 0.6f && kotlin.math.abs(y - startY) < cellH * 0.6f) return
             moved = true
@@ -176,7 +182,7 @@ class PopupOverlay(context: Context, private val prefs: Prefs) : View(context) {
     var onStickyChanged: ((Boolean) -> Unit)? = null
 
     /** True when the finger slid onto an option before lifting (classic drag-to-pick). */
-    fun pickedByDrag() = moved && selRow >= 0
+    fun pickedByDrag() = moved && selRow >= 0 && RectF(opRect).apply { inset(-dp(10f), -dp(10f)) }.contains(lastX, lastY)
 
     fun stick(choose: (Output?) -> Unit) {
         sticky = true; onChoose = choose

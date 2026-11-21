@@ -30,7 +30,7 @@ object Llm {
     val PROVIDERS = listOf(
         Provider("claude", "Claude", "claude-opus-5-5", "", "sk-ant-…", "console.anthropic.com", "claude"),
         Provider("openai", "OpenAI", "gpt-5-mini", "https://api.openai.com/v1", "sk-…", "platform.openai.com", "openai"),
-        Provider("gemini", "Gemini", "gemini-2.5-flash", "https://generativelanguage.googleapis.com/v1beta", "AIza…", "aistudio.google.com", "gemini"),
+        Provider("gemini", "Gemini", "gemini-3.5-flash-lite", "https://generativelanguage.googleapis.com/v1beta", "AIza…", "aistudio.google.com", "gemini"),
         Provider("deepseek", "DeepSeek", "deepseek-chat", "https://api.deepseek.com/v1", "sk-…", "platform.deepseek.com", "openai"),
         Provider("qwen", "通义千问", "qwen-plus", "https://dashscope.aliyuncs.com/compatible-mode/v1", "sk-…", "bailian.console.aliyun.com", "openai"),
         Provider("kimi", "Kimi", "moonshot-v1-8k", "https://api.moonshot.cn/v1", "sk-…", "platform.moonshot.cn", "openai"),
@@ -52,7 +52,7 @@ object Llm {
         "claude" to listOf("claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"),
         "openai" to listOf("gpt-5-mini", "gpt-5", "gpt-5-nano"),
         "deepseek" to listOf("deepseek-chat", "deepseek-reasoner"),
-        "gemini" to listOf("gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.5-flash-lite"),
+        "gemini" to listOf("gemini-3.5-flash-lite", "gemini-3.5-flash", "gemini-flash-lite-latest", "gemini-3.8-flash"),
     )
 
     fun provider(id: String) = PROVIDERS.firstOrNull { it.id == id } ?: PROVIDERS[0]
@@ -109,10 +109,12 @@ object Llm {
                         "claude" -> claude(key(prefs, id), m, system, user, { streamed = true; onText(it) }, cancelled, if (id == "claude") null else base(prefs, id))
                         "gemini" -> gemini(base(prefs, id), key(prefs, id), m, system, user, { streamed = true; onText(it) }, cancelled)
                         else -> openAi(base(prefs, id), key(prefs, id), m, system, user, { streamed = true; onText(it) }, cancelled)
-                    }.trim()
+                    }.trim().also { if (m != m0) remember(prefs, id, model, m0, m, last) }
                 } catch (e: HttpError) {
                     last = e
-                    if (!e.retryable || streamed) error(e.userMessage())
+                    if (streamed) error(e.userMessage())
+                    if (e.gone && models.size > 1) break      // a retired model: the next one
+                    if (!e.retryable) error(e.userMessage())
                     if (attempt < 2) Thread.sleep(if (attempt == 0) 1200L else 2800L)
                 }
             }
@@ -120,12 +122,37 @@ object Llm {
         error(last?.userMessage() ?: "出错了")
     }
 
-    /** Lighter Gemini models to fall back on when the chosen one is overloaded. */
-    private val GEMINI_FALLBACK = listOf("gemini-2.5-flash-lite", "gemini-2.0-flash")
+    /** The default model was retired and a fallback answered: make that the default from now on. */
+    private fun remember(prefs: Prefs, id: String, asked: String?, m0: String, m: String, why: HttpError?) {
+        if (asked.isNullOrBlank() && why?.gone == true && model(prefs, id) == m0) prefs.put("llm_${id}_model", m)
+    }
+
+    /** Gemini models to fall back on when the chosen one is overloaded or retired. */
+    private val GEMINI_FALLBACK = listOf("gemini-3.5-flash-lite", "gemini-flash-lite-latest")
+
+    /**
+     * Thinking costs seconds a keyboard can't spare (3.5 Flash thinks ~800 tokens on a
+     * one-line rewrite: 6 s instead of 0.9). Ask for the least each model accepts; models
+     * that refuse a level say so with a 400, and the answer is remembered per model.
+     */
+    private val LEVELS = listOf("minimal", "low", null)
+    private val levelFor = java.util.concurrent.ConcurrentHashMap<String, Int>()
+    private fun <T> withThinking(model: String, call: (JSONObject) -> T): T {
+        var i = levelFor[model] ?: 0
+        while (true) {
+            val cfg = JSONObject().apply { LEVELS[i]?.let { put("thinkingConfig", JSONObject().put("thinkingLevel", it)) } }
+            try { return call(cfg).also { levelFor[model] = i } } catch (e: HttpError) {
+                if (e.code == 400 && e.detail.contains("thinking", true) && i < LEVELS.lastIndex) { i++; continue }
+                throw e
+            }
+        }
+    }
 
     /** An HTTP failure, with the service's own explanation. */
     class HttpError(val code: Int, val detail: String) : Exception("HTTP $code: $detail") {
         val retryable get() = code == 429 || code == 500 || code in 502..504
+        /** The model does not exist (any more) for this key. */
+        val gone get() = code == 404
         fun userMessage() = when (code) {
             401, 403 -> "API Key 无效或没有权限"
             402 -> "账户余额不足"
@@ -162,6 +189,10 @@ object Llm {
                 (0 until arr.length()).map { arr.getJSONObject(it) }
                     .filter { m -> m.optJSONArray("supportedGenerationMethods")?.let { a -> (0 until a.length()).any { a.getString(it) == "generateContent" } } ?: true }
                     .map { it.getString("name").removePrefix("models/") }
+                    // speech output, images, music, robots, agents: nothing a keyboard can use
+                    .filterNot { n -> NOT_TEXT.any { n.contains(it) } }
+                    // the suggested ones first, then newest first (Google still lists retired models)
+                    .sortedWith(compareBy<String>({ s -> MODEL_SUGGESTIONS["gemini"]!!.indexOf(s).let { if (it < 0) 99 else it } }, { !it.startsWith("gemini") }).thenByDescending { it })
             }
             else -> {
                 val root = JSONObject(get("${base(prefs, id)}/models", mapOf("Authorization" to "Bearer $key")))
@@ -170,6 +201,10 @@ object Llm {
             }
         }
     }
+
+    private val noSystem = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
+    private val NOT_TEXT = listOf("tts", "image", "banana", "lyria", "robotics", "computer-use", "customtools", "deep-research", "antigravity", "embedding", "aqa", "veo", "imagen")
 
     private fun get(url: String, headers: Map<String, String>): String {
         val c = URL(url).openConnection() as HttpURLConnection
@@ -196,18 +231,23 @@ object Llm {
         val id = targetId(target); val model = targetModel(prefs, target)
         if (!configured(prefs, id)) error("还没有设置 ${provider(id).title} 的 API Key")
         val wav = wav16(pcm)
+        val gemini = protocol(prefs, id) == "gemini"
+        val models = if (gemini) listOf(model) + GEMINI_FALLBACK.filter { it != model } else listOf(model)
         var last: HttpError? = null
-        for (attempt in 0..2) {
-            try {
-                return when (protocol(prefs, id)) {
-                    "gemini" -> geminiListen(base(prefs, id), key(prefs, id), model, wav, lang)
-                    "claude" -> error("${provider(id).title} 不支持语音识别")
-                    else -> openAiTranscribe(base(prefs, id), key(prefs, id), model, wav, lang)
-                }.trim()
-            } catch (e: HttpError) {
-                last = e
-                if (!e.retryable) error(e.userMessage())
-                if (attempt < 2) Thread.sleep(if (attempt == 0) 1000L else 2500L)
+        for (m in models) {
+            for (attempt in 0..2) {
+                try {
+                    return when (protocol(prefs, id)) {
+                        "gemini" -> geminiListen(base(prefs, id), key(prefs, id), m, wav, lang)
+                        "claude" -> error("${provider(id).title} 不支持语音识别")
+                        else -> openAiTranscribe(base(prefs, id), key(prefs, id), m, wav, lang)
+                    }.trim()
+                } catch (e: HttpError) {
+                    last = e
+                    if (e.gone && models.size > 1) break
+                    if (!e.retryable) error(e.userMessage())
+                    if (attempt < 2) Thread.sleep(if (attempt == 0) 1000L else 2500L)
+                }
             }
         }
         error(last?.userMessage() ?: "识别失败")
@@ -258,7 +298,7 @@ object Llm {
             .put(JSONObject().put("inline_data", JSONObject().put("mime_type", "audio/wav").put("data", android.util.Base64.encodeToString(wav, android.util.Base64.NO_WRAP))))
             .put(JSONObject().put("text", "Transcribe this recording exactly as spoken, in $langName, with natural punctuation. " +
                 "Leave out hesitation sounds. Output only the transcript, nothing else.")))))
-        val c = post("$base/models/$model:generateContent", mapOf("x-goog-api-key" to key), body)
+        val c = withThinking(model) { cfg -> post("$base/models/$model:generateContent", mapOf("x-goog-api-key" to key), body.put("generationConfig", cfg)) }
         val text = try { c.inputStream.bufferedReader().readText() } catch (e: java.io.IOException) { error("连接中断了，再试一次") } finally { c.disconnect() }
         val parts = runCatching { JSONObject(text).getJSONArray("candidates").getJSONObject(0).getJSONObject("content").getJSONArray("parts") }.getOrNull() ?: return ""
         return (0 until parts.length()).map { parts.getJSONObject(it) }.filter { !it.optBoolean("thought") }.joinToString("") { it.optString("text") }
@@ -377,10 +417,20 @@ object Llm {
     // ---- Gemini ----
 
     private fun gemini(base: String, key: String, model: String, system: String, user: String, onText: (String) -> Unit, cancelled: () -> Boolean): String {
-        val body = JSONObject()
-            .put("systemInstruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", system))))
-            .put("contents", JSONArray().put(JSONObject().put("role", "user").put("parts", JSONArray().put(JSONObject().put("text", user)))))
-        val c = post("$base/models/$model:streamGenerateContent?alt=sse", mapOf("x-goog-api-key" to key), body)
+        // some models (Gemma, the transcribe model) refuse a system instruction: put it in the message instead
+        fun body(fold: Boolean) = JSONObject().apply {
+            if (!fold) put("systemInstruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", system))))
+            put("contents", JSONArray().put(JSONObject().put("role", "user").put("parts", JSONArray().put(JSONObject().put("text", if (fold) "$system\n\n$user" else user)))))
+        }
+        val url = "$base/models/$model:streamGenerateContent?alt=sse"
+        val c = withThinking(model) { cfg ->
+            if (model in noSystem) post(url, mapOf("x-goog-api-key" to key), body(true).put("generationConfig", cfg))
+            else try { post(url, mapOf("x-goog-api-key" to key), body(false).put("generationConfig", cfg)) } catch (e: HttpError) {
+                if (e.code != 400 || !e.detail.contains("instruction", true)) throw e
+                noSystem += model
+                post(url, mapOf("x-goog-api-key" to key), body(true).put("generationConfig", cfg))
+            }
+        }
         val sb = StringBuilder()
         sse(c, cancelled) { d ->
             val parts = runCatching { JSONObject(d).getJSONArray("candidates").getJSONObject(0).getJSONObject("content").getJSONArray("parts") }.getOrNull() ?: return@sse
