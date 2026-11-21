@@ -66,11 +66,36 @@ data class KbTheme(
             else -> (context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
         }
 
+        /** 临时模式: night indigo with a violet accent, whatever the theme, so it is plain to see it is on. */
+        fun incognito(): KbTheme {
+            val ink = Color.parseColor("#E9E6FF")
+            val accent = Color.parseColor("#A99BFF")
+            return KbTheme(
+                dark = true,
+                background = Color.parseColor("#15132A"),
+                surface = Color.parseColor("#2A2650"),
+                surfacePressed = Color.parseColor("#3A3566"),
+                soft = Colors.alpha(ink, 0x17),
+                softPressed = Colors.alpha(ink, 0x30),
+                ink = ink,
+                inkSoft = Color.parseColor("#BDB7E6"),
+                hint = Color.parseColor("#8A84B8"),
+                accent = accent,
+                accentPressed = Colors.blend(accent, Color.WHITE, 0.25f),
+                onAccent = Color.parseColor("#15132A"),
+                accentSoft = Colors.alpha(accent, 0x38),
+                popup = Color.parseColor("#332E5E"),
+                shadow = Colors.alpha(Color.BLACK, 0x50),
+                divider = Colors.alpha(ink, 0x16),
+            )
+        }
+
         fun resolve(context: Context, prefs: Prefs): KbTheme {
             val night = isDark(context, prefs)
             // 纸墨 starts in 朱砂, the color of a seal on paper, until another accent is picked
             val id = if (prefs.style == "paper" && !prefs.sp.contains(Prefs.ACCENT)) "cinnabar" else prefs.accent
             val accent = accentFor(context, id, night)
+            if (prefs.incognito) return incognito()
             if (prefs.style == "paper") return paper(night, accent)
             return if (night) {
                 val ink = Color.parseColor("#ECEEF1")

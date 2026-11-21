@@ -63,6 +63,21 @@ endif()
 
 option(BUILD_TEST "" OFF)
 option(BUILD_STATIC "" ON)
+# 临时模式: librime learns from every commit and has no switch for it. One guard in Memory::OnCommit
+# lets the option _kk_no_learning stop it. Applied here (idempotently) so the submodule stays as is.
+set(KK_MEMORY_CC "${CMAKE_CURRENT_SOURCE_DIR}/librime/src/rime/gear/memory.cc")
+file(READ "${KK_MEMORY_CC}" KK_MEMORY_SRC)
+string(FIND "${KK_MEMORY_SRC}" "_kk_no_learning" KK_PATCHED)
+if(KK_PATCHED EQUAL -1)
+  string(REPLACE "void Memory::OnCommit(Context* ctx) {\n  if (!user_dict_ || user_dict_->readonly())"
+                 "void Memory::OnCommit(Context* ctx) {\n  if (ctx && ctx->get_option(\"_kk_no_learning\"))\n    return;\n  if (!user_dict_ || user_dict_->readonly())"
+                 KK_MEMORY_SRC "${KK_MEMORY_SRC}")
+  string(FIND "${KK_MEMORY_SRC}" "_kk_no_learning" KK_PATCHED)
+  if(KK_PATCHED EQUAL -1)
+    message(FATAL_ERROR "could not add the no-learning guard to librime's memory.cc")
+  endif()
+  file(WRITE "${KK_MEMORY_CC}" "${KK_MEMORY_SRC}")
+endif()
 add_subdirectory(librime)
 target_compile_options(rime-static PRIVATE "-Wno-error=deprecated-declarations")
 

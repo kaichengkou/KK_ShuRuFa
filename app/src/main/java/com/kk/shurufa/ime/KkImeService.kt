@@ -147,6 +147,9 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     private val aiCand by lazy { AiCandidate(prefs) { syncBar() } }
     private var aiShown = false
 
+    /** Taps may teach the touch model (not in 临时模式 or passwords). */
+    private var tapLearn = true
+
     /** A suggestion was just picked and put a space after itself. */
     private var autoSpaced = false
     private var predictionLabel = ""
@@ -230,6 +233,33 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     private val stateListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         // the settings downloaded newer emoji
         if (key == Prefs.EMOJI_RELOAD) emoji.load()
+        if (key == Prefs.INCOGNITO) applyIncognito()
+    }
+
+    /**
+     * What may be learned and recorded in this field: never from passwords, addresses or fields
+     * that ask not to be learned from, and nothing at all in 临时模式.
+     */
+    private fun applyPrivacy(info: EditorInfo) {
+        val cls = info.inputType and InputType.TYPE_MASK_CLASS
+        val variation = info.inputType and InputType.TYPE_MASK_VARIATION
+        val isPassword = cls == InputType.TYPE_CLASS_TEXT && variation in PASSWORDS
+        val isAddress = cls == InputType.TYPE_CLASS_TEXT && variation in ADDRESSES
+        val noLearning = (info.imeOptions and EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING) != 0 || prefs.incognito
+        editor.recording = prefs.typingStats && !isPassword && !isAddress && !noLearning
+        wordsHere = cls == InputType.TYPE_CLASS_TEXT && !isPassword && !isAddress &&
+            (info.inputType and InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS) == 0
+        learnHere = wordsHere && !noLearning
+        tapLearn = !noLearning && !isPassword
+        if (built) keyboard.learnTaps = tapLearn
+    }
+
+    /** 临时模式 on or off: learning stops or resumes everywhere, and the colors change. */
+    private fun applyIncognito() {
+        applyRimeOptions()
+        if (built) setInputView(onCreateInputView())
+        currentInputEditorInfo?.let { applyPrivacy(it) }
+        notice(if (prefs.incognito) "临时模式：输入的内容不学习、不记录" else "已退出临时模式")
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
@@ -268,6 +298,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         }
         content = FrameLayout(this)
         keyboard = newKeyboard().also { it.touch = if (prefs.touchAdapt) touchModel else null }
+        keyboard.learnTaps = tapLearn
         buildCandidatePanel()
         buildSymbolPanel()
         buildEditPanel()
@@ -370,6 +401,8 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
 
     override fun onStartInputView(info: EditorInfo, restarting: Boolean) {
         super.onStartInputView(info, restarting)
+        // Rime's session can have been made anew (a backup's sync): its options with it
+        applyRimeOptions()
         tempLang = null
         predictions = emptyList()
         editor.reset()
@@ -380,11 +413,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         val isAddress = cls == InputType.TYPE_CLASS_TEXT && variation in ADDRESSES
         if ((isPassword || isAddress) && isZh) tempLang = prefs.languages.firstOrNull { layout(it).engine != "rime" } ?: "en"
         // 打字数据: never from passwords, addresses or fields that ask not to be learned from
-        editor.recording = prefs.typingStats && !isPassword && !isAddress &&
-            (info.imeOptions and EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING) == 0
-        wordsHere = cls == InputType.TYPE_CLASS_TEXT && !isPassword && !isAddress &&
-            (info.inputType and InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS) == 0
-        learnHere = wordsHere && (info.imeOptions and EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING) == 0
+        applyPrivacy(info)
         autoSpaced = false
         panel = when {
             cls == InputType.TYPE_CLASS_PHONE -> Panel.PHONE
@@ -436,6 +465,8 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         if (!RimeEngine.ready) return
         RimeBridge.setOption("emoji", prefs.zhEmoji)
         RimeBridge.setOption("traditionalization", prefs.zhTraditional)
+        // 临时模式: Rime learns nothing from what is committed (a guard added to its Memory)
+        RimeBridge.setOption("_kk_no_learning", prefs.incognito)
     }
 
     // ---- panels -------------------------------------------------------------------------
@@ -782,7 +813,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         recentSymbols.remove(o.text)
         recentSymbols.add(0, o.text)
         while (recentSymbols.size > 30) recentSymbols.removeAt(recentSymbols.size - 1)
-        prefs.state.edit().putString(Prefs.RECENT_SYMBOLS, recentSymbols.joinToString("\u0001")).apply()
+        if (!prefs.incognito) prefs.state.edit().putString(Prefs.RECENT_SYMBOLS, recentSymbols.joinToString("\u0001")).apply()
         if (!symLock && prefs.symbolAutoReturn) showPanel(Panel.LETTERS)
     }
 
@@ -911,6 +942,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
             .filter { it.first !in onBar }
             .map { (id, name) -> QuickPanel.Tile("tool:$id", name) }
         quickPanel.tiles = listOf(
+            QuickPanel.Tile("incognito", "临时模式", on = prefs.incognito),
             QuickPanel.Tile("predict", "联想", on = if (isZh) prefs.zhPredict else prefs.wordPredict),
             QuickPanel.Tile("correct", "纠错", on = prefs.zhCorrection),
             QuickPanel.Tile("trad", "繁体", on = prefs.zhTraditional),
@@ -936,6 +968,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     private fun onQuickTile(id: String) {
         when (id) {
             in RIME_TOOLS -> rimeTool(RIME_TOOLS[id]!!)
+            "incognito" -> prefs.state.edit().putBoolean(Prefs.INCOGNITO, !prefs.incognito).apply()
             "calc" -> { prefs.put(Prefs.NUM_MODE, "simple"); showPanel(Panel.NUM) }
             "trad" -> prefs.put(Prefs.ZH_TRAD, !prefs.zhTraditional)
             "emoji" -> prefs.put(Prefs.ZH_EMOJI, !prefs.zhEmoji)

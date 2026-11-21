@@ -46,6 +46,7 @@ class VoicePanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
     var look = Look.READY
         set(v) {
             if (field != v) lit.animateTo(if (v == Look.LISTENING) 1f else 0f, dur(Motion.SWAP + 60))
+            if (field != v && (v == Look.WORKING || v == Look.LOADING)) workSince = Motion.now()
             field = v
             if (v != Look.LISTENING) level.animateTo(0f, dur(200))
             invalidate()
@@ -71,6 +72,8 @@ class VoicePanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
     /** 0 idle, 1 listening: the button fills with the accent. */
     private val lit = Tween(0f)
     private val spin = Tween(0f)
+    /** When the wait for the recognizer began. */
+    private var workSince = 0L
     private val hits = Hits()
     private var pressed: String? = null
     private val arc = RectF()
@@ -104,7 +107,9 @@ class VoicePanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
         chip(c, "engine", engineName, if (picking) ChipStyle.ACTIVE else ChipStyle.SOFT, x, m, chevron = true)
         chip(c, "mode", mode, if (translating) ChipStyle.ACTIVE else ChipStyle.SOFT, width - m, m, alignRight = true, icon = if (translating) "translate" else null)
         val bottomY = height - m - ch
-        if (busy) chip(c, "cancel", "取消", ChipStyle.GHOST, m, bottomY)
+        // waiting on the recognizer: 取消 is the way out, so it stands out
+        val waiting = look == Look.WORKING || look == Look.LOADING
+        if (busy) chip(c, "cancel", "取消", if (waiting) ChipStyle.SOFT else ChipStyle.GHOST, m, bottomY, icon = if (waiting) "stop" else null)
         val del = chip(c, "delete", "", ChipStyle.SOFT, width - m, bottomY, alignRight = true, icon = "backspace")
         if (canUndo) chip(c, "undo", "撤回上一句", ChipStyle.SOFT, del - dp(Ui.CHIP_GAP), bottomY, alignRight = true, icon = "undo")
 
@@ -119,9 +124,17 @@ class VoicePanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
         val l = lit.value
         if (l > 0.01f) {
             val lv = level.value
+            // listening: rings keep flowing out from the button, faster and wider as the voice rises
+            val period = 1700f - 700f * lv
+            val ph = (Motion.now() % period.toLong()) / period
+            for (k in 0..1) {
+                val p = (ph + k * 0.5f) % 1f
+                bg.color = Colors.fade(t.accentSoft, l * (1f - p) * 0.9f)
+                c.drawCircle(cx, cy, r * (1.02f + (0.55f + 0.45f * lv) * p), bg)
+            }
             bg.color = Colors.fade(t.accentSoft, l)
-            c.drawCircle(cx, cy, r * (1.12f + 0.26f * lv), bg)
-            c.drawCircle(cx, cy, r * (1.04f + 0.1f * lv), bg)
+            c.drawCircle(cx, cy, r * (1.08f + 0.42f * lv), bg)
+            again = true
         }
         val idle = if (pressed == "mic") t.softPressed else t.soft
         val on = if (pressed == "mic") t.accentPressed else t.accent
@@ -129,11 +142,16 @@ class VoicePanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
         c.drawCircle(cx, cy, r, bg)
         hits.add("mic", cx - r, cy - r, cx + r, cy + r, slop = dp(12f))
         if (look == Look.WORKING || look == Look.LOADING) {
-            if (!spin.running) { spin.set(0f); spin.animateTo(1f, 900, Motion.LINEAR) }
+            if (!spin.running) { spin.set(0f); spin.animateTo(1f, 1000, Motion.LINEAR) }
             again = true
-            ip.color = t.accent; ip.style = Paint.Style.STROKE; ip.strokeWidth = dp(3f); ip.strokeCap = Paint.Cap.ROUND
-            arc.set(cx - r - dp(6f), cy - r - dp(6f), cx + r + dp(6f), cy + r + dp(6f))
-            c.drawArc(arc, spin.value * 360f - 90f, 70f, false, ip)
+            // a sweep that grows and shrinks as it turns, with a faint track under it
+            ip.style = Paint.Style.STROKE; ip.strokeWidth = dp(3.5f); ip.strokeCap = Paint.Cap.ROUND
+            arc.set(cx - r - dp(7f), cy - r - dp(7f), cx + r + dp(7f), cy + r + dp(7f))
+            ip.color = t.accentSoft; c.drawArc(arc, 0f, 360f, false, ip)
+            val s = spin.value
+            val sweep = 40f + 140f * kotlin.math.sin(Math.PI.toFloat() * s)
+            ip.color = t.accent
+            c.drawArc(arc, s * 360f - 90f + (Motion.now() % 3000) / 3000f * 360f, sweep, false, ip)
             ip.style = Paint.Style.FILL
         }
         ip.color = Colors.blend(t.ink, t.onAccent, l)
@@ -147,6 +165,18 @@ class VoicePanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
                 "…" + TextUtils.ellipsize(partial.reversed(), ellipsizer, avail - tp.measureText("…"), TextUtils.TruncateAt.END).toString().reversed().trimEnd('…')
             }
             drawText(c, shown, cx, lineY, tp)
+        } else if (waiting) {
+            // what it is waiting for, for how long, and how to stop waiting
+            val secs = (Motion.now() - workSince) / 1000f
+            val dots = ".".repeat(1 + ((Motion.now() - workSince) / 380 % 3).toInt())
+            tp.typeface = Ui.medium; tp.textSize = sp(Ui.BODY); tp.color = t.accent
+            val head = status.trimEnd('…', '.') + dots + if (secs >= 1f) String.format("  %.1f 秒", secs) else ""
+            drawText(c, head, cx, lineY - if (secs >= 2f) dp(9f) else 0f, tp)
+            if (secs >= 2f) {
+                tp.typeface = Ui.regular; tp.textSize = sp(Ui.SMALL); tp.color = t.hint
+                drawText(c, "点「取消」可以打断", cx, lineY + dp(10f), tp)
+            }
+            tp.typeface = Ui.regular
         } else {
             tp.typeface = Ui.regular; tp.textSize = sp(Ui.BODY); tp.color = t.inkSoft
             drawText(c, status, cx, lineY, tp)

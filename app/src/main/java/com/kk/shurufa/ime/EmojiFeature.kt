@@ -144,12 +144,12 @@ class EmojiFeature(private val host: Host) {
         if (e in kaomoji || recentKao.contains(e)) {
             recentKao.remove(e); recentKao.add(0, e)
             while (recentKao.size > 12) recentKao.removeAt(recentKao.size - 1)
-            prefs.state.edit().putString(Prefs.RECENT_KAOMOJI, recentKao.joinToString("\u0001")).apply()
+            if (!prefs.incognito) prefs.state.edit().putString(Prefs.RECENT_KAOMOJI, recentKao.joinToString("\u0001")).apply()
             return
         }
         recent.remove(e); recent.add(0, e)
         while (recent.size > 32) recent.removeAt(recent.size - 1)
-        prefs.state.edit().putString(Prefs.RECENT_EMOJI, recent.joinToString(" ")).apply()
+        if (!prefs.incognito) prefs.state.edit().putString(Prefs.RECENT_EMOJI, recent.joinToString(" ")).apply()
     }
 
     /** The base emoji a shown one belongs to (a recent skin tone maps back to its base). */

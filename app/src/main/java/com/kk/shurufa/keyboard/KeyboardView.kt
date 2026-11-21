@@ -52,6 +52,8 @@ class KeyboardView(context: Context, prefs: Prefs) : KbView(context, prefs) {
     var listener: KeyboardListener? = null
     /** 落点自适应: where this person's taps land on each letter; null reads taps by the key shapes alone. */
     var touch: TouchModel? = null
+    /** Whether taps teach the touch model where this person hits the keys (not in 临时模式 or passwords). */
+    var learnTaps = true
     var overlay: PopupOverlay? = null
     /** Math keys show four-direction hints and use a math font. */
     var mathMode = false
@@ -535,7 +537,7 @@ class KeyboardView(context: Context, prefs: Prefs) : KbView(context, prefs) {
         val k = keys[hit]
         touch?.let { m ->
             val now = SystemClock.uptimeMillis()
-            if (k.fn == "backspace") m.undone(now) else if (learnable(k)) m.tapped(k.main!!.text, rects[hit], x, y, now)
+            if (!learnTaps) {} else if (k.fn == "backspace") m.undone(now) else if (learnable(k)) m.tapped(k.main!!.text, rects[hit], x, y, now)
         }
         pointerId = e.getPointerId(index)
         active = k

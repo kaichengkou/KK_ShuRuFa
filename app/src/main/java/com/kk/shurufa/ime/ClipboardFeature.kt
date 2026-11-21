@@ -58,6 +58,8 @@ class ClipboardFeature(private val host: Host) {
     }
 
     private fun added(text: String) {
+        // 临时模式: what is copied is not kept
+        if (prefs.incognito) return
         clips.add(text)
         images.prune(clips.entries().map { it.text })
         if (prefs.clipSuggest) { pending = text; pendingAt = SystemClock.uptimeMillis() }

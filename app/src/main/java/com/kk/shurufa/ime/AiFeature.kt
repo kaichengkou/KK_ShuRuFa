@@ -38,6 +38,7 @@ class AiFeature(private val host: Host) {
                     "replace" -> apply(replace = true)
                     "insert" -> apply(replace = false)
                     "retry" -> action?.let { start(it) }
+                    "stop" -> stop()
                     "copy" -> {
                         (host.context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("AI", result))
                         host.notice("已复制")
@@ -125,4 +126,14 @@ class AiFeature(private val host: Host) {
 
     /** Leaving the panel stops a run that is still streaming. */
     fun cancel() { run++ }
+
+    /** 停止: the run is let go; what came so far stays, to use or retry. */
+    private fun stop() {
+        run++
+        panel.running = null
+        host.haptics.play(HapticEvent.OPTION)
+        if (panel.hasResult()) { result = panel.resultText(); panel.status = "" }
+        else { result = ""; panel.status = "已停止 · 点一个操作重新开始" }
+        panel.invalidate()
+    }
 }

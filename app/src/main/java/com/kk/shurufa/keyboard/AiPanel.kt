@@ -61,7 +61,9 @@ class AiPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
     private var picking = false
     var needsSetup = false
     var running: String? = null
-        set(v) { field = v; if (v != null) pulse.set(0f); invalidate() }
+        set(v) { if (v != null && field == null) runSince = Motion.now(); field = v; invalidate() }
+    /** When the run began, for the seconds shown while waiting. */
+    private var runSince = 0L
     var doneTitle = ""
     var status = ""
         set(v) { field = v; invalidate() }
@@ -237,6 +239,39 @@ class AiPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
     }
 
     /** The answer card; true while something in it moves. */
+    fun hasResult() = result.isNotEmpty()
+    fun resultText() = result
+
+    /** …, growing a dot at a time while something runs. */
+    private fun dots(): String = ".".repeat(1 + ((Motion.now() - runSince) / 380 % 3).toInt())
+
+    /** 停止, right-aligned at [right]; returns its left edge. */
+    private fun drawStop(c: Canvas, right: Float, top: Float, h: Float): Float {
+        val w = chipWidth("停止", icon = "stop", textSp = Ui.SMALL + 1f)
+        val sr = RectF(right - w, top, right, top + h)
+        drawChip(c, sr, "停止", ChipStyle.SOFT, pressed = pressed == "stop", icon = "stop", textSp = Ui.SMALL + 1f)
+        hits.add("stop", sr, slop = dp(5f))
+        return sr.left
+    }
+
+    /** Placeholder lines with a light sweeping across them: the answer is on its way. */
+    private fun shimmer(c: Canvas, l: Float, t0: Float, r0: Float, b: Float) {
+        val h = dp(11f); val gap = dp(12f)
+        val widths = floatArrayOf(0.94f, 0.82f, 0.6f, 0.88f, 0.45f)
+        val sweep = l - (r0 - l) * 0.4f + (r0 - l) * 1.8f * pulse.value
+        var y = t0
+        for (wf in widths) {
+            if (y + h > b) break
+            val right = l + (r0 - l) * wf
+            bg.shader = android.graphics.LinearGradient(sweep - dp(90f), 0f, sweep + dp(90f), 0f,
+                intArrayOf(theme.soft, Colors.blend(theme.soft, theme.accentSoft, 0.9f), theme.soft), floatArrayOf(0f, 0.5f, 1f),
+                android.graphics.Shader.TileMode.CLAMP)
+            c.drawRoundRect(l, y, right, y + h, h / 2, h / 2, bg)
+            bg.shader = null
+            y += h + gap
+        }
+    }
+
     private fun drawResult(c: Canvas, top0: Float): Boolean {
         val t = theme
         val card = r.apply { set(pad, top0, width - pad, height - dp(10f)) }
@@ -246,14 +281,24 @@ class AiPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
         c.drawRoundRect(card, rad, rad, bg)
         val cardL = card.left; val cardR = card.right; val cardT = card.top; val cardB = card.bottom
         val inner = dp(12f)
+        if (result.isEmpty() && running != null && status.isEmpty()) {
+            // waiting for the first words: what is being done, the seconds, 停止, and lines of
+            // text-to-be with a light sweeping across them
+            if (!pulse.running) { pulse.set(0f); pulse.animateTo(1f, 1300, Motion.LINEAR) }
+            val lineH = dp(28f); val lineT = cardT + dp(8f); val lineCy = lineT + lineH / 2
+            tp.textAlign = Paint.Align.LEFT; tp.textSize = sp(Ui.SMALL); tp.typeface = Ui.medium; tp.color = t.accent
+            drawText(c, doneTitle + " · 正在思考" + dots(), cardL + inner, lineCy, tp)
+            tp.typeface = Ui.regular; tp.color = t.hint
+            val secs = (Motion.now() - runSince) / 1000f
+            val stopW = drawStop(c, cardR - dp(8f), lineT, lineH)
+            if (secs >= 1f) { tp.textAlign = Paint.Align.RIGHT; drawText(c, String.format("%.0f 秒", secs), stopW - dp(8f), lineCy, tp) }
+            shimmer(c, cardL + inner, lineT + lineH + dp(12f), cardR - inner, cardB - dp(12f))
+            return true
+        }
         if (result.isEmpty()) {
-            // waiting for the first words: the line breathes
-            val breathing = running != null && status.isEmpty()
-            tp.textAlign = Paint.Align.CENTER; tp.textSize = sp(Ui.SMALL + 1f)
-            tp.color = if (breathing) Colors.blend(t.hint, t.accent, 0.5f + 0.5f * sin(pulse.value * Math.PI).toFloat()) else t.hint
-            if (breathing && !pulse.running) { pulse.set(0f); pulse.animateTo(1f, 1100, Motion.LINEAR) }
-            drawText(c, status.ifEmpty { if (running != null) "正在思考…" else idleNote() }, card.centerX(), card.centerY(), tp)
-            return breathing
+            tp.textAlign = Paint.Align.CENTER; tp.textSize = sp(Ui.SMALL + 1f); tp.color = t.hint
+            drawText(c, status.ifEmpty { idleNote() }, card.centerX(), card.centerY(), tp)
+            return false
         }
         // title line: ✕ and what was done on the left, the buttons for the answer on the right
         val lineH = dp(28f)
@@ -266,9 +311,11 @@ class AiPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
             hits.add("back", r, slop = dp(5f))
             tx = r.right + dp(4f)
         }
-        tp.textAlign = Paint.Align.LEFT; tp.textSize = sp(Ui.SMALL); tp.color = t.hint; tp.typeface = Ui.medium
-        drawText(c, if (running != null) "$doneTitle · 生成中…" else doneTitle, tx, lineCy, tp)
+        tp.textAlign = Paint.Align.LEFT; tp.textSize = sp(Ui.SMALL); tp.color = if (running != null) t.accent else t.hint; tp.typeface = Ui.medium
+        drawText(c, if (running != null) "$doneTitle · 生成中" + dots() else doneTitle, tx, lineCy, tp)
         tp.typeface = Ui.regular
+        // still writing: 停止 keeps what came so far
+        if (running != null) { drawStop(c, cardR - dp(8f), lineT, lineH); if (!pulse.running) { pulse.set(0f); pulse.animateTo(1f, 1300, Motion.LINEAR) } }
         if (running == null) {
             var bx = cardR - dp(8f)
             for ((id, label) in BUTTONS) {
@@ -313,7 +360,7 @@ class AiPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
             bg.color = t.divider
             c.drawRoundRect(cardR - dp(6f), y, cardR - dp(3.5f), y + h, dp(2f), dp(2f), bg)
         }
-        return moving
+        return moving || running != null
     }
 
     /** What an action will work on, said where the answer will appear. */
@@ -441,6 +488,6 @@ class AiPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
     private companion object {
         /** Result buttons, drawn right to left. */
         val BUTTONS = listOf("replace" to "替换", "insert" to "插入", "copy" to "复制", "retry" to "重试")
-        val BUTTON_IDS = setOf("replace", "insert", "copy", "retry", "setup", "custom")
+        val BUTTON_IDS = setOf("replace", "insert", "copy", "retry", "setup", "custom", "stop")
     }
 }

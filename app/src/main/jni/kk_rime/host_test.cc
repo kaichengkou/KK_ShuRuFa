@@ -49,6 +49,8 @@ int main(int argc, char** argv) {
     const char* seq = argv[i];
     if (strcmp(seq, "+emoji") == 0) { api->set_option(s, "emoji", True); continue; }
     if (strcmp(seq, "-emoji") == 0) { api->set_option(s, "emoji", False); continue; }
+    if (strcmp(seq, "+nolearn") == 0) { api->set_option(s, "_kk_no_learning", True); continue; }
+    if (strcmp(seq, "-nolearn") == 0) { api->set_option(s, "_kk_no_learning", False); continue; }
     if (strcmp(seq, "+trad") == 0) { api->set_option(s, "traditionalization", True); continue; }
     if (strcmp(seq, "-trad") == 0) { api->set_option(s, "traditionalization", False); continue; }
     if (strncmp(seq, "@caret=", 7) == 0) {  // move the caret inside the current input, then show
