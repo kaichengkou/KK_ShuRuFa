@@ -101,6 +101,10 @@ class MenuRenderTest {
         bar.toneFilter = 3
         bar.showCandidates("ma", listOf("马", "码", "吗", "玛", "蚂", "犸", "马上"), emptyList(), -1); f.invalidate(); save("bar_tone_3", f)
         bar.toneMarks = false; bar.toneFilter = 0
+        bar.showCandidates("wo men zai xue xiao men kou jian mian", listOf("我们在学校门口", "我们在学校门口见面", "我们在", "我们", "我"), listOf("", "AI"), -1)
+        f.invalidate(); save("bar_ai", f)
+        bar.showMath("uni", simple = true); bar.showMoney("1050" to "壹仟零伍拾元整"); f.invalidate(); save("bar_money", f)
+        bar.showMoney(null)
     }
 
     private fun setPicking(v: Any, value: Any?) {

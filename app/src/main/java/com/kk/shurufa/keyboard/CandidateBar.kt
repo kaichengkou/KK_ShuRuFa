@@ -406,7 +406,7 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
                 drawText(c, s, x + dp(12f) + (cw - dp(24f) - tw) / 2, lineCy, tp)
                 if (note.isNotEmpty()) {
                     tp.textSize = noteSize; tp.typeface = Ui.regular
-                    tp.color = if (note.contains('→') || note.contains('⇄')) theme.accent else theme.hint
+                    tp.color = if (note == "AI" || note.contains('→') || note.contains('⇄')) theme.accent else theme.hint
                     tp.alpha = (255 * a).toInt()
                     c.drawText(note, x + dp(12f) + (cw - dp(24f) - nw) / 2, lineCy - dp(9.5f), tp)
                 }

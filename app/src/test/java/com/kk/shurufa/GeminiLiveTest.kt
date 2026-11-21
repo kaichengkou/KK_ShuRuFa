@@ -42,6 +42,28 @@ class GeminiLiveTest {
         org.junit.Assert.assertNotEquals("gemini-2.5-flash", Llm.model(p, "gemini"))
     }
 
+    /** AI 候选: a pause on longer pinyin brings the service's reading of it. */
+    @Test fun aiCandidate() {
+        val p = prefs(); p.put(Prefs.AI_CANDIDATE, true); p.put(Prefs.AI_PROVIDER, "gemini|gemini-3.5-flash-lite")
+        var ready = 0
+        val ai = com.kk.shurufa.ime.AiCandidate(p) { ready++ }
+        val input = "womenzaixuexiaomenkoujianmian"
+        val t0 = System.currentTimeMillis()
+        ai.update(input, 8, "我们在学校门口", "明天下午", allowed = true)
+        while (ai.answerFor(input) == null && System.currentTimeMillis() - t0 < 20_000) {
+            Thread.sleep(50); org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(50))
+        }
+        println("[gemini] AI 候选 ${System.currentTimeMillis() - t0} ms → ${ai.answerFor(input)}")
+        org.junit.Assert.assertEquals("我们在学校门口见面", ai.answerFor(input)?.trimEnd('。'))
+        org.junit.Assert.assertEquals(1, ready)
+        // initials only: what comes back is not Chinese, so nothing is offered
+        ai.update("wjdkyzsysbxyxgygxdfr", 20, "", "", allowed = true)
+        // not where learning is not allowed
+        ai.clear(); ai.update(input, 8, "我们在学校门口", "", allowed = false)
+        Thread.sleep(800); org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(800))
+        org.junit.Assert.assertNull(ai.answerFor(input))
+    }
+
     @Test fun live() {
         val p = prefs()
         val listed = Llm.listModels(p, "gemini")

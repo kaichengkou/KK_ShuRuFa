@@ -142,6 +142,10 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     private var wordsHere = true
     /** What is typed here may be learned from. */
     private var learnHere = true
+    /** AI 候选, and whether the bar shows it first now. */
+    private val aiCand by lazy { AiCandidate(prefs) { syncBar() } }
+    private var aiShown = false
+
     /** A suggestion was just picked and put a space after itself. */
     private var autoSpaced = false
     private var predictionLabel = ""
@@ -658,7 +662,16 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
                 val (cands, comments) = zhCandidates(CANDIDATES_ON_BAR)
                 bar.toneMarks = prefs.toneFilter
                 bar.toneFilter = toneFilter
-                bar.showCandidates(pre, cands, zh.annotations(cands, comments), zh.caretInPreedit(pre, RimeBridge.cursor()))
+                val input = RimeBridge.input()
+                aiCand.update(input, pre.split(' ', '\'').count { it.isNotBlank() }, cands.firstOrNull().orEmpty(), editor.textBefore(20),
+                    allowed = learnHere && sink == null && toneFilter == 0)
+                val ai = aiCand.answerFor(input)
+                aiShown = ai != null
+                val notes = zh.annotations(cands, comments)
+                // second, marked AI: the first stays Rime's, which is what space takes
+                if (ai != null) bar.showCandidates(pre, cands.take(1) + ai + cands.drop(1),
+                    notes.take(1).ifEmpty { listOf("") } + "AI" + notes.drop(1), zh.caretInPreedit(pre, RimeBridge.cursor()))
+                else bar.showCandidates(pre, cands, notes, zh.caretInPreedit(pre, RimeBridge.cursor()))
                 if (prefs.zhPreeditInline) editor.compose(RimeBridge.input())
             }
             predictions.isNotEmpty() && letters -> bar.showPredictions(predictions, predictionLabel)
@@ -681,10 +694,10 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         candGrid = GridPanel(this, prefs).apply {
             theme = kbTheme; cellStyle = GridPanel.CellStyle.FLAT; columns = 8; rowHeightDp = 50f; textSp = 19f
             highlightFirst = true; overlay = this@KkImeService.overlay
-            onItem = { i -> onCandidate(i) }
+            onItem = { i -> pickZh(i) }
             onFeedback = { k -> haptics.play(if (k == "popup") HapticEvent.POPUP else HapticEvent.LETTER) }
-            longOptions = { i -> candidateOptions(i) }
-            onLongOption = { i, o -> onCandidateOption(i, o) }
+            longOptions = { i -> zhOptions(i) }
+            onLongOption = { i, o -> zhOption(i, o) }
         }
         val side = newKeyboard().apply {
             heightScale = 0.9f
@@ -969,7 +982,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
                 predictor.suggest(editor.textBefore(20).ifEmpty { out }) else emptyList()
             predictionLabel = ""
         } else if (prefs.zhPreeditInline && RimeBridge.input().isEmpty()) editor.finishComposingText()
-        if (RimeBridge.input().isEmpty()) { zh.reset(); pinyinEdit = false }
+        if (RimeBridge.input().isEmpty()) { zh.reset(); pinyinEdit = false; aiCand.clear(); aiShown = false }
         syncBar()
         if (panel == Panel.CANDIDATES) {
             if (composing) {
@@ -1359,6 +1372,16 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
             syncBar()
             return
         }
+        if (aiShown) {
+            // the bar's second word is the AI's reading of the whole pinyin
+            if (index == AI_SLOT) { commitAiCandidate(); return }
+            pickZh(if (index > AI_SLOT) index - 1 else index); return
+        }
+        pickZh(index)
+    }
+
+    /** Picks Rime's candidate at [index] of what is shown (the grid's numbering, the bar's without AI). */
+    private fun pickZh(index: Int) {
         if (!RimeEngine.ready) return
         zh.track(RimeBridge.preedit())
         RimeBridge.selectCandidateGlobal(rimeIndex(index))
@@ -1448,7 +1471,31 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         return shown.map { all[it] } to shown.map { comments.getOrElse(it) { "" } }
     }
 
-    override fun candidateOptions(index: Int): List<Output> {
+    /** AI 候选 taken: it replaces the whole pinyin. */
+    private fun commitAiCandidate() {
+        val text = aiCand.answerFor(RimeBridge.input()) ?: return
+        RimeBridge.clearComposition()
+        zh.reset()
+        aiCand.clear(); aiShown = false
+        editor.type(pangu(text), pairable = false)
+        predictions = if (prefs.zhPredict && !prefs.pinyinMode) predictor.suggest(editor.textBefore(20)) else emptyList()
+        predictionLabel = ""
+        syncBar()
+    }
+
+    override fun candidateOptions(index: Int): List<Output> = when {
+        !aiShown -> zhOptions(index)
+        index == AI_SLOT -> emptyList()
+        else -> zhOptions(if (index > AI_SLOT) index - 1 else index)
+    }
+
+    override fun onCandidateOption(index: Int, option: Output) = when {
+        !aiShown -> zhOption(index, option)
+        index == AI_SLOT -> Unit
+        else -> zhOption(if (index > AI_SLOT) index - 1 else index, option)
+    }
+
+    private fun zhOptions(index: Int): List<Output> {
         val word = RimeBridge.candidates(rimeIndex(index) + 1).getOrNull(rimeIndex(index)) ?: return emptyList()
         val shown = if (word.codePointCount(0, word.length) > 6) word.substring(0, word.offsetByCodePoints(0, 5)) + "…" else word
         val chars = word.codePoints().toArray().filter { Character.UnicodeScript.of(it) == Character.UnicodeScript.HAN }
@@ -1459,7 +1506,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         return listOf(Output("取消", "§cancel")) + pick + Output("不再优先「$shown」", "§forget")
     }
 
-    override fun onCandidateOption(index: Int, option: Output) {
+    private fun zhOption(index: Int, option: Output) {
         if (option.text == "§first" || option.text == "§last") {
             // 雾凇's 以词定字 acts on the highlighted candidate with [ and ]
             // (false when it already is highlighted, as the first one is)
@@ -1578,6 +1625,8 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         const val VOWELS = "аеёиоуыэюя"
         /** Candidates fetched for the bar: more than fit, so a swipe finds more without a pause. */
         const val CANDIDATES_ON_BAR = 60
+        /** Where the AI 候选 sits on the bar. */
+        const val AI_SLOT = 1
         const val XK_BRACKETLEFT = 0x5b
         const val XK_BRACKETRIGHT = 0x5d
         /** Quick-panel tools that open 雾凇's own candidates: tile → what is typed for them. */

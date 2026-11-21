@@ -1497,6 +1497,9 @@ private fun OnlinePage(prefs: Prefs) {
         }
         Note("工具栏的 ✦：润色、纠错、正式、口语、精简、扩写，翻译成英文 / 俄语 / 中文，以及“输入指令”——直接用键盘打出想怎么改，回车执行。面板右上角可以临时换模型。")
     }
+    Group("AI 候选") {
+        Toggle(prefs, Prefs.AI_CANDIDATE, "打长拼音时请 AI 给一个候选", "打了三个音节以上、停顿一下时，把这段拼音和光标前最多 20 个字发给上面选的 AI 服务，它给出的整句排在候选栏第二个，标着 AI。会把你正在打的内容发出去；密码、地址和无痕输入框里不会发。建议用快的模型，比如 Gemini 3.5 Flash Lite（约半秒）", false)
+    }
     Group("翻译") {
         val engines = listOf("auto" to "自动（有 AI 用 AI，否则离线）", "mlkit" to "离线（ML Kit）") + targets
         val curE = prefs.translateEngine
