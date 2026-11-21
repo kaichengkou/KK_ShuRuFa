@@ -73,7 +73,7 @@ class AiFeature(private val host: Host) {
     fun onOpened() {
         host.finishComposing()
         val src = source()
-        panel.source = src.ifBlank { "（输入框是空的）" }
+        panel.source = src
         panel.sourceLabel = if (fromSelection) "选中" else "全文"
         panel.running = null; panel.status = ""
         panel.setResult("", null)

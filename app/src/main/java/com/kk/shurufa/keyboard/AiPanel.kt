@@ -121,10 +121,13 @@ class AiPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
         tp.textAlign = Paint.Align.LEFT; tp.textSize = sp(Ui.SMALL); tp.typeface = Ui.medium; tp.color = t.accent
         drawText(c, sourceLabel, pad, headCy, tp)
         val lx = pad + tp.measureText(sourceLabel) + dp(8f)
-        tp.typeface = Ui.regular; tp.color = t.inkSoft
+        // an empty field is said quietly, in the hint color, not as if it were the text
+        val blank = source.isBlank()
+        tp.typeface = Ui.regular; tp.color = if (blank) t.hint else t.inkSoft
         val avail = (if (needsSetup) width - pad else width - pad - pw - dp(10f)) - lx
         ellipsizer.set(tp)
-        drawText(c, TextUtils.ellipsize(source.replace('\n', ' '), ellipsizer, avail.coerceAtLeast(0f), TextUtils.TruncateAt.END), lx, headCy, tp)
+        val shown = if (blank) "输入框是空的" else source.replace('\n', ' ')
+        drawText(c, TextUtils.ellipsize(shown, ellipsizer, avail.coerceAtLeast(0f), TextUtils.TruncateAt.END), lx, headCy, tp)
         y += headH + dp(10f)
         if (needsSetup) { drawSetup(c, y); return }
         if (picking) {
@@ -219,7 +222,7 @@ class AiPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
         drawText(c, "还没有设置 AI 服务", cx, cardTop + dp(60f), tp)
         tp.textSize = sp(Ui.SMALL); tp.typeface = Ui.regular; tp.color = t.hint
         ellipsizer.set(tp)
-        drawText(c, TextUtils.ellipsize("填入自己的 Key 就能用：Claude、OpenAI、DeepSeek、Gemini…", ellipsizer, card.width() - dp(24f), TextUtils.TruncateAt.END), cx, cardTop + dp(82f), tp)
+        drawText(c, TextUtils.ellipsize("填入自己的 Key，即可使用 Claude、OpenAI、Gemini 等", ellipsizer, card.width() - dp(24f), TextUtils.TruncateAt.END), cx, cardTop + dp(82f), tp)
         val w = chipWidth("去设置", icon = "settings")
         val by = minOf(cardTop + dp(100f), cardBottom - dp(12f) - dp(Ui.CHIP_H))
         r.set(cx - w / 2, by, cx + w / 2, by + dp(Ui.CHIP_H))

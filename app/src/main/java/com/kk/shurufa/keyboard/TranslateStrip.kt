@@ -126,7 +126,7 @@ class TranslateStrip(context: Context, prefs: Prefs) : KbView(context, prefs) {
         }
         bg.color = t.divider
         c.drawRect(innerL, innerT + half, innerR, innerT + half + dp(0.8f), bg)
-        val res = when { result.isNotEmpty() -> result; busy -> "翻译中…"; else -> status }
+        val res = when { result.isNotEmpty() -> result; busy -> "翻译中…"; status.isNotEmpty() -> status; else -> "译文会显示在这里" }
         val rl = resLayout ?: layout(res, textW, if (result.isNotEmpty()) t.ink else t.hint, TextUtils.TruncateAt.END, medium = result.isNotEmpty()).also { resLayout = it }
         c.save(); c.translate(innerL, innerT + half + (half - rl.height) / 2); rl.draw(c); c.restore()
         if (result.isNotEmpty()) {
