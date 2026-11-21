@@ -29,13 +29,15 @@ class AiCandidate(private val prefs: Prefs, private val onReady: () -> Unit) {
      * Called whenever the pinyin changes. [syllables] is how many it has, [first] what Rime puts
      * first (a hint for the service), [before] the text before the caret.
      */
-    fun update(input: String, syllables: Int, first: String, before: String, allowed: Boolean) {
+    fun update(input: String, syllables: Int, first: String, before: () -> String, allowed: Boolean) {
         main.removeCallbacksAndMessages(null)
         if (!prefs.aiCandidate || !allowed || syllables < MIN_SYLLABLES || input.length < 6) { token++; asking = ""; return }
         if (input == forInput || input == asking) return
         val target = Llm.resolve(prefs, prefs.quickTarget.ifEmpty { prefs.aiProvider }) ?: return
         // within the keyboard's own budget, and not while the service asked to wait
         if (!com.kk.shurufa.online.AiBudget.mayAsk()) return
+        // read from the field only when it is going to be asked (each read is a call into the app)
+        val context = before().takeLast(20)
         val t = ++token
         // a moment's rest first: no request for every letter
         main.postDelayed({
@@ -43,7 +45,7 @@ class AiCandidate(private val prefs: Prefs, private val onReady: () -> Unit) {
             Thread {
                 com.kk.shurufa.online.AiBudget.asked(prefs)
                 val res = runCatching {
-                    Llm.completeQuick(prefs, target, SYSTEM, "Context: ${before.takeLast(20)}\nRime's first guess: $first\nPinyin: $input", cancelled = { t != token })
+                    Llm.completeQuick(prefs, target, SYSTEM, "Context: $context\nRime's first guess: $first\nPinyin: $input", cancelled = { t != token })
                 }
                 val e = res.exceptionOrNull()
                 if (e is Llm.HttpError && e.code == 429) com.kk.shurufa.online.AiBudget.limited() else if (res.isSuccess) com.kk.shurufa.online.AiBudget.ok()

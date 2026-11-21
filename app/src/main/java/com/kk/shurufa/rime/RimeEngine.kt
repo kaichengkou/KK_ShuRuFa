@@ -41,6 +41,7 @@ object RimeEngine {
         val ctx = context.applicationContext
         emit(State.PREPARING)
         exec.execute {
+            redeployQueued = false
             try {
                 val shared = sharedDir(ctx)
                 val user = userDir(ctx).apply { mkdirs() }
@@ -82,10 +83,20 @@ object RimeEngine {
     }
 
     fun redeploy(context: Context) {
+        // one that is queued and not begun yet will read the newest settings anyway
+        if (redeployQueued) return
+        redeployQueued = true
         if (state == State.READY) exec.execute { runCatching { RimeBridge.shutdown() } }
         state = State.IDLE
         start(context, redeploy = true)
     }
+    @Volatile private var redeployQueued = false
+
+    /**
+     * Runs [job] on Rime's thread, after a start or deploy that is under way, and only when the
+     * engine is running then (never while it deploys).
+     */
+    fun whenReady(job: () -> Unit) = exec.execute { if (state == State.READY) runCatching(job) }
 
     /** User-side patch generated from the settings; it takes precedence over the bundled one. */
     private fun writeUserConfig(ctx: Context, shared: File, user: File) {

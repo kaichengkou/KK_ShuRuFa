@@ -74,6 +74,7 @@ int main(int argc, char** argv) {
     }
     if (strncmp(seq, "@learn=", 7) == 0) {  // @learn=shi:十 — teach a commit through a session of its own
       std::string arg(seq + 7); size_t c = arg.find(':');
+      auto lt0 = std::chrono::steady_clock::now();
       RimeSessionId t = api->create_session();
       api->set_option(t, "_kk_no_learning", False);
       api->set_input(t, arg.substr(0, c).c_str());
@@ -87,8 +88,27 @@ int main(int argc, char** argv) {
       if (pick >= 0) api->select_candidate(t, pick);
       RIME_STRUCT(RimeCommit, cm);
       bool ok = api->get_commit(t, &cm); if (ok) api->free_commit(&cm);
-      printf("  learn %s -> %d\n", arg.c_str(), ok);
       api->destroy_session(t);
+      printf("  learn %s -> %d (%lld us with its session)\n", arg.c_str(), ok,
+             (long long)std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - lt0).count());
+      continue;
+    }
+    if (strncmp(seq, "@many=", 6) == 0) {  // @many=300:zhongguorenmin — time typing it and listing that many candidates
+      std::string arg(seq + 6); size_t c = arg.find(':');
+      int n = atoi(arg.substr(0, c).c_str());
+      auto t0 = std::chrono::steady_clock::now();
+      for (const char* p = arg.c_str() + c + 1; *p; p++) api->process_key(s, *p, 0);
+      auto t1 = std::chrono::steady_clock::now();
+      int got = 0;
+      RimeCandidateListIterator it = {0};
+      if (api->candidate_list_begin(s, &it)) {
+        while (got < n && api->candidate_list_next(&it)) got++;
+        api->candidate_list_end(&it);
+      }
+      auto t2 = std::chrono::steady_clock::now();
+      auto us = [](auto a, auto b) { return (long long)std::chrono::duration_cast<std::chrono::microseconds>(b - a).count(); };
+      printf("  %s: typing %lld us, %d candidates %lld us\n", arg.c_str(), us(t0, t1), got, us(t1, t2));
+      api->clear_composition(s);
       continue;
     }
     if (strcmp(seq, "@sync") == 0) {  // Rime's sync: write snapshots, merge the others

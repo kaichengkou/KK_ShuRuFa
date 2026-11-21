@@ -59,7 +59,8 @@ class DeferredLearning(private val delayMs: Long = DELAY_MS) {
         if (items.isNotEmpty()) main.postDelayed(due, (delayMs - (now - items.first().at)).coerceAtLeast(500))
     }
 
-    private fun teach(list: List<Item>) = Background.run { for (i in list) runCatching { RimeBridge.learn(i.input, i.text) } }
+    /** On Rime's own thread, after any deploy in progress; nothing while the engine is not running. */
+    private fun teach(list: List<Item>) = com.kk.shurufa.rime.RimeEngine.whenReady { for (i in list) runCatching { RimeBridge.learn(i.input, i.text) } }
 
     val pending get() = items.size
 

@@ -16,6 +16,8 @@ import java.util.concurrent.TimeUnit
 object Background {
     private val main = Handler(Looper.getMainLooper())
     private val pool = serial("kk-bg")
+    /** Downloads, on a thread of their own: a slow network must not hold up the files above. */
+    private val net = serial("kk-net")
 
     /**
      * One job after another on a thread of its own, which ends after a few idle seconds. Work the
@@ -26,11 +28,18 @@ object Background {
             Thread({ Process.setThreadPriority(priority); r.run() }, name).apply { isDaemon = true }
         }
 
-    fun run(job: () -> Unit) = pool.execute { runCatching(job) }
+    fun run(job: () -> Unit) = pool.execute { runCatching(job).onFailure(::report) }
 
     /** Runs [job] in the background and hands its result to [done] on the main thread. */
-    fun <T> load(job: () -> T, done: (T) -> Unit) = pool.execute {
-        val r = runCatching(job)
-        r.onSuccess { v -> main.post { done(v) } }
+    fun <T> load(job: () -> T, done: (T) -> Unit) = pool.execute { deliver(job, done) }
+
+    /** [load] for work that goes over the network. */
+    fun <T> download(job: () -> T, done: (T) -> Unit) = net.execute { deliver(job, done) }
+
+    private fun <T> deliver(job: () -> T, done: (T) -> Unit) {
+        runCatching(job).onSuccess { v -> main.post { done(v) } }.onFailure(::report)
     }
+
+    /** A job that failed is logged (it does not take the keyboard down with it). */
+    private fun report(e: Throwable) { android.util.Log.w("KK", "background job failed", e) }
 }

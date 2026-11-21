@@ -61,7 +61,7 @@ class EmojiFeature(private val host: Host) {
         if (cm.activeNetwork == null || cm.isActiveNetworkMetered) return
         prefs.state.edit().putLong(Prefs.EMOJI_CHECKED, now).apply()
         val current = data.version
-        Background.load({ runCatching { EmojiData.update(ctx, current) }.getOrNull() }) { v -> if (v != null) load() }
+        Background.download({ runCatching { EmojiData.update(ctx, current) }.getOrNull() }) { v -> if (v != null) load() }
     }
 
     // ---- the panel ----

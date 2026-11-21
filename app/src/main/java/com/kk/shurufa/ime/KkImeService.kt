@@ -212,6 +212,9 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
             voice.trimMemory()
             if (sink != Sink.TRANSLATE) translateService.trimMemory()
+            // next come the word tables (the Russian ones are about 6 MB): those of languages not
+            // in use now are let go, what they learned saved; they load again on first use
+            wordPredictors.keys.filter { it != curLang }.forEach { l -> wordPredictors.remove(l)?.save() }
         }
     }
 
@@ -712,7 +715,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
                 zh.track(pre)
                 val (cands, comments) = zhCandidates(CANDIDATES_ON_BAR)
                 val input = RimeBridge.input()
-                aiCand.update(input, pre.split(' ', '\'').count { it.isNotBlank() }, cands.firstOrNull().orEmpty(), editor.textBefore(20),
+                aiCand.update(input, pre.split(' ', '\'').count { it.isNotBlank() }, cands.firstOrNull().orEmpty(), { editor.textBefore(20) },
                     allowed = learnHere && sink == null && toneFilter == 0)
                 val ai = aiCand.answerFor(input)
                 aiShown = ai != null
