@@ -195,7 +195,7 @@ class ClipboardFeature(private val host: Host) {
         host.finishComposing()
         pending = null
         val img = ClipImages.parse(text)
-        if (img == null) { host.editor.type(text, pairable = false); return }
+        if (img == null) { host.editor.type(text, pairable = false, source = TypingStats.Source.PASTE); return }
         val (file, mime) = img
         val uri = images.uri(file) ?: return host.notice("图片已经不在了")
         if (host.editor.commitImage(uri, mime)) return

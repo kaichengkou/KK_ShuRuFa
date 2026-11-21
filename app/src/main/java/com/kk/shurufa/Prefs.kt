@@ -87,6 +87,8 @@ class Prefs(context: Context) {
     /** 落点自适应: learn where taps land on each letter key. */
     val touchAdapt get() = b(TOUCH_ADAPT, true)
     val dictFeeds get() = s(DICT_FEEDS, "")
+    /** 打字数据: count what is written, on this phone only. */
+    val typingStats get() = b(TYPING_STATS, true)
 
     // Clipboard
     val clipKeep get() = i(CLIP_KEEP, 40)
@@ -238,6 +240,7 @@ class Prefs(context: Context) {
         const val TOUCH_ADAPT = "touch_adapt"
         /** 词库拓展包 catalogs subscribed to, one link a line. */
         const val DICT_FEEDS = "dict_feeds"
+        const val TYPING_STATS = "typing_stats"
         const val CLIP_KEEP = "clip_keep"
         const val CLIP_SUGGEST = "clip_suggest"
         const val CLIP_MAX_CHARS = "clip_max_chars"

@@ -71,6 +71,7 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.key
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -85,6 +86,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material.icons.outlined.Animation
 import androidx.compose.material.icons.outlined.Apps
 import androidx.compose.material.icons.outlined.Cloud
+import androidx.compose.material.icons.outlined.Insights
 import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.ContentPaste
 import androidx.compose.material.icons.outlined.Functions
@@ -106,6 +108,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.kk.shurufa.BuildConfig
+import com.kk.shurufa.R
 import com.kk.shurufa.Prefs
 import com.kk.shurufa.ime.HapticEvent
 import com.kk.shurufa.ime.Haptics
@@ -175,7 +178,7 @@ private data class PageInfo(val id: String, val title: String, val summary: Stri
 private val SECTIONS = listOf(
     "外观与手感" to listOf("look", "motion", "haptics", "gestures"),
     "输入" to listOf("languages", "chinese", "dict", "packs", "keys"),
-    "工具" to listOf("toolbar", "symbols", "clipboard", "voice", "online"),
+    "工具" to listOf("toolbar", "symbols", "clipboard", "voice", "online", "stats"),
     "高级" to listOf("files"),
 )
 
@@ -185,7 +188,7 @@ private val PAGE_ICONS: Map<String, ImageVector> = mapOf(
     "dict" to Icons.AutoMirrored.Outlined.MenuBook, "packs" to Icons.AutoMirrored.Outlined.LibraryBooks,
     "keys" to Icons.Outlined.Keyboard, "toolbar" to Icons.Outlined.Apps, "symbols" to Icons.Outlined.Functions,
     "clipboard" to Icons.Outlined.ContentPaste, "voice" to Icons.Outlined.Mic, "online" to Icons.Outlined.Cloud,
-    "files" to Icons.Outlined.Code,
+    "files" to Icons.Outlined.Code, "stats" to Icons.Outlined.Insights,
 )
 
 private val PAGES = listOf(
@@ -204,6 +207,7 @@ private val PAGES = listOf(
     PageInfo("voice", "语音输入", "本地识别模型、识别语言、系统识别"),
     PageInfo("online", "联网功能", "翻译、词库更新、AI 改写"),
     PageInfo("files", "布局文件", "导出和重新加载 YAML 布局"),
+    PageInfo("stats", "打字数据", "每天的字数、时段、常用词云"),
 )
 
 @Composable
@@ -237,6 +241,7 @@ private fun SettingsApp(prefs: Prefs, start: String) {
                     "toolbar" -> ToolbarPage(prefs)
                     "online" -> OnlinePage(prefs)
                     "files" -> FilesPage()
+                    "stats" -> StatsPage(prefs)
                 }
             }
         }
@@ -259,7 +264,7 @@ private fun SubPage(title: String, onBack: () -> Unit, content: @Composable () -
 }
 
 @Composable
-private fun Group(title: String? = null, content: @Composable () -> Unit) {
+internal fun Group(title: String? = null, content: @Composable () -> Unit) {
     Column(Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
         if (title != null) Text(title, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary,
             modifier = Modifier.padding(start = 4.dp, bottom = 8.dp))
@@ -271,10 +276,10 @@ private fun Group(title: String? = null, content: @Composable () -> Unit) {
 }
 
 @Composable
-private fun Note(text: String) = Text(text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(vertical = 4.dp))
+internal fun Note(text: String) = Text(text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(vertical = 4.dp))
 
 @Composable
-private fun Toggle(prefs: Prefs, key: String, title: String, sub: String?, def: Boolean) {
+internal fun Toggle(prefs: Prefs, key: String, title: String, sub: String?, def: Boolean) {
     var v by remember { mutableStateOf(prefs.sp.getBoolean(key, def)) }
     Row(Modifier.fillMaxWidth().clickable { v = !v; prefs.put(key, v) }.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
@@ -385,10 +390,21 @@ private fun Home(prefs: Prefs, open: (String) -> Unit) {
     }
     LazyColumn(Modifier.fillMaxSize().systemBarsPadding().imePadding(), contentPadding = PaddingValues(16.dp, 20.dp, 16.dp, 32.dp)) {
         item {
-            Text("KK输入法", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-            Text("版本 ${BuildConfig.VERSION_NAME}", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Spacer(Modifier.height(16.dp))
+            // the app's own key, as on the home screen, beside its name
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 18.dp)) {
+                Box(Modifier.size(56.dp).clip(RoundedCornerShape(17.dp))
+                    .background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(androidx.compose.ui.graphics.Color(0xFF14818B), androidx.compose.ui.graphics.Color(0xFF0B5A61)))),
+                    contentAlignment = Alignment.Center) {
+                    androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(R.drawable.ic_launcher_foreground), null, modifier = Modifier.size(84.dp))
+                }
+                Spacer(Modifier.width(16.dp))
+                Column {
+                    Text("KK输入法", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                    Text("版本 ${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
         }
+        item { key(tick) { StatsSummary { open("stats") } } }
         item { Setup(tick) }
         item { RimeStatus() }
         for ((title, ids) in SECTIONS) item {
@@ -449,9 +465,11 @@ private fun RimeStatus() {
         Text(when (state) {
             RimeEngine.State.DEPLOYING -> "正在部署词库（首次约需一分钟）…"
             RimeEngine.State.PREPARING -> "正在复制词库文件…"
-            RimeEngine.State.FAILED -> "启动失败：${RimeEngine.error ?: "未知错误"}"
+            RimeEngine.State.FAILED -> "中文引擎没有启动成功，点重试再部署一次；还不行的话，重启手机后再试"
             else -> "未启动"
         }, modifier = Modifier.padding(vertical = 6.dp))
+        // what went wrong, small, for a bug report
+        if (state == RimeEngine.State.FAILED) RimeEngine.error?.let { Note(it) }
         if (state == RimeEngine.State.FAILED) FilledTonalButton(onClick = { RimeEngine.redeploy(ctx) }) { Text("重试") }
     }
 }

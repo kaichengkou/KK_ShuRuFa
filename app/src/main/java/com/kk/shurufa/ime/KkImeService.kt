@@ -62,7 +62,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
 
     override val context: Context get() = this
     override val prefs by lazy { Prefs(this) }
-    override val editor by lazy { Editor(this, prefs) }
+    override val editor by lazy { Editor(this, prefs).also { it.stats = TypingStats.get(this) } }
     override lateinit var haptics: Haptics
         private set
     override lateinit var kbTheme: KbTheme
@@ -366,6 +366,9 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         val isPassword = cls == InputType.TYPE_CLASS_TEXT && variation in PASSWORDS
         val isAddress = cls == InputType.TYPE_CLASS_TEXT && variation in ADDRESSES
         if ((isPassword || isAddress) && isZh) tempLang = prefs.languages.firstOrNull { layout(it).engine != "rime" } ?: "en"
+        // 打字数据: never from passwords, addresses or fields that ask not to be learned from
+        editor.recording = prefs.typingStats && !isPassword && !isAddress &&
+            (info.imeOptions and EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING) == 0
         panel = when {
             cls == InputType.TYPE_CLASS_PHONE -> Panel.PHONE
             (cls == InputType.TYPE_CLASS_NUMBER || cls == InputType.TYPE_CLASS_DATETIME) && prefs.numberFieldMath -> { mathTab = "basic"; numPanel() }
@@ -391,6 +394,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     override fun onWindowHidden() {
         super.onWindowHidden()
         stopBackgroundWork()
+        Background.run { TypingStats.get(this).save() }
     }
 
     /** Nothing keeps working once the keyboard is out of sight: the microphone stops, a streaming answer is dropped. */

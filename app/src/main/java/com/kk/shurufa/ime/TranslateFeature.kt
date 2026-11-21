@@ -122,7 +122,7 @@ class TranslateFeature(private val host: Host, private val service: TranslateSer
         if (t.isEmpty() || resultFor != host.query.toString()) return
         host.closeSink()
         // a selection being translated is replaced: committing over it does that
-        host.editor.type(t, pairable = false)
+        host.editor.type(t, pairable = false, source = TypingStats.Source.AI)
     }
 }
 

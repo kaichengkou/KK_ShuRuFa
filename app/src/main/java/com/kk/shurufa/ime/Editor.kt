@@ -36,6 +36,12 @@ class Editor(private val ime: InputMethodService, private val prefs: Prefs) {
         return InputConnectionCompat.commitContent(ic, info, content, InputConnectionCompat.INPUT_CONTENT_GRANT_READ_URI_PERMISSION, null)
     }
 
+    /** 打字数据: where what is written is counted; off in fields that ask not to be learned from. */
+    var stats: TypingStats? = null
+    var recording = true
+
+    private fun record(text: String, source: TypingStats.Source) { if (recording) stats?.record(text, source) }
+
     /** Selection as last reported by the editor. */
     var selStart = 0
         private set
@@ -72,8 +78,8 @@ class Editor(private val ime: InputMethodService, private val prefs: Prefs) {
      * Types [text]: commits it (pairing brackets when [pairable]) and records it for undo.
      * [syllables] are the pinyin that produced its Chinese characters (for 删除后联想).
      */
-    fun type(text: String, pairable: Boolean = true, syllables: List<String>? = null) {
-        val tail = commit(text, pairable, syllables) ?: return
+    fun type(text: String, pairable: Boolean = true, syllables: List<String>? = null, source: TypingStats.Source = TypingStats.Source.TYPED) {
+        val tail = commit(text, pairable, syllables, source) ?: return
         history.push(EditHistory.Op.Insert(tail.first, tail.second))
     }
 
@@ -81,7 +87,7 @@ class Editor(private val ime: InputMethodService, private val prefs: Prefs) {
      * Commits [text] without recording it; `‸` marks where the caret should land. Returns what
      * went in before and after the caret, or null when nothing did.
      */
-    fun commit(text: String, pairable: Boolean = true, syllables: List<String>? = null): Pair<String, String>? {
+    fun commit(text: String, pairable: Boolean = true, syllables: List<String>? = null, source: TypingStats.Source = TypingStats.Source.TYPED): Pair<String, String>? {
         val ic = ic ?: return null
         logChars(text.replace("‸", ""), syllables)
         var t = text
@@ -100,6 +106,7 @@ class Editor(private val ime: InputMethodService, private val prefs: Prefs) {
         }
         val idx = t.indexOf('‸')
         val clean = t.replace("‸", "")
+        record(clean, source)
         if (idx < 0 || idx >= clean.length) { ic.commitText(clean, 1); return clean to "" }
         // read the position before the edit: inside a batch edit the editor may report stale values
         val start = selection()?.first
@@ -123,6 +130,7 @@ class Editor(private val ime: InputMethodService, private val prefs: Prefs) {
         }
         ic.commitText(text, 1)
         ic.endBatchEdit()
+        record(text, TypingStats.Source.AI)
     }
 
     /** Puts [text] after the selection (or at the caret), leaving the selection's text alone. */
@@ -133,6 +141,7 @@ class Editor(private val ime: InputMethodService, private val prefs: Prefs) {
         ic.commitText(text, 1)
         ic.endBatchEdit()
         history.push(EditHistory.Op.Insert(text))
+        record(text, TypingStats.Source.AI)
     }
 
     /** Shows [text] as composing text (replaced by the next compose or commit). */
@@ -149,6 +158,7 @@ class Editor(private val ime: InputMethodService, private val prefs: Prefs) {
         ic.commitText(text, 1)
         ic.endBatchEdit()
         history.push(EditHistory.Op.Insert(text))
+        record(text, TypingStats.Source.VOICE)
     }
 
     /** Deletes [text] when it is right before the caret. */

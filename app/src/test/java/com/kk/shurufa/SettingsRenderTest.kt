@@ -70,6 +70,30 @@ class SettingsRenderTest {
         File("build/screens/icon.png").outputStream().use { out.compress(Bitmap.CompressFormat.PNG, 100, it) }
     }
 
+    /** 打字数据 with a month of typing, rendered as the page and as the home page's summary. */
+    @Config(qualifiers = "w400dp-h1900dp-xxhdpi")
+    @Test fun stats() {
+        val days = org.json.JSONObject()
+        val today = java.time.LocalDate.now()
+        for (i in 0 until 34) {
+            val n = (900 + 700 * kotlin.math.sin(i * 0.7) + (i * 137) % 500).toInt().coerceAtLeast(0)
+            if (i % 9 != 4) days.put(today.minusDays(i.toLong()).toString(), org.json.JSONArray(listOf(n, n / 6, n / 10, n / 20)))
+        }
+        val hours = org.json.JSONArray((0 until 24).map { h -> (if (h in 8..23) 300 + 900 * kotlin.math.exp(-((h - 21.0) * (h - 21.0)) / 8) + 400 * kotlin.math.exp(-((h - 10.0) * (h - 10.0)) / 4) else 20.0).toInt() })
+        val words = org.json.JSONObject()
+        listOf("项目" to 120, "今天" to 96, "明天" to 80, "会议" to 66, "方案" to 60, "设计" to 55, "输入法" to 52, "谢谢" to 48, "好的" to 47, "时间" to 40,
+            "问题" to 38, "下午" to 33, "客户" to 30, "数据" to 29, "测试" to 26, "周末" to 22, "晚饭" to 20, "电影" to 18, "键盘" to 17, "Kotlin" to 16,
+            "朋友" to 15, "周报" to 14, "发布" to 13, "咖啡" to 12, "地铁" to 11, "需求" to 10, "文档" to 10, "评审" to 9, "上线" to 8, "附件" to 8,
+            "照片" to 7, "生日" to 7, "快递" to 6, "跑步" to 6, "学习" to 5, "老师" to 5, "春天" to 4, "天气" to 4, "火锅" to 4, "旅行" to 3).forEach { (w, n) -> words.put(w, n) }
+        val emoji = org.json.JSONObject().put("😂", 40).put("👍", 31).put("🙏", 18).put("❤️", 12).put("🎉", 7).put("😅", 5)
+        File(ctx.filesDir, "typing_stats.json").writeText(org.json.JSONObject().put("since", today.minusDays(40).toString()).put("days", days)
+            .put("hours", hours).put("words", words).put("emoji", emoji).toString())
+        com.kk.shurufa.ime.TypingStats.reload()
+        for (theme in listOf("light", "dark")) { render("stats", theme); render("home", theme) }
+        File(ctx.filesDir, "typing_stats.json").delete()
+        com.kk.shurufa.ime.TypingStats.reload()
+    }
+
     @Test fun pages() {
         for (theme in listOf("light", "dark")) for (page in listOf("home", "look", "online", "packs")) render(page, theme)
     }

@@ -117,7 +117,7 @@ class AiFeature(private val host: Host) {
         run++
         when {
             replace && !fromSelection -> host.editor.replace(t, wholeField = true)
-            replace -> host.editor.type(t, pairable = false)
+            replace -> host.editor.type(t, pairable = false, source = TypingStats.Source.AI)
             else -> host.editor.insertAfterSelection(t)
         }
         host.show(Panel.LETTERS)

@@ -18,8 +18,8 @@ android {
         applicationId = "com.kk.shurufa"
         minSdk = 26
         targetSdk = 35
-        versionCode = 23
-        versionName = "0.9.10"
+        versionCode = 24
+        versionName = "0.9.11"
         ndk { abiFilters += abis }
         externalNativeBuild {
             cmake { arguments += listOf("-DANDROID_STL=c++_static", "-DCMAKE_BUILD_TYPE=Release") }
