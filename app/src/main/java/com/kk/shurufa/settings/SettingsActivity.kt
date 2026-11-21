@@ -693,9 +693,9 @@ private fun LanguagesPage(prefs: Prefs) {
         Toggle(prefs, Prefs.DOUBLE_SPACE, "双击空格输入句号", null, true)
         Toggle(prefs, Prefs.STRESS_MODE, "重音模式", "俄语元音上滑输入带重音的字母（а́ е́ и́ …）；不开时长按也有", false)
     }
-    Group("俄语联想") {
-        Toggle(prefs, Prefs.WORD_PREDICT, "补全和下一个词", "打字时补全正在打的词，打完一个词后推荐接下来常用的词（6.6 万词，按口语频率排序）", true)
-        Toggle(prefs, Prefs.WORD_LEARN, "从我打的字里学习", "记住你常用的词和搭配，排到前面。密码、地址和无痕输入框不学。只存在本机", true)
+    Group("俄语和英语联想") {
+        Toggle(prefs, Prefs.WORD_PREDICT, "补全和下一个词", "打字时补全正在打的词，打完一个词、空格后推荐接下来的词（俄语 6.7 万词、英语 5.4 万词，按口语频率排序）", true)
+        Toggle(prefs, Prefs.WORD_LEARN, "从我打的字里学习", "记住你常用的词、搭配和写法：名字、父称、缩写（Андрей Леонидович、физфак МГУ）打过一次，下次就会接着推荐，大小写照你写的。密码、地址和无痕输入框不学。只存在本机", true)
         val ctx = androidx.compose.ui.platform.LocalContext.current
         var cleared by remember { mutableStateOf(false) }
         TextButton(enabled = !cleared, onClick = { com.kk.shurufa.ime.WordPredictor.clearAll(ctx); cleared = true }) {

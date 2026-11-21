@@ -37,4 +37,13 @@ class VoiceTextTest {
         assertEquals("我用 iPhone 拍了 3 张照片", VoiceText.spaced("我用iPhone拍了3张照片"))
         assertEquals(0 to "我用 iPhone 拍的。", f("我用iPhone拍的。", "", false, pangu = true))
     }
+
+    /** Recognizers space Chinese apart (SenseVoice's ▁, AI services): taken out, Latin words keep theirs. */
+    @Test fun noSpacesInsideChinese() {
+        assertEquals(0 to "动效不显，单词之间隔着一个大空格。", f("动效 不显， 单词 之间 隔着 一个 大空格 。", "", false))
+        assertEquals(0 to "开放时间早上9点至下午5点。", f("开放时间早上 9 点至下午 5 点。", "", false))
+        assertEquals(0 to "我用iPhone拍的", f("我用 iPhone 拍的", "", false))
+        assertEquals(0 to "我用 iPhone 拍的", f("我用iPhone 拍的", "", false, pangu = true))
+        assertEquals(0 to "他说 good morning 就走了", f("他说 good morning 就走了", "", false, pangu = true))
+    }
 }

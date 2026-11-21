@@ -1413,9 +1413,8 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         val (typed, ctx) = WordPredictor.split(before)
         predictions = when {
             typed.isNotEmpty() -> p.complete(typed, ctx)
-            // after a word and a space, or once a sentence has ended
-            before.endsWith(" ") && (ctx.isNotEmpty() || (before.isNotBlank() && WordPredictor.sentenceStart(before))) ->
-                p.following(ctx, capital = WordPredictor.sentenceStart(before))
+            // after any space in text (a word, a comma, a sentence end, Chinese before it): what may come next
+            before.endsWith(" ") && before.isNotBlank() -> p.following(ctx, capital = WordPredictor.sentenceStart(before))
             else -> emptyList()
         }
         predictionLabel = ""
@@ -1425,18 +1424,20 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     private fun learnWordBefore() {
         if (!learnHere || !prefs.wordLearn) return
         val p = words() ?: return
-        val (typed, ctx) = WordPredictor.split(editor.textBefore(64))
-        if (typed.length >= 2) p.learn(ctx, typed)
+        val before = editor.textBefore(64)
+        val (typed, ctx) = WordPredictor.split(before)
+        if (typed.length >= 2) p.learn(ctx, typed, sentenceStart = WordPredictor.sentenceStart(before.dropLast(typed.length)))
     }
 
     /** A suggestion was tapped: it replaces the letters typed so far, followed by a space. */
     private fun pickWord(i: Int) {
         val word = predictions.getOrNull(i) ?: return
         val p = words()
-        val (typed, ctx) = WordPredictor.split(editor.textBefore(64))
+        val before = editor.textBefore(64)
+        val (typed, ctx) = WordPredictor.split(before)
         editor.replaceBefore(typed.length, "$word ")
         autoSpaced = true
-        if (learnHere && prefs.wordLearn) p?.learn(ctx, word)
+        if (learnHere && prefs.wordLearn) p?.learn(ctx, word, sentenceStart = WordPredictor.sentenceStart(before.dropLast(typed.length)))
         updateAutoCap()
         predictions = p?.following(ctx + word, capital = false).orEmpty()
         predictionLabel = ""

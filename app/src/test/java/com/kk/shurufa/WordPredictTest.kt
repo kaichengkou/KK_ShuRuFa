@@ -31,8 +31,8 @@ import java.time.Duration
 class WordPredictTest {
     private val ctx = ApplicationProvider.getApplicationContext<android.content.Context>()
 
-    private fun loaded(): WordPredictor {
-        val p = WordPredictor(ctx, "ru")
+    private fun loaded(lang: String = "ru"): WordPredictor {
+        val p = WordPredictor(ctx, lang)
         p.load()
         val until = System.currentTimeMillis() + 10_000
         while (!p.ready && System.currentTimeMillis() < until) Thread.sleep(20)
@@ -73,6 +73,43 @@ class WordPredictTest {
         assertEquals("кайфово", p.following(listOf("очень"), capital = false).first())
         p.clearLearned()
         assertTrue("кайфово" !in p.complete("кай", emptyList()))
+    }
+
+    /** Names, patronymics, abbreviations: remembered as written, offered after what came before. */
+    @Test fun remembersNamesAsWritten() {
+        val p = loaded(); p.clearLearned()
+        // "Андрей Леонидович", at the start of a message, and "физфак МГУ" inside one
+        p.learn(emptyList(), "Андрей", sentenceStart = true)
+        p.learn(listOf("Андрей"), "Леонидович")
+        p.learn(listOf("на"), "физфак")
+        p.learn(listOf("физфак"), "МГУ")
+        assertEquals("Леонидович", p.following(listOf("Андрей"), capital = false).first())
+        assertEquals("МГУ", p.following(listOf("на", "физфак"), capital = false).first())
+        assertEquals("Леонидович", p.complete("лео", listOf("Андрей")).first())
+        assertEquals("МГУ", p.complete("мг", listOf("физфак")).first())
+        // the table's own written forms (в Москве: the case after в, capitalized)
+        assertTrue(p.complete("моск", listOf("в")).take(3).all { it.startsWith("Моск") })
+        p.clearLearned()
+    }
+
+    /** After a word nobody knows (a name), something still comes: never an empty bar. */
+    @Test fun neverNothingAfterASpace() {
+        val p = loaded(); p.clearLearned()
+        assertTrue(p.following(listOf("Зюзя"), capital = false).size >= 5)
+    }
+
+    /** Chinese before a Russian word is not part of it. */
+    @Test fun chineseIsNotAWordLetter() {
+        assertEquals("Анд" to emptyList<String>(), WordPredictor.split("这是Анд"))
+        assertEquals("" to listOf("Андрей"), WordPredictor.split("我和Андрей "))
+    }
+
+    @Test fun english() {
+        val p = loaded("en"); p.clearLearned()
+        assertTrue(p.following(listOf("how", "are"), capital = false).first() == "you")
+        assertEquals("I", p.following(emptyList(), capital = true).let { l -> l.first { it.equals("i", true) } })
+        assertTrue(p.complete("tha", emptyList()).take(3).any { it == "thank" || it == "that" })
+        assertEquals("Tom", p.complete("to", listOf("with")).first { it.startsWith("To") })
     }
 
     /** A field: an editable text the service writes into through a real input connection. */

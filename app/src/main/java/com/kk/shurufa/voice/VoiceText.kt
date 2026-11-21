@@ -22,8 +22,33 @@ object VoiceText {
         return out.ifEmpty { t }
     }
 
+    private val fullPunct = "，。！？、；：…“”‘’（）《》"
+
+    /**
+     * Spaces the recognizers put inside Chinese (SenseVoice marks some word starts with ▁, the AI
+     * services space words and digits apart): none between two Chinese characters, none around
+     * Chinese punctuation; spaces between Latin or Cyrillic words stay. 盘古之白 comes after.
+     */
+    fun tidy(s: String): String {
+        val t = s.replace(Regex("[ \\t\\u00A0\\u3000]+"), " ")
+        val sb = StringBuilder()
+        for ((i, c) in t.withIndex()) {
+            if (c == ' ') {
+                val p = t.getOrNull(i - 1); val n = t.getOrNull(i + 1)
+                if (p == null || n == null) continue
+                val pz = isCjk(p) || p in fullPunct
+                val nz = isCjk(n) || n in fullPunct
+                // between Chinese, or Chinese and a digit or letter: no space (盘古之白 puts its own back)
+                if (pz || nz) continue
+            }
+            sb.append(c)
+        }
+        return sb.toString()
+    }
+
     fun format(raw: String, before: String, continuing: Boolean, style: String, pangu: Boolean, fillers: Boolean = true): Edit {
         var t = raw.trim()
+        if (t.any { isCjk(it) }) t = tidy(t)
         if (fillers) t = dropFillers(t)
         if (t.isEmpty()) return Edit(0, "")
         if (!t.any { isCjk(it) }) return latin(t, before)

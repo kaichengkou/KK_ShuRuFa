@@ -21,6 +21,10 @@ class WordPredictor(private val context: Context, val lang: String) {
     /** Learned: word → times used; "prev word" → (next word → times). */
     private val used = HashMap<String, Int>()
     private val after = HashMap<String, HashMap<String, Int>>()
+    /** How this person writes a word when it is not all lowercase: names (Андрей), abbreviations (МГУ). */
+    private val forms = HashMap<String, String>()
+    /** The most common words of the table, for when nothing else fits. */
+    @Volatile private var common: List<String> = emptyList()
     private val file get() = File(context.filesDir, "learned_$lang.tsv")
     private var dirty = false
 
@@ -34,7 +38,9 @@ class WordPredictor(private val context: Context, val lang: String) {
             if (words != null) return@run
             next = TsvIndex(context.assets.open("data/${lang}_next.txt").use { it.readBytes() })
             readLearned()
-            words = TsvIndex(context.assets.open("data/${lang}_words.txt").use { it.readBytes() })
+            val bytes = context.assets.open("data/${lang}_words.txt").use { it.readBytes() }
+            common = mostCommon(bytes, 10)
+            words = TsvIndex(bytes)
         }
     }
 
@@ -52,7 +58,7 @@ class WordPredictor(private val context: Context, val lang: String) {
         val follows = followers(context)
         val score = HashMap<String, Double>()
         w.prefix(low, 4000) { k, v ->
-            val base = v.toIntOrNull() ?: 1
+            val base = v.substringBefore('\t').toIntOrNull() ?: 1
             score[k] = base + bonus(k, follows)
         }
         // what this person writes, also words the table does not have: a word used a few times
@@ -64,7 +70,14 @@ class WordPredictor(private val context: Context, val lang: String) {
         val own = score[low]
         val first = own != null && own >= (ranked.firstOrNull()?.value ?: 0.0) - 12
         val list = (if (first) listOf(low) else emptyList()) + ranked.map { it.key } + (if (own != null && !first) listOf(low) else emptyList())
-        return list.take(max).map { matchCase(it, typed) }
+        return list.take(max).map { show(it, typed) }
+    }
+
+    /** A word as it is shown: in the form this person writes it (Андрей, МГУ), else in the case typed. */
+    private fun show(word: String, typed: String): String {
+        val f = forms[word] ?: tableForm(word)
+        val allCaps = typed.length >= 2 && typed.all { !it.isLetter() || it.isUpperCase() }
+        return if (f != null && !allCaps) f else matchCase(word, typed)
     }
 
     /** What may come after [context] (oldest first; empty or ending a sentence: a sentence start). */
@@ -73,8 +86,35 @@ class WordPredictor(private val context: Context, val lang: String) {
         val out = LinkedHashMap<String, Double>()
         val follows = followers(context)
         follows.forEachIndexed { i, (word, weight) -> out[word] = (out[word] ?: 0.0) + weight - i * 0.01 }
+        // never nothing: after a word the tables do not know (a name), the words this person uses
+        // most, then the most common ones
+        if (out.size < max) {
+            synchronized(this) { used.entries.sortedByDescending { it.value }.take(6).map { it.key } }
+                .forEachIndexed { i, w -> if (w !in out) out[w] = 40.0 - i }
+            common.forEachIndexed { i, w -> if (w !in out) out[w] = 20.0 - i }
+        }
         return out.entries.sortedByDescending { it.value }.map { it.key }.take(max)
-            .map { if (capital) it.replaceFirstChar { c -> c.uppercase() } else it }
+            .map { w -> forms[w] ?: tableForm(w) ?: if (capital) w.replaceFirstChar { c -> c.uppercase() } else w }
+    }
+
+    /** How the table says a word is written inside a sentence, when not in lowercase (Москва, I, Tom). */
+    private fun tableForm(word: String): String? = words?.get(word)?.substringAfter('\t', "")?.takeIf { it.isNotEmpty() }
+
+    /** The [n] best-scored words of a words table. */
+    private fun mostCommon(bytes: ByteArray, n: Int): List<String> {
+        val best = java.util.PriorityQueue<Pair<String, Int>>(compareBy { it.second })
+        var start = 0
+        for (i in bytes.indices) {
+            if (bytes[i] != '\n'.code.toByte()) continue
+            val line = String(bytes, start, i - start, Charsets.UTF_8)
+            start = i + 1
+            val tab = line.indexOf('\t')
+            if (tab <= 0) continue
+            val sc = line.substring(tab + 1).substringBefore('\t').toIntOrNull() ?: continue
+            best.add(line.substring(0, tab) to sc)
+            if (best.size > n) best.poll()
+        }
+        return best.sortedByDescending { it.second }.map { it.first }
     }
 
     /** Candidates for what follows [context], with weights: learned pairs first, then the tables. */
@@ -94,12 +134,23 @@ class WordPredictor(private val context: Context, val lang: String) {
 
     // ---- learning ----
 
-    /** [word] was written after [context] (oldest first). */
-    fun learn(context: List<String>, word: String) {
+    /**
+     * [word] was written after [context] (oldest first). [sentenceStart]: it opened a sentence, so a
+     * capital says nothing about the word itself.
+     */
+    fun learn(context: List<String>, word: String, sentenceStart: Boolean = false) {
         val w = word.lowercase()
         if (w.length < 2 || w.length > 30) return
         synchronized(this) {
             used[w] = (used[w] ?: 0) + 1
+            // the written form: a capital inside a sentence (Леонидович) or capitals throughout (МГУ)
+            // is how the word is written; a capital opening a sentence only for a word the table lacks
+            if (word != w) {
+                val caps = word.length >= 2 && word.all { !it.isLetter() || it.isUpperCase() }
+                if (!sentenceStart || caps || (words?.get(w) == null && forms[w] == null)) {
+                    if (word != tableForm(w)) forms[w] = word else forms.remove(w)
+                }
+            } else if (!sentenceStart) forms.remove(w)
             val prev = context.lastOrNull()?.lowercase() ?: "^"
             after.getOrPut(prev) { HashMap() }.let { it[w] = (it[w] ?: 0) + 1 }
             if (used.size > MAX_WORDS) trim()
@@ -109,7 +160,7 @@ class WordPredictor(private val context: Context, val lang: String) {
 
     /** Forgets everything learned. */
     fun clearLearned() {
-        synchronized(this) { used.clear(); after.clear(); dirty = false }
+        synchronized(this) { used.clear(); after.clear(); forms.clear(); dirty = false }
         Background.run { file.delete() }
     }
 
@@ -120,6 +171,7 @@ class WordPredictor(private val context: Context, val lang: String) {
             dirty = false
             buildString {
                 for ((w, n) in used) append("w\t").append(w).append('\t').append(n).append('\n')
+                for ((w, f) in forms) append("f\t").append(w).append('\t').append(f).append('\n')
                 for ((p, m) in after) for ((w, n) in m) append("b\t").append(p).append('\t').append(w).append('\t').append(n).append('\n')
             }
         }
@@ -137,6 +189,7 @@ class WordPredictor(private val context: Context, val lang: String) {
                 val p = line.split('\t')
                 when {
                     p.size == 3 && p[0] == "w" -> used[p[1]] = p[2].toIntOrNull() ?: 1
+                    p.size == 3 && p[0] == "f" -> forms[p[1]] = p[2]
                     p.size == 4 && p[0] == "b" -> after.getOrPut(p[1]) { HashMap() }[p[2]] = p[3].toIntOrNull() ?: 1
                 }
             }
@@ -147,6 +200,7 @@ class WordPredictor(private val context: Context, val lang: String) {
     private fun trim() {
         val keep = used.entries.sortedByDescending { it.value }.take(MAX_WORDS * 3 / 4).map { it.key }.toHashSet()
         used.keys.retainAll(keep)
+        forms.keys.retainAll(keep)
         after.keys.retainAll(keep + "^")
         for (m in after.values) m.keys.retainAll(keep)
     }
@@ -161,7 +215,7 @@ class WordPredictor(private val context: Context, val lang: String) {
             for (l in LANGS) File(context.filesDir, "learned_$l.tsv").delete()
         }
         /** Languages that have tables. */
-        val LANGS = setOf("ru")
+        val LANGS = setOf("ru", "en")
 
         /** The word's case follows what was typed: Привет for Пр…, ПРИВЕТ for ПР… */
         fun matchCase(word: String, typed: String): String = when {
@@ -170,8 +224,16 @@ class WordPredictor(private val context: Context, val lang: String) {
             else -> word
         }
 
-        /** A letter that can be part of a word (Cyrillic or Latin, and a hyphen inside one). */
-        fun isWordChar(c: Char) = c.isLetter() || c == '-'
+        /**
+         * A letter that can be part of a word: Latin, Cyrillic or Greek, and a hyphen or apostrophe
+         * inside one. Not Chinese, so 这是Андрей ends the context at А.
+         */
+        fun isWordChar(c: Char): Boolean {
+            if (c == '-' || c == '\'' || c == '’') return true
+            if (!c.isLetter()) return false
+            val s = Character.UnicodeScript.of(c.code)
+            return s == Character.UnicodeScript.LATIN || s == Character.UnicodeScript.CYRILLIC || s == Character.UnicodeScript.GREEK
+        }
 
         /**
          * Splits the text before the caret: the word being typed (letters right before the caret)
@@ -181,7 +243,7 @@ class WordPredictor(private val context: Context, val lang: String) {
         fun split(before: String): Pair<String, List<String>> {
             var i = before.length
             while (i > 0 && isWordChar(before[i - 1])) i--
-            val typed = before.substring(i).trimStart('-')
+            val typed = before.substring(i).trimStart('-', '\'', '’')
             val rest = before.substring(0, i)
             val ctx = ArrayList<String>()
             var j = rest.length
