@@ -10,6 +10,12 @@
 // exact spellings cannot: it has to end where no chain of real syllables, as typed, ends. So
 // correct input gets nothing extra ("nihao" is ni+hao, so 鸟 from "niao" is not offered), and
 // bare initials do not count as syllables here, or every typo would pass for an abbreviation.
+//
+// Abbreviations and names are left alone: a stretch of consonants with no vowel (zjl, wsm, kkd)
+// is an abbreviation, not a typo, so nothing in it is corrected (wsm stays 为什么, not 万 from
+// "wan"); and a doubled consonant inside the input (anna) is only taken for a stray tap where the
+// letters, as typed, do not already spell real syllables. A doubled vowel (zhengzaai) or a last
+// letter tapped twice (tamenn, beijingg) still is.
 
 #include <rime/dict/corrector.h>
 #include <rime/dict/prism.h>
@@ -33,6 +39,8 @@ class KkCorrector : public rime::Corrector {
  public:
   void ToleranceSearch(const Prism& prism, const std::string& key, Corrections* results, size_t tolerance) override {
     auto& p = const_cast<Prism&>(prism);
+    // an abbreviation: no vowel in the next letters, nothing to correct
+    if (!HasVowel(key, 0, std::min(key.size(), static_cast<size_t>(4)))) return;
     // where chains of real syllables, spelled as typed, can end
     const size_t n = std::min(key.size(), static_cast<size_t>(32));
     std::vector<bool> reach(n + 1, false);
@@ -75,7 +83,10 @@ class KkCorrector : public rime::Corrector {
       for (auto& m : matches) {
         if (m.length < i) continue;
         Correction c{1, static_cast<rime::SyllableId>(m.value), m.length + 1};
-        if (key[i] == key[i - 1]) doubled.Alter(m.value, c); else found.Alter(m.value, c);
+        // a vowel tapped twice anywhere, a consonant tapped twice at the end (tamenn, beijingg);
+        // a consonant doubled inside (anna) is taken as written
+        bool slip = key[i] == key[i - 1] && (IsVowel(key[i]) || i + 1 == key.size());
+        if (slip) doubled.Alter(m.value, c); else found.Alter(m.value, c);
       }
     }
     // a letter missing: put each letter back in turn; the match covers one typed letter less
@@ -119,6 +130,8 @@ class KkCorrector : public rime::Corrector {
     if (ra < 0 || rb < 0 || a == b) return false;
     return std::abs(ra - rb) <= 1 && std::fabs(xa - xb) <= 1.0f;
   }
+
+  static bool IsVowel(char c) { return c == 'a' || c == 'e' || c == 'i' || c == 'o' || c == 'u' || c == 'v'; }
 
   // a syllable rather than a bare initial (zh, h, j…), which only abbreviations are
   static bool HasVowel(const std::string& key, size_t pos, size_t len) {

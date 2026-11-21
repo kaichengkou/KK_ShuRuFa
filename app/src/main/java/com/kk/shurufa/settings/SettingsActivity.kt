@@ -711,7 +711,7 @@ private fun ChinesePage(prefs: Prefs, openDict: () -> Unit) {
         Toggle(prefs, Prefs.ZH_TRAD, "输出繁体", null, false)
         Toggle(prefs, Prefs.ZH_EMOJI, "候选里带 emoji", "黄脸表情排在原位，其他 emoji 排在前五个词之后", true)
         Toggle(prefs, Prefs.ZH_PREDICT, "联想", "上屏后在候选栏推荐常接的词", true)
-        Toggle(prefs, Prefs.ZH_CORRECTION, "按键纠错", "按错相邻键也能出正确的词；可能多出几个不相干的候选。切换后会重新部署", true)
+        Toggle(prefs, Prefs.ZH_CORRECTION, "按键纠错", "按错相邻键、字母打反、漏打或多按一下也能出正确的词。只打声母的缩写（zjl、wsm）和名字不纠。切换后会重新部署", true)
         Toggle(prefs, Prefs.PANGU, "中英文之间自动加空格", "盘古之白：汉字和英文字母、数字相邻时自动隔开，如「用 iPhone 拍了 3 张」", false)
         Toggle(prefs, Prefs.TONE_FILTER, "声调筛选", "打拼音时拼音行右侧显示 ā á ǎ à，点一个只留第一个字是这个声调的候选（按你打的拼音判断多音字），再点取消", true)
         Toggle(prefs, Prefs.TYPO_MARK, "纠错批注", "纠错得到的候选后面用小字标出改了哪里，比如 p→o、no⇄on", true)
