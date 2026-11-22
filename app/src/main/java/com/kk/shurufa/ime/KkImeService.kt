@@ -277,6 +277,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         val noLearning = (info.imeOptions and EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING) != 0 || prefs.incognito
         editor.recording = prefs.typingStats && !isPassword && !isAddress && !noLearning
         editor.secret = isPassword
+        editor.app = info.packageName.orEmpty()
         wordsHere = cls == InputType.TYPE_CLASS_TEXT && !isPassword && !isAddress &&
             (info.inputType and InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS) == 0
         learnHere = wordsHere && !noLearning
@@ -303,7 +304,6 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     // ---- the input view -----------------------------------------------------------------
 
     override fun onCreateInputView(): View {
-        editor.onStubborn = { notice("这个应用不接受普通删除，已改用「选中再删」的方式") }
         // a rebuilt view starts without a query: the strip it typed into is replaced
         if (sink != null) dropSink()
         ghost = null
@@ -348,9 +348,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         floats = com.kk.shurufa.keyboard.FloatPills(this, prefs).also {
             it.theme = kbTheme; it.visibility = View.GONE
             it.onFeedback = { haptics.play(HapticEvent.OPTION) }
-            // the pencil: edit the pinyin, the caret at its end
-            it.onLeft = { if (composing) onPreeditTap(RimeBridge.preedit().length) }
-            it.onRight = { i -> floatCand?.let { commitAiCandidate() } ?: floatCloud.getOrNull(i)?.let { p -> pickCloud(p) } }
+            it.onPick = { i -> floatCand?.let { commitAiCandidate() } ?: floatCloud.getOrNull(i)?.let { p -> pickCloud(p) } }
         }
         root.addView(floats, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM))
         // the tabs stand on the keyboard's top edge, whatever its height
@@ -733,18 +731,8 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     override fun syncBar() {
         if (!built) return
         floatCloud = emptyList(); floatCand = null
-        // the pinyin (or 按原拼音) in the 浮条, unless it is written into the field itself
-        val above = prefs.preeditPlace == "float" && !prefs.zhPreeditInline
-        bar.pinyinAbove = above
         syncBarOnly()
-        val letters = panel == Panel.LETTERS || panel == Panel.CANDIDATES
-        val left = when {
-            !above || !letters || sink != null -> ""
-            composing && !pinyinEdit -> RimeBridge.preedit()
-            !composing && predictions.isNotEmpty() -> predictionLabel
-            else -> ""
-        }
-        floats.show(left, editable = composing, right = floatCand?.let { listOf(it) } ?: floatCloud)
+        floats.show(floatCand?.let { listOf(it) } ?: floatCloud)
     }
 
     private fun syncBarOnly() {
@@ -1956,7 +1944,6 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         /** Two taps of the period within this make an ellipsis. */
         const val DOUBLE_PERIOD_MS = 400L
         /** 声调筛选 in the opened candidates. */
-        val TONE_TABS = listOf("0" to "全部", "1" to "ā 一声", "2" to "á 二声", "3" to "ǎ 三声", "4" to "à 四声")
         const val XK_BRACKETLEFT = 0x5b
         const val XK_BRACKETRIGHT = 0x5d
         /** Quick-panel tools that open 雾凇's own candidates: tile → what is typed for them. */

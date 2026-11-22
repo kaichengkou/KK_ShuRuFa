@@ -86,7 +86,7 @@ class WaitRenderTest {
             File("build/screens/$name.png").outputStream().use { out.compress(Bitmap.CompressFormat.PNG, 100, it) }
         }
         bar.showPredictions(listOf("吧", "了", "的"))
-        f.show("", false, listOf("周末一起去爬山吧", "顺便吃个饭", "你几点有空"))
+        f.show(listOf("周末一起去爬山吧", "顺便吃个饭", "你几点有空"))
         shot("float_cloud")
         org.junit.Assert.assertTrue(f.showing && f.tabRects.size == 3)
         ime.onDestroy()

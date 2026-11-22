@@ -164,7 +164,7 @@ class Editor(private val ime: InputMethodService, private val prefs: Prefs) {
     /** Deletes [text] when it is right before the caret. */
     fun deleteIfBefore(text: String) {
         val ic = ic ?: return
-        if (text.isNotEmpty() && textBefore(text.length) == text) { ic.beginBatchEdit(); ic.deleteSurroundingText(text.length, 0); ic.commitText("", 1); ic.endBatchEdit() }
+        if (text.isNotEmpty() && textBefore(text.length) == text) ic.deleteSurroundingText(text.length, 0)
     }
 
     /** Deletes [before] characters, then types [text]: one step for undo. */
@@ -182,64 +182,35 @@ class Editor(private val ime: InputMethodService, private val prefs: Prefs) {
      * Deletes what is before the caret (or the selection). Returns false when there was plainly
      * nothing left to delete, so a held backspace can stop buzzing.
      *
-     * Rich editors (Samsung Notes and other note apps) often do not say what is before the caret,
-     * or refuse to delete through the input connection: they get a real ⌫ key instead, which they
-     * always handle (and which also takes images, list marks and paragraph breaks).
+     * Editors that will not say what is before the caret, or refuse the delete, get a real ⌫ key,
+     * which every editor handles. A few apps take a delete into the text they show the keyboard
+     * but never onto the page ([stubborn]): there the character is selected and replaced instead.
      */
     fun deleteBackward(): Boolean {
         val ic = ic ?: return false
-        if (ime.currentInputEditorInfo?.inputType == InputType.TYPE_NULL) { ime.sendDownUpKeyEvents(KeyEvent.KEYCODE_DEL); return true }
-        val pkg = ime.currentInputEditorInfo?.packageName.orEmpty()
-        if (pkg in stubborn) return deleteBySelecting(ic)
-        // the field as it is, to see afterwards whether the delete really happened
-        val req = ExtractedTextRequest()
-        val was = ic.getExtractedText(req, 0)
-        val raw = ic.getTextBeforeCursor(64, 0)
-        if (raw == null && was == null) { ime.sendDownUpKeyEvents(KeyEvent.KEYCODE_DEL); return true }
-        val window = raw?.toString() ?: was?.let { it.text?.subSequence(0, it.selectionEnd.coerceIn(0, it.text?.length ?: 0))?.toString() }.orEmpty()
+        val info = ime.currentInputEditorInfo
+        if (info?.inputType == InputType.TYPE_NULL) { ime.sendDownUpKeyEvents(KeyEvent.KEYCODE_DEL); return true }
+        if (app in stubborn) return deleteBySelecting(ic)
+        val before = ic.getTextBeforeCursor(2, 0)?.toString()
+            ?: run { ime.sendDownUpKeyEvents(KeyEvent.KEYCODE_DEL); return true }
         // a selection only when the editor reported one: some answer getSelectedText with text
         // while nothing is selected
-        val sel = if (hasSelection) ic.getSelectedText(0) else null
-        val last: String
-        if (!sel.isNullOrEmpty()) {
-            history.push(EditHistory.Op.Delete(sel.toString()))
-            last = ""
-            ic.beginBatchEdit(); ic.commitText("", 1); ic.endBatchEdit()
-        } else {
-            // at the start, as far as the field says: the key still goes, for what it cannot show
-            if (window.isEmpty()) { ime.sendDownUpKeyEvents(KeyEvent.KEYCODE_DEL); return false }
-            val after = ic.getTextAfterCursor(1, 0)?.toString()
-            last = window.substring(window.offsetByCodePoints(window.length, -1))
-            history.push(EditHistory.Op.Delete(last))
-            // Inside a batch, closed by an empty commit: some editors (Samsung Notes) apply a delete
-            // to the text they show the keyboard but redraw the page only when an edit is closed
-            // that way, as 上滑清空 and typing do. For every other editor the commit does nothing.
-            ic.beginBatchEdit()
-            // an empty bracket pair goes together
-            if (prefs.autoPair && PAIRS[last] == after) ic.deleteSurroundingText(last.length, 1)
-            else if (!ic.deleteSurroundingTextInCodePoints(1, 0)) ic.deleteSurroundingText(last.length, 0)
-            ic.commitText("", 1)
-            ic.endBatchEdit()
+        if (hasSelection) {
+            val sel = ic.getSelectedText(0)
+            if (!sel.isNullOrEmpty()) { history.push(EditHistory.Op.Delete(sel.toString())); ic.commitText("", 1); return true }
         }
-        // Some editors (Samsung Notes) agree to a delete and do nothing; they do take a selection
-        // replaced by nothing, as 上滑清空 does. Found once, that way is used in that app from then on.
-        if (was != null) {
-            val now = ic.getExtractedText(req, 0)
-            if (now != null && now.text?.toString() == was.text?.toString() && now.selectionEnd == was.selectionEnd && now.startOffset == was.startOffset) {
-                stubborn += pkg
-                onStubborn?.invoke()
-                deleteBySelecting(ic, was)
-            }
-        } else if (raw != null && ic.getTextBeforeCursor(64, 0)?.toString() == window) {
-            // no full text to check against: the key, which every editor handles
-            ime.sendDownUpKeyEvents(KeyEvent.KEYCODE_DEL)
-        }
-        if (last.isNotEmpty()) onCharDeleted(last)
+        // at the start, as far as the field says: the key still goes, for what it cannot show
+        if (before.isEmpty()) { ime.sendDownUpKeyEvents(KeyEvent.KEYCODE_DEL); return false }
+        val last = before.substring(before.offsetByCodePoints(before.length, -1))
+        history.push(EditHistory.Op.Delete(last))
+        // an empty bracket pair goes together
+        val pair = prefs.autoPair && PAIRS.containsKey(last) && ic.getTextAfterCursor(1, 0)?.toString() == PAIRS[last]
+        val ok = if (pair) ic.deleteSurroundingText(last.length, 1)
+            else ic.deleteSurroundingTextInCodePoints(1, 0) || ic.deleteSurroundingText(last.length, 0)
+        if (!ok) ime.sendDownUpKeyEvents(KeyEvent.KEYCODE_DEL)
+        onCharDeleted(last)
         return true
     }
-
-    /** Told when an app turns out to need [deleteBySelecting]. */
-    var onStubborn: (() -> Unit)? = null
 
     /**
      * Apps whose editor deletes only by replacing a selection (see [deleteBackward]). Samsung Notes
@@ -249,8 +220,8 @@ class Editor(private val ime: InputMethodService, private val prefs: Prefs) {
     private val stubborn = hashSetOf("com.samsung.android.app.notes", "com.samsung.android.app.memo")
 
     /** Deletes the selection, or the character before the caret, by selecting it and putting nothing in its place. */
-    private fun deleteBySelecting(ic: InputConnection, known: android.view.inputmethod.ExtractedText? = null): Boolean {
-        val et = known ?: ic.getExtractedText(ExtractedTextRequest(), 0)
+    private fun deleteBySelecting(ic: InputConnection): Boolean {
+        val et = ic.getExtractedText(ExtractedTextRequest(), 0)
         val text = et?.text
         if (et == null || text == null) {
             // no full text: the caret as the editor last reported it, and the character before it
@@ -301,7 +272,7 @@ class Editor(private val ime: InputMethodService, private val prefs: Prefs) {
             is EditHistory.Op.Insert -> {
                 val ok = ic.getTextBeforeCursor(op.text.length, 0)?.toString() == op.text &&
                     (op.tail.isEmpty() || ic.getTextAfterCursor(op.tail.length, 0)?.toString() == op.tail)
-                if (ok) { ic.beginBatchEdit(); ic.deleteSurroundingText(op.text.length, op.tail.length); ic.commitText("", 1); ic.endBatchEdit() } else ctrlZ()
+                if (ok) ic.deleteSurroundingText(op.text.length, op.tail.length) else ctrlZ()
             }
             is EditHistory.Op.Delete -> ic.commitText(op.text, 1)
             is EditHistory.Op.Replace -> {
@@ -345,6 +316,8 @@ class Editor(private val ime: InputMethodService, private val prefs: Prefs) {
 
     /** The field is a password: nothing is copied out of it. */
     var secret = false
+    /** The app the field belongs to. */
+    var app = ""
 
     /** Reads where the selection is from the field itself (one that was there before the keyboard came). */
     fun refreshSelection() { selection()?.let { (s, e) -> onSelection(s, e) } }

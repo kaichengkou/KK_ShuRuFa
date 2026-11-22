@@ -68,8 +68,6 @@ class AiCandidate(private val prefs: Prefs, private val onReady: () -> Unit) {
     }
 
     companion object {
-        const val MIN_SYLLABLES = 3
-        const val PAUSE_MS = 450L
         private const val SYSTEM =
             "You turn pinyin typed on a phone keyboard into Chinese. The pinyin has no tones; syllables may be " +
                 "shortened to initials and may contain a small typo. Using the text already written before it as " +

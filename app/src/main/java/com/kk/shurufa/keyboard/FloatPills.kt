@@ -14,19 +14,15 @@ import kotlin.math.max
 import kotlin.math.min
 
 /**
- * 浮条: what sits on the keyboard's top edge, over the app, in quiet translucent tabs. On the left
- * the pinyin being typed (… ni'hao, with a pencil: a tap edits it), so the candidate row below is
- * all words; on the right what the AI offers (云联想's continuations, the AI 候选), one tab each,
- * stacked upward. Nothing here moves the candidates, and only the tabs take touches.
+ * AI 标签: what the AI offers (云联想's continuations, or the AI 候选) in quiet translucent tabs
+ * standing on the keyboard's top right edge, over the app, one per line, stacked upward. Nothing
+ * here moves the candidates, and only the tabs take touches.
  */
 @SuppressLint("ViewConstructor")
 class FloatPills(context: Context, prefs: Prefs) : KbView(context, prefs) {
-    var onLeft: (() -> Unit)? = null
-    var onRight: ((Int) -> Unit)? = null
+    var onPick: ((Int) -> Unit)? = null
     var onFeedback: (() -> Unit)? = null
 
-    private var left = ""
-    private var leftEditable = false
     private var right: List<String> = emptyList()
     private val appear = Tween(0f)
     private val bg = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -39,14 +35,14 @@ class FloatPills(context: Context, prefs: Prefs) : KbView(context, prefs) {
     /** Where the tabs are (in this view), for the window's touch region. */
     val tabRects = ArrayList<RectF>()
 
-    val showing get() = left.isNotEmpty() || right.isNotEmpty()
+    val showing get() = right.isNotEmpty()
 
-    /** [left]: the pinyin (or a label like 按原拼音), [editable] when a tap edits it; [right]: AI lines. */
-    fun show(left: String, editable: Boolean, right: List<String>) {
-        if (left == this.left && right == this.right && editable == leftEditable) return
-        val had = this.right.isNotEmpty()
-        val rows = max(1, right.size) != max(1, this.right.size)
-        this.left = left; leftEditable = editable; this.right = right
+    /** Shows the AI's [lines] (none: hidden). */
+    fun show(lines: List<String>) {
+        if (lines == right) return
+        val had = right.isNotEmpty()
+        val rows = max(1, lines.size) != max(1, right.size)
+        right = lines
         if (right.isNotEmpty() && !had) { appear.set(0f); appear.animateTo(1f, dur(Motion.POP_IN + 40), Motion.ENTER) }
         visibility = if (showing) VISIBLE else GONE
         if (rows) requestLayout()
@@ -81,24 +77,7 @@ class FloatPills(context: Context, prefs: Prefs) : KbView(context, prefs) {
         val maxW = width * 0.62f
         tp.typeface = Ui.regular; tp.textSize = textSize; tp.textAlign = Paint.Align.LEFT
         ellipsizer.set(tp)
-        // the AI's line keeps its room first; the pinyin takes what is left, cut at its start
         val iconW = dp(19f)
-        val firstW = right.firstOrNull()?.let { min(tp.measureText(it) + pad * 2 + iconW, maxW) } ?: 0f
-        if (left.isNotEmpty()) {
-            val pencil = if (leftEditable) dp(26f) else 0f
-            val avail = min(maxW, width - firstW - dp(10f)) - pad * 2 - pencil
-            // the end of the pinyin matters (where typing goes on): cut at the start
-            val shown = if (tp.measureText(left) <= avail) left else "…" + TextUtils.ellipsize(left.reversed(), ellipsizer, avail - tp.measureText("…"),
-                TextUtils.TruncateAt.END).toString().trimEnd('…').reversed()
-            val w = tp.measureText(shown) + pad * 2 + pencil
-            val r = RectF(0f, height - tabH, w, height.toFloat())
-            bg.color = if (pressed == "left") Colors.blend(fill, ink, 0.12f) else fill
-            tab(c, r, roundBottom = false)
-            tp.color = ink
-            drawText(c, shown, r.left + pad, r.centerY(), tp)
-            if (leftEditable) drawPencil(c, r.right - pad - dp(9f), r.centerY(), ink)
-            hits.add("left", r); tabRects += r
-        }
         val a = appear.value
         var y = height.toFloat()
         for ((i, line) in right.withIndex()) {
@@ -122,26 +101,11 @@ class FloatPills(context: Context, prefs: Prefs) : KbView(context, prefs) {
         if (appear.running) invalidate()
     }
 
-    private fun drawPencil(c: Canvas, cx: Float, cy: Float, color: Int) {
-        ip.color = color; ip.style = Paint.Style.STROKE; ip.strokeWidth = dp(1.8f); ip.strokeCap = Paint.Cap.ROUND; ip.strokeJoin = Paint.Join.ROUND
-        val s = dp(8f)
-        path.reset()
-        // a pencil leaning right: body, then the tip at the lower left
-        path.moveTo(cx - s * 0.55f, cy + s * 0.55f)
-        path.lineTo(cx + s * 0.55f, cy - s * 0.55f)
-        path.lineTo(cx + s * 0.85f, cy - s * 0.25f)
-        path.lineTo(cx - s * 0.25f, cy + s * 0.85f)
-        path.lineTo(cx - s * 0.8f, cy + s * 0.8f)
-        path.close()
-        c.drawPath(path, ip)
-        ip.style = Paint.Style.FILL
-    }
-
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(e: MotionEvent): Boolean {
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                pressed = hits.at(e.x, e.y)?.takeIf { it != "left" || leftEditable }
+                pressed = hits.at(e.x, e.y)
                 invalidate(); return pressed != null
             }
             MotionEvent.ACTION_MOVE -> if (pressed != null && hits.at(e.x, e.y) != pressed) { pressed = null; invalidate() }
@@ -149,7 +113,7 @@ class FloatPills(context: Context, prefs: Prefs) : KbView(context, prefs) {
                 val p = pressed; pressed = null; invalidate()
                 if (p != null && hits.at(e.x, e.y) == p) {
                     onFeedback?.invoke()
-                    if (p == "left") onLeft?.invoke() else p.removePrefix("r").toIntOrNull()?.let { onRight?.invoke(it) }
+                    p.removePrefix("r").toIntOrNull()?.let { onPick?.invoke(it) }
                 }
             }
             MotionEvent.ACTION_CANCEL -> { pressed = null; invalidate() }

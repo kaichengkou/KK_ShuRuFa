@@ -9,7 +9,7 @@ import com.kk.shurufa.online.Llm
  * 云联想 (off unless turned on): when typing pauses where suggestions show (after a Chinese word
  * is committed, after a space in Russian or English, after a suggestion is picked), the AI service
  * set for 改写 is asked how the text goes on, and up to three short continuations join the front
- * of the suggestions, marked 云. It sees the last [CONTEXT] characters before the caret and
+ * of the suggestions, marked 云. It sees the last few dozen characters (a setting) before the caret and
  * nothing else; it is never asked in passwords, addresses, fields that ask not to be learned
  * from, or in 临时模式.
  *
@@ -66,8 +66,6 @@ class CloudPredict(private val prefs: Prefs, private val onReady: () -> Unit) {
     }
 
     companion object {
-        /** The most context any setting sends. */
-        const val CONTEXT = 200
         private fun system(n: Int) =
             "You are the next-phrase suggester of a phone keyboard. Given the text the user has typed so far " +
                 "(it may end mid-sentence), suggest $n different short continuations they are likely to type next: " +
