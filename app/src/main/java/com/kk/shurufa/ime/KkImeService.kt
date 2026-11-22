@@ -147,6 +147,10 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     /** 云联想, and the continuations at the front of the suggestions now. */
     private val cloud by lazy { CloudPredict(prefs) { syncBar() } }
     private var cloudShown: List<String> = emptyList()
+    /** AI 浮窗, and what it shows now: 云联想's lines or the AI 候选. */
+    private lateinit var aiFloat: com.kk.shurufa.keyboard.AiFloat
+    private var floatCloud: List<String> = emptyList()
+    private var floatCand: String? = null
 
     /** AI 候选, and whether the bar shows it first now. */
     private val aiCand by lazy { AiCandidate(prefs) { syncBar() } }
@@ -340,6 +344,18 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         column.addView(bar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         column.addView(content, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         root.addView(column, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM))
+        aiFloat = com.kk.shurufa.keyboard.AiFloat(this, prefs).also {
+            it.theme = kbTheme; it.visibility = View.GONE
+            it.onFeedback = { haptics.play(HapticEvent.OPTION) }
+            it.onPick = { i -> floatCand?.let { commitAiCandidate() } ?: floatCloud.getOrNull(i)?.let { p -> pickCloud(p) } }
+        }
+        root.addView(aiFloat, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.END))
+        // it sits just above the keyboard, whatever its height
+        column.addOnLayoutChangeListener { _, _, top, _, bottom, _, _, _, _ ->
+            val lp = aiFloat.layoutParams as FrameLayout.LayoutParams
+            val m = bottom - top - dp(6f).toInt()
+            if (lp.bottomMargin != m) { lp.bottomMargin = m; lp.marginEnd = dp(4f).toInt(); aiFloat.layoutParams = lp }
+        }
         root.addView(overlay, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         root.setOnApplyWindowInsetsListener { _, ins ->
             val bottom = if (Build.VERSION.SDK_INT >= 30) ins.getInsets(WindowInsets.Type.navigationBars()).bottom
@@ -381,6 +397,9 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         // an open menu takes taps anywhere (a tap outside it closes it)
         if (overlay.sticky) outInsets.touchableRegion.set(0, insetLoc[1], root.width, bottom)
         else outInsets.touchableRegion.set(0, minOf(top, bottom - shown), root.width, bottom)
+        // the AI 浮窗 over the app takes its own taps
+        if (!overlay.sticky && aiFloat.visibility == View.VISIBLE && aiFloat.height > 0)
+            outInsets.touchableRegion.op(aiFloat.left, insetLoc[1] + aiFloat.top, aiFloat.right, insetLoc[1] + aiFloat.bottom, android.graphics.Region.Op.UNION)
     }
 
     /** The system draws its IME buttons below the keys; give that strip the keyboard's color. */
@@ -710,6 +729,12 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
 
     override fun syncBar() {
         if (!built) return
+        floatCloud = emptyList(); floatCand = null
+        syncBarOnly()
+        aiFloat.show(if (floatCand != null) "AI 候选" else "云联想", floatCand?.let { listOf(it) } ?: floatCloud)
+    }
+
+    private fun syncBarOnly() {
         val s = sink
         val letters = panel == Panel.LETTERS
         when {
@@ -740,7 +765,11 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
                 val input = RimeBridge.input()
                 aiCand.update(input, pre.split(' ', '\'').count { it.isNotBlank() }, cands.firstOrNull().orEmpty(), { editor.textBefore(20) },
                     allowed = learnHere && sink == null && !toneFiltering)
-                val ai = aiCand.answerFor(input)
+                val aiAnswer = aiCand.answerFor(input)
+                // in the 浮窗 it leaves the bar as Rime has it
+                val floating = prefs.aiPlace == "float"
+                if (floating) floatCand = aiAnswer
+                val ai = aiAnswer.takeIf { !floating }
                 aiShown = ai != null
                 val notes = zh.annotations(cands, comments)
                 // second, marked AI: the first stays Rime's, which is what space takes
@@ -751,7 +780,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
             }
             predictions.isNotEmpty() && letters -> {
                 // 云联想: the AI's continuations of this text, when they came, go first, marked 云
-                val before = editor.textBefore(CloudPredict.CONTEXT)
+                val before = editor.textBefore(prefs.cloudContext)
                 val revert = revertChip && corrected != null
                 if (predictionLabel.isEmpty() && !revert) cloud.update(before, allowed = learnHere && sink == null)
                 if (com.kk.shurufa.online.AiBudget.justPaused) {
@@ -759,6 +788,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
                     notice("AI 服务说请求太多（免费额度可能用完了），云联想先歇 30 分钟")
                 }
                 cloudShown = if (predictionLabel.isEmpty() && !revert) cloud.answerFor(before) else emptyList()
+                if (prefs.aiPlace == "float" && cloudShown.isNotEmpty()) { floatCloud = cloudShown; cloudShown = emptyList() }
                 if (revert) bar.showPredictions(predictions, predictionLabel, listOf("原"))
                 else if (cloudShown.isEmpty()) bar.showPredictions(predictions, predictionLabel)
                 else bar.showPredictions(cloudShown + predictions.filter { it !in cloudShown }, predictionLabel, cloudShown.map { "云" })

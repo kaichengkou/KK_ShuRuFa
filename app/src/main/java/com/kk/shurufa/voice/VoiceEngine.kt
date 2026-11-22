@@ -83,7 +83,12 @@ class VoiceEngine(private val context: Context, private val prefs: Prefs) {
 
     /** Stops listening; what was said so far is still recognized and delivered. */
     fun stop() {
-        if (prefs.voiceEngine == "system") system?.stopListening() else running = false
+        if (prefs.voiceEngine == "system") { system?.stopListening(); return }
+        if (!running) return
+        running = false
+        // the microphone closes within a chunk; what was said is recognized now, and the panel
+        // shows that at once instead of still looking like it listens
+        if (state == State.LISTENING) post(State.RECOGNIZING)
     }
 
     /** Stops without delivering anything more. */

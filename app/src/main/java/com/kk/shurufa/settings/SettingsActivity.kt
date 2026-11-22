@@ -1652,8 +1652,15 @@ private fun OnlinePage(prefs: Prefs, openServices: () -> Unit) {
         }
         Note("工具栏的 ✦：润色、纠错、正式、口语、精简、扩写，翻译成英文 / 俄语 / 中文，以及“输入指令”——直接用键盘打出想怎么改，回车执行。面板右上角可以临时换模型。")
     }
+    Group("显示在哪") {
+        Choice(prefs, Prefs.AI_PLACE, "AI 给的说法", listOf("float" to "右上角浮窗", "bar" to "候选栏里"), def = "float")
+        Note("浮窗在键盘右上角，不挤动候选栏，空格和第一个候选还在原来的位置；点 × 收起。")
+    }
     Group("云联想") {
-        Toggle(prefs, Prefs.CLOUD_PREDICT, "打字停顿时请 AI 续写", "打字停顿时，把光标前最多 80 个字发给 AI，它给的 3 种接法排在联想最前，标「云」。临时模式、密码和地址栏里不发", false)
+        Toggle(prefs, Prefs.CLOUD_PREDICT, "打字停顿时请 AI 续写", "打字停顿时，把光标前最多 80 个字发给 AI，它给的几种接法显示出来，标「云」。临时模式、密码和地址栏里不发", false)
+        IntSlider(prefs, Prefs.CLOUD_PAUSE, "停顿多久再问", 350, 200..1500, " 毫秒", "短一些来得快，长一些问得少、省额度")
+        IntSlider(prefs, Prefs.CLOUD_CONTEXT, "带上前文", 80, 20..200, " 字", "越多越懂上下文，也发出去越多")
+        IntSlider(prefs, Prefs.CLOUD_COUNT, "给几种接法", 3, 1..5, " 种")
         if (targets.isNotEmpty()) {
             var pickQuick by remember { mutableStateOf(false) }
             val q = prefs.quickTarget.takeIf { it.isNotEmpty() }?.let { com.kk.shurufa.online.Llm.resolve(prefs, it) }
@@ -1664,7 +1671,10 @@ private fun OnlinePage(prefs: Prefs, openServices: () -> Unit) {
         Note("今天已请求 ${com.kk.shurufa.online.AiBudget.today(prefs)} 次。每分钟最多 ${com.kk.shurufa.online.AiBudget.PER_MINUTE} 次，额度说明见「AI 服务」。")
     }
     Group("AI 候选") {
-        Toggle(prefs, Prefs.AI_CANDIDATE, "打长拼音时请 AI 给一个候选", "打三个音节以上停顿时，把拼音和前面 20 个字发给 AI，它给的整句排在第二个，标「AI」。密码和地址栏里不发", false)
+        Toggle(prefs, Prefs.AI_CANDIDATE, "打长拼音时请 AI 给一个候选", "打三个音节以上停顿时，把拼音和前面 20 个字发给 AI，它给的整句显示出来，标「AI」。密码和地址栏里不发", false)
+        IntSlider(prefs, Prefs.AI_CAND_SYLLABLES, "几个音节起问", 3, 2..8, " 个")
+        IntSlider(prefs, Prefs.AI_CAND_PAUSE, "停顿多久再问", 450, 200..1500, " 毫秒")
+        IntSlider(prefs, Prefs.AI_CAND_CONTEXT, "带上前文", 20, 0..80, " 字")
     }
     Group("翻译") {
         val engines = listOf("auto" to "自动（有 AI 用 AI，否则离线）", "mlkit" to "离线（ML Kit）") + targets

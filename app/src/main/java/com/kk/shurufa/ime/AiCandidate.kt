@@ -31,13 +31,13 @@ class AiCandidate(private val prefs: Prefs, private val onReady: () -> Unit) {
      */
     fun update(input: String, syllables: Int, first: String, before: () -> String, allowed: Boolean) {
         main.removeCallbacksAndMessages(null)
-        if (!prefs.aiCandidate || !allowed || syllables < MIN_SYLLABLES || input.length < 6) { token++; asking = ""; return }
+        if (!prefs.aiCandidate || !allowed || syllables < prefs.aiCandSyllables || input.length < 6) { token++; asking = ""; return }
         if (input == forInput || input == asking) return
         val target = Llm.resolve(prefs, prefs.quickTarget.ifEmpty { prefs.aiProvider }) ?: return
         // within the keyboard's own budget, and not while the service asked to wait
         if (!com.kk.shurufa.online.AiBudget.mayAsk()) return
         // read from the field only when it is going to be asked (each read is a call into the app)
-        val context = before().takeLast(20)
+        val context = before().takeLast(prefs.aiCandContext)
         val t = ++token
         // a moment's rest first: no request for every letter
         main.postDelayed({
@@ -56,7 +56,7 @@ class AiCandidate(private val prefs: Prefs, private val onReady: () -> Unit) {
                     if (looksRight(r, first)) { forInput = input; answer = r; onReady() }
                 }
             }.apply { isDaemon = true }.start()
-        }, PAUSE_MS)
+        }, prefs.aiCandPauseMs.toLong())
     }
 
     /** Chinese, not pinyin given back, and something Rime did not already put first. */

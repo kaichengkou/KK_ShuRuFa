@@ -111,6 +111,16 @@ class Prefs(context: Context) {
     val pangu get() = b(PANGU, false)
     /** AI 候选: the AI service's reading of longer pinyin as the first candidate (sends the pinyin). */
     val aiCandidate get() = b(AI_CANDIDATE, false)
+    /** Where AI suggestions show: float (a small card at the keyboard's top right) or bar (among the candidates). */
+    val aiPlace get() = s(AI_PLACE, "float")
+    /** 云联想: characters before the caret sent, the pause before asking (ms), how many continuations. */
+    val cloudContext get() = sp.getInt(CLOUD_CONTEXT, 80)
+    val cloudPauseMs get() = sp.getInt(CLOUD_PAUSE, 350)
+    val cloudCount get() = sp.getInt(CLOUD_COUNT, 3)
+    /** AI 候选: syllables before it asks, the pause (ms), characters of context sent. */
+    val aiCandSyllables get() = sp.getInt(AI_CAND_SYLLABLES, 3)
+    val aiCandPauseMs get() = sp.getInt(AI_CAND_PAUSE, 450)
+    val aiCandContext get() = sp.getInt(AI_CAND_CONTEXT, 20)
     /** 云联想: the AI service suggests how the text goes on (sends the last 80 characters). */
     val cloudPredict get() = b(CLOUD_PREDICT, false)
     /** The service and model for 云联想 and AI 候选 ("id|model"); empty: the one for 改写. */
@@ -289,6 +299,13 @@ class Prefs(context: Context) {
         const val TONE_FILTER = "tone_filter"
         const val PANGU = "pangu"
         const val AI_CANDIDATE = "ai_candidate"
+        const val AI_PLACE = "ai_place"
+        const val CLOUD_CONTEXT = "cloud_context"
+        const val CLOUD_PAUSE = "cloud_pause"
+        const val CLOUD_COUNT = "cloud_count"
+        const val AI_CAND_SYLLABLES = "ai_cand_syllables"
+        const val AI_CAND_PAUSE = "ai_cand_pause"
+        const val AI_CAND_CONTEXT = "ai_cand_context"
         const val CLOUD_PREDICT = "cloud_predict"
         const val QUICK_TARGET = "quick_target"
         const val PINYIN_MODE = "pinyin_mode"

@@ -31,14 +31,14 @@ class CloudPredict(private val prefs: Prefs, private val onReady: () -> Unit) {
     }
 
     /** The continuations for exactly [before] (the text before the caret), if they came. */
-    fun answerFor(before: String): List<String> = if (before.isNotEmpty() && before.takeLast(CONTEXT) == forText) answer else emptyList()
+    fun answerFor(before: String): List<String> = if (before.isNotEmpty() && before.takeLast(prefs.cloudContext) == forText) answer else emptyList()
 
     fun clear() { main.removeCallbacksAndMessages(null); token++; asking = "" }
 
     /** Called when suggestions show for [before]; asks after a short pause if this text is new. */
     fun update(before: String, allowed: Boolean) {
         main.removeCallbacksAndMessages(null)
-        val key = before.takeLast(CONTEXT)
+        val key = before.takeLast(prefs.cloudContext)
         if (!prefs.cloudPredict || !allowed || key.isBlank() || key.trim().length < 2) { token++; asking = ""; return }
         if (key == forText || key == asking) return
         cache[key]?.let { forText = key; answer = it; return }
@@ -50,11 +50,11 @@ class CloudPredict(private val prefs: Prefs, private val onReady: () -> Unit) {
             asking = key
             Thread {
                 com.kk.shurufa.online.AiBudget.asked(prefs)
-                val r = runCatching { Llm.completeQuick(prefs, target, SYSTEM, key, cancelled = { t != token }) }
+                val r = runCatching { Llm.completeQuick(prefs, target, system(prefs.cloudCount), key, cancelled = { t != token }) }
                 val e = r.exceptionOrNull()
                 if (e is Llm.HttpError && e.code == 429) com.kk.shurufa.online.AiBudget.limited() else if (r.isSuccess) com.kk.shurufa.online.AiBudget.ok()
                 val raw = r.getOrNull().orEmpty()
-                val list = parse(raw, key)
+                val list = parse(raw, key, prefs.cloudCount)
                 results.post {
                     if (t != token) return@post
                     asking = ""
@@ -62,28 +62,28 @@ class CloudPredict(private val prefs: Prefs, private val onReady: () -> Unit) {
                     if (list.isNotEmpty()) { forText = key; answer = list; onReady() }
                 }
             }.apply { isDaemon = true; name = "kk-cloud" }.start()
-        }, PAUSE_MS)
+        }, prefs.cloudPauseMs.toLong())
     }
 
     companion object {
-        const val CONTEXT = 80
-        const val PAUSE_MS = 350L
-        private const val SYSTEM =
+        /** The most context any setting sends. */
+        const val CONTEXT = 200
+        private fun system(n: Int) =
             "You are the next-phrase suggester of a phone keyboard. Given the text the user has typed so far " +
-                "(it may end mid-sentence), suggest 3 different short continuations they are likely to type next: " +
+                "(it may end mid-sentence), suggest $n different short continuations they are likely to type next: " +
                 "each 1 to 6 words (Chinese: 2 to 8 characters), natural for a chat message, in the same language " +
                 "as the end of the text, written as the user (first person; the user is a man). Do not repeat the " +
                 "text. One per line, nothing else."
 
         /** Up to three clean lines: no numbering, quotes or repeats of the text, of a sensible length. */
-        fun parse(raw: String, before: String): List<String> {
+        fun parse(raw: String, before: String, max: Int = 3): List<String> {
             val tail = before.trimEnd().takeLast(12)
             return raw.lines().map { l ->
                 l.trim().trimStart('-', '•', '*', ' ').replace(Regex("^\\d+[.、)]\\s*"), "")
                     .trim('"', '“', '”', '「', '」', '\'', ' ')
             }.filter { s ->
                 s.isNotEmpty() && s.length <= 40 && !tail.endsWith(s) && s != before.trim()
-            }.distinct().take(3)
+            }.distinct().take(max)
         }
     }
 }

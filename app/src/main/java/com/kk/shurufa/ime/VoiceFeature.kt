@@ -107,7 +107,7 @@ class VoiceFeature(private val host: Host, private val translate: TranslateServi
             else -> VoicePanel.Look.READY
         }
         view.status = when (state) {
-            VoiceEngine.State.LISTENING -> "正在听…停顿 ${prefs.voiceAutoStopSec} 秒自动结束"
+            VoiceEngine.State.LISTENING -> "正在听 · 说完点一下立即识别"
             VoiceEngine.State.LOADING -> "正在加载模型…"
             VoiceEngine.State.RECOGNIZING -> "识别中…"
             else -> detail.ifEmpty { if (spoke) "点按继续说" else "点按开始说话" }

@@ -63,6 +63,29 @@ class WaitRenderTest {
         save(ap, 230, "ai_waiting")
     }
 
+    @Test fun aiFloat() {
+        val prefs = Prefs(ctx).apply { put(Prefs.ANIMATIONS, false) }
+        val ime = Robolectric.buildService(KkImeService::class.java).create().get()
+        val view = ime.onCreateInputView()
+        ime.onStartInputView(EditorInfo().apply { inputType = InputType.TYPE_CLASS_TEXT; packageName = "test.app" }, false)
+        val f = KkImeService::class.java.getDeclaredField("aiFloat").apply { isAccessible = true }.get(ime) as com.kk.shurufa.keyboard.AiFloat
+        f.show("云联想", listOf("周末一起去爬山吧", "顺便吃个饭", "你几点有空"))
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(300))
+        val w = ctx.resources.displayMetrics.widthPixels
+        view.measure(View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(ctx.resources.displayMetrics.heightPixels, View.MeasureSpec.AT_MOST))
+        view.layout(0, 0, view.measuredWidth, view.measuredHeight)
+        view.measure(View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(ctx.resources.displayMetrics.heightPixels, View.MeasureSpec.AT_MOST))
+        view.layout(0, 0, view.measuredWidth, view.measuredHeight)
+        val col = (view as ViewGroup).getChildAt(0)
+        val top = (f.top - (8 * d).toInt()).coerceAtLeast(0)
+        val b = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
+        Canvas(b).apply { drawColor(android.graphics.Color.parseColor("#F4F4F4")); view.draw(this) }
+        val out = Bitmap.createBitmap(b, 0, top, b.width, (col.bottom - top).coerceAtLeast(1))
+        File("build/screens/ai_float.png").outputStream().use { out.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        org.junit.Assert.assertTrue(f.showing && f.height > 0 && f.bottom - (10 * d).toInt() <= col.top)
+        ime.onDestroy()
+    }
+
     @Test fun incognitoKeyboard() {
         val prefs = Prefs(ctx).apply { put(Prefs.ANIMATIONS, false) }
         prefs.state.edit().putBoolean(Prefs.INCOGNITO, true).commit()

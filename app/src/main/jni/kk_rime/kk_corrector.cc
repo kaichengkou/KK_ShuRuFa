@@ -14,8 +14,8 @@
 // Abbreviations and names are left alone: a stretch of consonants with no vowel (zjl, wsm, kkd)
 // is an abbreviation, not a typo, so nothing in it is corrected (wsm stays 为什么, not 万 from
 // "wan"); and a doubled consonant inside the input (anna) is only taken for a stray tap where the
-// letters, as typed, do not already spell real syllables. A doubled vowel (zhengzaai) or a last
-// letter tapped twice (tamenn, beijingg) still is.
+// letters, as typed, do not already spell real syllables. A doubled vowel (zhengzaai) still is;
+// a doubled last consonant is an abbreviation (yingg: 应该), not a slip.
 
 #include <rime/dict/corrector.h>
 #include <rime/dict/prism.h>
@@ -104,9 +104,10 @@ class KkCorrector : public rime::Corrector {
       for (auto& m : matches) {
         if (m.length < i) continue;
         Correction c{1, static_cast<rime::SyllableId>(m.value), m.length + 1};
-        // a vowel tapped twice anywhere, a consonant tapped twice at the end (tamenn, beijingg);
-        // a consonant doubled inside (anna) is taken as written
-        bool slip = key[i] == key[i - 1] && (IsVowel(key[i]) || i + 1 == key.size());
+        // a vowel tapped twice anywhere (zhengzaai). A consonant doubled is taken as written: at
+        // the end it is an initial standing for the next syllable (yingg is ying+g, 应该; tamenn
+        // is 他们呢), inside it starts one (anna)
+        bool slip = key[i] == key[i - 1] && IsVowel(key[i]);
         if (slip) doubled.Alter(m.value, c); else found.Alter(m.value, c);
       }
     }
