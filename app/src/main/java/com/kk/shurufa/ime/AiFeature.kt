@@ -38,7 +38,8 @@ class AiFeature(private val host: Host, private val kay: Kay) {
                 when (b) {
                     "setup" -> host.openSettings("ai")
                     "replace" -> apply(replace = true)
-                    "insert" -> if (panel.inChat) insertAnswer() else apply(replace = false)
+                    "insert" -> apply(replace = false)
+                    "clear" -> { run++; panel.running = null; pendingSaid = ""; pendingAnswer = ""; kay.forgetTalk(); panel.status = ""; syncChat() }
                     "reply" -> { chatting = true; host.openSink(Sink.AI) }
                     "retry" -> action?.let { start(it) }
                     "stop" -> stop()
@@ -161,13 +162,6 @@ class AiFeature(private val host: Host, private val kay: Kay) {
         }.apply { isDaemon = true; name = "kk-kay" }.start()
     }
 
-    /** 插入: 小K's last answer goes into the field. */
-    private fun insertAnswer() {
-        val last = kay.talk.lastOrNull { !it.mine }?.text ?: return
-        run++
-        host.editor.type(last, pairable = false, source = TypingStats.Source.AI)
-        host.show(Panel.LETTERS)
-    }
 
     /** 输入指令 or 回话 finished: back on the panel, the instruction runs or 小K hears it. */
     fun runInstruction(instruction: String) {

@@ -27,7 +27,7 @@ import kotlin.math.sin
 /**
  * 小K's panel. On top, a switch between 聊天 (talking with 小K) and the kinds of action it can do
  * with the text (改写 · 翻译), and the model they go to. 聊天 shows the conversation, the newest
- * at the bottom, with 回话 (type to it) and 插入 (its last answer into the field).
+ * at the bottom, with 回话 (type to it) and 清空 (start over).
  *
  * For the actions:
  * below, every action of the kind picked, wrapped onto as many lines as they need and ending with
@@ -404,11 +404,11 @@ class AiPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
             drawChip(c, r, "回话", ChipStyle.PRIMARY, pressed = pressed == "reply", textSp = Ui.SMALL + 1f)
             hits.add("reply", r, slop = dp(5f))
             bx = r.left - dp(6f)
-            if (chatHasAnswer) {
-                val iw = chipWidth("插入", textSp = Ui.SMALL + 1f)
+            if (chat.isNotEmpty()) {
+                val iw = chipWidth("清空", textSp = Ui.SMALL + 1f)
                 r.set(bx - iw, lineT, bx, lineT + lineH)
-                drawChip(c, r, "插入", ChipStyle.SOFT, pressed = pressed == "insert", textSp = Ui.SMALL + 1f)
-                hits.add("insert", r, slop = dp(5f))
+                drawChip(c, r, "清空", ChipStyle.SOFT, pressed = pressed == "clear", textSp = Ui.SMALL + 1f)
+                hits.add("clear", r, slop = dp(5f))
             }
         }
         resView.set(cardL + inner, lineT + lineH + dp(6f), cardR - inner, cardB - dp(10f))
@@ -556,6 +556,6 @@ class AiPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
     private companion object {
         /** Result buttons, drawn right to left. */
         val BUTTONS = listOf("replace" to "替换", "insert" to "插入", "copy" to "复制", "retry" to "重试")
-        val BUTTON_IDS = setOf("replace", "insert", "copy", "retry", "setup", "custom", "stop", "reply")
+        val BUTTON_IDS = setOf("replace", "insert", "copy", "retry", "setup", "custom", "stop", "reply", "clear")
     }
 }
