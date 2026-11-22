@@ -57,6 +57,7 @@ object Backup {
                 phrases = f.useLines { l -> l.count { it.isNotBlank() && !it.startsWith('#') } }
             }
             for (f in dicts) put("rime/${f.name}", f.readBytes())
+            com.kk.shurufa.ime.Muted.file(ctx).takeIf { it.isFile }?.let { put("rime/${com.kk.shurufa.ime.Muted.FILE}", it.readBytes()) }
             for (f in ctx.filesDir.listFiles().orEmpty()) if (f.name.startsWith("learned_") && f.name.endsWith(".tsv")) put("files/${f.name}", f.readBytes())
             File(ctx.filesDir, "typing_stats.json").takeIf { it.isFile }?.let { put("files/typing_stats.json", it.readBytes()) }
             // the clipboard's 收藏, not its history (codes and passwords pass through it)
@@ -106,6 +107,7 @@ object Backup {
                     File(user, name.substringAfter('/')).writeBytes(b); dicts++
                 }
                 name.startsWith("files/learned_") && name.endsWith(".tsv") -> File(ctx.filesDir, name.substringAfter('/')).writeBytes(b)
+                name == "rime/${com.kk.shurufa.ime.Muted.FILE}" -> com.kk.shurufa.ime.Muted.merge(ctx, String(b))
                 name == "files/typing_stats.json" -> File(ctx.filesDir, "typing_stats.json").writeBytes(b)
                 name == "files/clip_favorites.txt" -> mergeFavorites(File(ctx.filesDir, "clipboard.txt"), String(b))
             }

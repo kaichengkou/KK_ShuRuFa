@@ -96,6 +96,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     private lateinit var candGrid: GridPanel
     private lateinit var candHandle: SheetHandle
     private lateinit var toneTabs: com.kk.shurufa.keyboard.TabStrip
+    private lateinit var syllableTabs: com.kk.shurufa.keyboard.TabStrip
     private lateinit var symbolPanel: LinearLayout
     private lateinit var symRail: GridPanel
     private lateinit var symCells: GridPanel
@@ -160,7 +161,17 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     /** A suggestion was just picked and put a space after itself. */
     private var autoSpaced = false
     /** 自动纠错: the latest correction, which the next backspace (or the 原 chip) undoes. */
-    private class Correction(val word: String, val original: String, val sep: String)
+    /**
+     * An automatic change just made: [word] + [sep] is before the caret where [original] + [sep]
+     * was typed. [isWord]: a word corrected (自动纠错), the rest are 双击空格, 省略号, 半角标点 and
+     * 盘古之白. The next backspace puts back what was typed.
+     */
+    private class Correction(val word: String, val original: String, val sep: String, val isWord: Boolean = true)
+
+    /** Notes an automatic change (typed [original], [made] is in the field instead). */
+    private fun madeAuto(made: String, original: String) {
+        if (made != original) corrected = Correction(made, original, "", isWord = false)
+    }
     private var corrected: Correction? = null
     private var predictionLabel = ""
     private var searchResults: List<String> = emptyList()
@@ -229,6 +240,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
             if (built) setInputView(onCreateInputView())
             return
         }
+        if (key == Prefs.MUTED_STAMP) { if (RimeEngine.ready) restartRimeEngine(); return }
         when (key) {
             Prefs.ZH_EMOJI, Prefs.ZH_TRAD -> applyRimeOptions()
             Prefs.ZH_PREDICT -> if (prefs.zhPredict) predictor.load() else { predictions = emptyList(); syncBar() }
@@ -480,6 +492,15 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         syncBar()
     }
 
+    /** Rime's engine built again (its Lua filters read their lists afresh), the pinyin kept. */
+    private fun restartRimeEngine() {
+        val input = RimeBridge.input()
+        RimeBridge.selectSchema("rime_ice")
+        applyRimeOptions()
+        if (input.isNotEmpty()) RimeBridge.setInput(input)
+        flushRime()
+    }
+
     private fun applyRimeOptions() {
         if (!RimeEngine.ready) return
         RimeBridge.setOption("emoji", prefs.zhEmoji)
@@ -607,8 +628,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
             Panel.AI -> { content.addView(aiPanel, fixed); if (entering) ai.onOpened() }
             Panel.VOICE -> { content.addView(voicePanel, fixed); if (entering) voice.onOpened() }
             Panel.CANDIDATES -> {
-                toneTabs.visibility = if (prefs.toneFilter) View.VISIBLE else View.GONE
-                toneTabs.setTabs(TONE_TABS, toneFilter.toString())
+                syncToneTabs()
                 val (cands, comments) = zhCandidates(300)
                 candGrid.notes = zh.annotations(cands, comments)
                 candGrid.setItems(cands)
@@ -716,7 +736,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
                 val (cands, comments) = zhCandidates(CANDIDATES_ON_BAR)
                 val input = RimeBridge.input()
                 aiCand.update(input, pre.split(' ', '\'').count { it.isNotBlank() }, cands.firstOrNull().orEmpty(), { editor.textBefore(20) },
-                    allowed = learnHere && sink == null && toneFilter == 0)
+                    allowed = learnHere && sink == null && !toneFiltering)
                 val ai = aiCand.answerFor(input)
                 aiShown = ai != null
                 val notes = zh.annotations(cands, comments)
@@ -785,6 +805,14 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         }
         candPanel = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         candPanel.addView(candHandle, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        // with several syllables, a row above picks which one the tones are for
+        syllableTabs = com.kk.shurufa.keyboard.TabStrip(this, prefs).apply {
+            theme = kbTheme; compact = true
+            onFeedback = { haptics.play(HapticEvent.OPTION) }
+            onTab = { t -> toneSyllable = t.toInt(); syncToneTabs() }
+            onVerticalDrag = { phase, y, v -> when (phase) { 0 -> candHandle.begin(y); 1 -> candHandle.drag(y); else -> candHandle.end(v) } }
+        }
+        candPanel.addView(syllableTabs, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         candPanel.addView(toneTabs, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         candPanel.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
     }
@@ -1067,7 +1095,9 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
             zh.reset()
             // learned later if it stays (a slip deleted right away teaches nothing)
             if (learnHere && commit.any { isCjk(it) }) learning.committed(syl.joinToString(""), commit)
-            editor.type(pangu(out), pairable = false, syllables = if (out == commit) syl else null)
+            val spaced = pangu(out)
+            editor.type(spaced, pairable = false, syllables = if (out == commit) syl else null)
+            corrected = null; madeAuto(spaced, out)
             predictions = if (prefs.zhPredict && !prefs.pinyinMode && out.any { isCjk(it) })
                 predictor.suggest(editor.textBefore(20).ifEmpty { out }) else emptyList()
             predictionLabel = ""
@@ -1186,7 +1216,9 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
             }
             finishComposing()
             if (ellipsis(t)) { syncBar(); return }
-            editor.type(pangu(smartPunct(t)))
+            val made = pangu(smartPunct(t))
+            editor.type(made)
+            madeAuto(made, t)
             syncBar()
             return
         }
@@ -1198,7 +1230,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         if (autoSpaced && typed.length == 1 && typed[0] in ",.!?;:)…" && editor.textBefore(1) == " ") {
             // a picked word put a space after itself: punctuation goes before that space
             editor.replaceBefore(1, if (typed[0] == ')') typed else "$typed ")
-        } else editor.type(pangu(typed))
+        } else pangu(typed).let { made -> editor.type(made); madeAuto(made, typed) }
         if (fix != null) corrected = Correction(fix.first, fix.second, typed)
         autoSpaced = false
         if (isMain && key.isLetter && shift == 1) { shift = 0; autoShift = false; keyboard.invalidate() }
@@ -1230,7 +1262,9 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         if (!prefs.doublePeriodEllipsis || !quick || (t != "。" && t != ".")) return false
         if (editor.textBefore(1) != t) return false
         lastPeriodAt = 0L
-        editor.replaceBefore(1, if (t == "。") "……" else "…")
+        val made = if (t == "。") "……" else "…"
+        editor.replaceBefore(1, made)
+        corrected = Correction(made, t + t, "", isWord = false)
         return true
     }
     private var lastPeriodAt = 0L
@@ -1268,9 +1302,13 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
                 val before = editor.textBefore(2)
                 // 双击空格: a full stop after a word
                 if (prefs.doubleSpacePeriod && !isZh && panel == Panel.LETTERS && now - lastSpaceAt < 600 &&
-                    before.length == 2 && before[1] == ' ' && before[0].isLetterOrDigit()) editor.replaceBefore(1, ". ")
-                else editor.type(" ")
-                corrected = fix?.let { Correction(it.first, it.second, " ") }
+                    before.length == 2 && before[1] == ' ' && before[0].isLetterOrDigit()) {
+                    editor.replaceBefore(1, ". ")
+                    corrected = Correction(". ", "  ", "", isWord = false)
+                } else {
+                    editor.type(" ")
+                    corrected = fix?.let { Correction(it.first, it.second, " ") }
+                }
                 lastSpaceAt = now
                 updateAutoCap()
                 suggestWords()
@@ -1309,7 +1347,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
             "more_symbols" -> showPanel(Panel.SYMBOLS)
             "math" -> { finishComposing(); showPanel(Panel.MATH) }
             "abc" -> { editor.selectMode = false; showPanel(Panel.LETTERS) }
-            "collapse" -> { toneFilter = 0; showPanel(Panel.LETTERS) }
+            "collapse" -> { tones = IntArray(0); showPanel(Panel.LETTERS) }
             "reinput" -> { RimeBridge.clearComposition(); flushRime(); showPanel(Panel.LETTERS) }
             "undo" -> undo()
             "lock" -> {
@@ -1542,7 +1580,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         }
         predictionLabel = ""
         // right after a correction the word as it was typed comes first, marked 原: a tap puts it back
-        revertChip = corrected?.takeIf { before.endsWith(it.word + it.sep) }?.let { c ->
+        revertChip = corrected?.takeIf { it.isWord && before.endsWith(it.word + it.sep) }?.let { c ->
             predictions = listOf(c.original) + predictions.filter { it != c.original }
             true
         } ?: false
@@ -1571,7 +1609,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         val tail = c.word + c.sep
         if (editor.textBefore(tail.length) != tail) return false
         editor.replaceBefore(tail.length, c.original)
-        words()?.keep(c.original, learn = learnHere && prefs.wordLearn)
+        if (c.isWord) words()?.keep(c.original, learn = learnHere && prefs.wordLearn)
         updateAutoCap(); suggestWords(); syncBar()
         return true
     }
@@ -1612,36 +1650,74 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
 
     // ---- 声调筛选 ----------------------------------------------------------------------------
 
-    /** The tone kept (1–4), 0 for all; for the pinyin in [toneFor] only. */
-    private var toneFilter = 0
+    /**
+     * 声调筛选, syllable by syllable: [tones] holds the tone kept for each syllable typed (1–4, 0
+     * for any), for the pinyin in [toneFor] only. [toneSyllable] is the one the tone row is for.
+     */
+    private var tones = IntArray(0)
     private var toneFor = ""
+    private var toneSyllable = 0
+    private val toneFiltering get() = tones.any { it != 0 }
     /** While filtering: position on the bar or in the grid → Rime's own candidate index. */
     private var toneIdx: IntArray? = null
 
     private fun rimeIndex(i: Int) = toneIdx?.getOrNull(i) ?: i
 
+    /** The syllables still to be chosen for (what Rime shows after any part already picked). */
+    private fun toneSyllables(): List<String> =
+        RimeBridge.preedit().split(' ', '\'').filter { s -> s.isNotEmpty() && s.all { it in 'a'..'z' } }
+
     private fun onToneFilter(tone: Int) {
-        toneFilter = tone
-        toneFor = RimeBridge.input()
+        val syl = toneSyllables()
+        if (syl.isEmpty()) return
+        if (RimeBridge.input() != toneFor || tones.size != syl.size) { tones = IntArray(syl.size); toneFor = RimeBridge.input() }
+        val at = toneSyllable.coerceIn(0, syl.size - 1)
+        tones[at] = tone
+        // on to the next syllable that has no tone yet, so 你好 is two taps
+        if (tone != 0) (1 until syl.size).map { (at + it) % syl.size }.firstOrNull { tones[it] == 0 }?.let { toneSyllable = it }
         syncBar()
         if (panel == Panel.CANDIDATES) showPanel(Panel.CANDIDATES)
     }
 
     /**
-     * Up to [n] candidates with their comments. With a tone picked, only those whose first
-     * character has that tone for the first syllable typed (行 is xíng for "xing", háng for "hang").
+     * The tone rows of the opened candidates: the syllables (each with the tone picked for it,
+     * nǐ·hao), and the four tones of the chosen one written on it (nī ní nǐ nì), so it is plain
+     * which character is being narrowed.
+     */
+    private fun syncToneTabs() {
+        val syl = toneSyllables()
+        val on = prefs.toneFilter && syl.isNotEmpty()
+        if (RimeBridge.input() != toneFor || tones.size != syl.size) { tones = IntArray(syl.size); toneFor = RimeBridge.input(); toneSyllable = 0 }
+        toneSyllable = toneSyllable.coerceIn(0, (syl.size - 1).coerceAtLeast(0))
+        syllableTabs.visibility = if (on && syl.size > 1) View.VISIBLE else View.GONE
+        toneTabs.visibility = if (on) View.VISIBLE else View.GONE
+        if (!on) return
+        if (syl.size > 1) syllableTabs.setTabs(syl.mapIndexed { i, s -> i.toString() to PinyinTones.mark(s, tones[i]) }, toneSyllable.toString())
+        val s = syl[toneSyllable]
+        val vowel = s.any { it in "aeiouv" }
+        toneTabs.setTabs(listOf("0" to "全部") + (1..4).map { t -> t.toString() to (if (vowel) PinyinTones.mark(s, t) else "ˉˊˇˋ"[t - 1].toString()) },
+            tones[toneSyllable].toString())
+    }
+
+    /**
+     * Up to [n] candidates with their comments. With tones picked, only those whose characters
+     * have them, each for its own syllable (行 is xíng for "xing", háng for "hang"); a candidate
+     * shorter than the syllables is checked as far as it goes.
      */
     private fun zhCandidates(n: Int): Pair<List<String>, List<String>> {
-        if (toneFilter != 0 && RimeBridge.input() != toneFor) toneFilter = 0
-        if (toneFilter == 0) {
+        if (toneFiltering && RimeBridge.input() != toneFor) tones = IntArray(0)
+        if (!toneFiltering) {
             toneIdx = null
             val c = RimeBridge.candidates(n).toList()
             return c to RimeBridge.candidateComments(c.size).toList()
         }
         val all = RimeBridge.candidates(400).toList()
         val comments = RimeBridge.candidateComments(all.size).toList()
-        val syllable = RimeBridge.preedit().split(' ', '\'').firstOrNull { s -> s.isNotEmpty() && s.all { it in 'a'..'z' } }
-        val keep = all.indices.filter { i -> all[i].firstOrNull()?.let { toneFilter in zh.tones.tonesOf(it, syllable) } == true }
+        val syl = toneSyllables()
+        val keep = all.indices.filter { i ->
+            val c = all[i]
+            tones.indices.all { k -> tones[k] == 0 || (k >= c.length && k > 0) || c.getOrNull(k)?.let { ch -> tones[k] in zh.tones.tonesOf(ch, syl.getOrNull(k)) } == true }
+        }
         toneIdx = keep.toIntArray()
         val shown = keep.take(n)
         return shown.map { all[it] } to shown.map { comments.getOrElse(it) { "" } }
@@ -1699,7 +1775,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         val pick = if (word.codePointCount(0, word.length) >= 2 && chars.size >= 2) listOf(
             Output("取首字「${String(Character.toChars(chars.first()))}」", "§first"),
             Output("取末字「${String(Character.toChars(chars.last()))}」", "§last")) else emptyList()
-        return listOf(Output("取消", "§cancel")) + pick + Output("不再优先「$shown」", "§forget")
+        return listOf(Output("取消", "§cancel")) + pick + Output("不再优先「$shown」", "§forget") + Output("不再出现「$shown」", "§mute")
     }
 
     private fun zhOption(index: Int, option: Output) {
@@ -1709,6 +1785,13 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
             RimeBridge.highlightCandidate(rimeIndex(index))
             zh.track(RimeBridge.preedit())
             rimeKey(if (option.text == "§first") XK_BRACKETLEFT else XK_BRACKETRIGHT)
+            return
+        }
+        if (option.text == "§mute") {
+            val word = RimeBridge.candidates(rimeIndex(index) + 1).getOrNull(rimeIndex(index)) ?: return
+            Muted.add(this, word)
+            restartRimeEngine()
+            notice("「$word」不会再出现，可以在「自定义词库」里恢复")
             return
         }
         if (option.text != "§forget") return

@@ -49,10 +49,18 @@ data class KbTheme(
             "green" to ("竹青" to (0xFF3B6E52.toInt() to 0xFF8EC0A2.toInt())),
             "graphite" to ("墨" to (0xFF2F3237.toInt() to 0xFFD6D1C8.toInt())),
             "system" to ("系统取色" to (0 to 0)),
+            "custom" to ("自定义" to (0 to 0)),
         )
+
+        /** The 自定义 accent: [hue] at the lightness and strength of the presets, light and dark. */
+        fun customAccent(hue: Int, dark: Boolean): Int =
+            if (dark) hsl(hue.toFloat(), 0.42f, 0.64f) else hsl(hue.toFloat(), 0.62f, 0.32f)
+
+        private fun hsl(h: Float, s: Float, l: Float): Int = androidx.core.graphics.ColorUtils.HSLToColor(floatArrayOf(h, s, l))
 
         /** The accent shown for preset [id] (the settings swatches use it too). */
         fun accentFor(context: Context, id: String, dark: Boolean): Int {
+            if (id == "custom") return customAccent(com.kk.shurufa.Prefs(context).accentHue, dark)
             if (id == "system" && Build.VERSION.SDK_INT >= 31) {
                 return context.getColor(if (dark) android.R.color.system_accent1_200 else android.R.color.system_accent1_600)
             }
@@ -98,8 +106,13 @@ data class KbTheme(
             // 纸墨 starts in 朱砂, the color of a seal on paper, until another accent is picked
             val id = if (prefs.style == "paper" && !prefs.sp.contains(Prefs.ACCENT)) "cinnabar" else prefs.accent
             val accent = accentFor(context, id, night)
+            Ui.useFont(context, prefs.font)
             if (prefs.incognito) return incognito()
-            if (prefs.style == "paper") return paper(night, accent)
+            val base = if (prefs.style == "paper") paper(night, accent) else plain(night, accent)
+            return base.tuned(prefs.themeWarmth / 100f, prefs.themeShade / 100f)
+        }
+
+        private fun plain(night: Boolean, accent: Int): KbTheme {
             return if (night) {
                 val ink = Color.parseColor("#ECEEF1")
                 KbTheme(
@@ -189,6 +202,35 @@ private fun paper(night: Boolean, accent: Int): KbTheme = if (night) {
         popup = Color.parseColor("#FBF8F2"),
         shadow = Colors.alpha(Color.parseColor("#4A3A28"), 0x22),
         divider = Colors.alpha(ink, 0x14),
+    )
+}
+
+/**
+ * 主题微调: [warmth] (−0.5…0.5) moves the keyboard's own colors (not the accent) toward a neutral
+ * grey or a warmer tone of the same lightness, so 纸墨 can be made less yellow or 简约 a little
+ * warmer; [shade] (−0.5…0.5) makes the background lighter or deeper against the keys.
+ */
+internal fun KbTheme.tuned(warmth: Float, shade: Float): KbTheme {
+    if (warmth == 0f && shade == 0f) return this
+    fun w(c: Int): Int {
+        if (warmth == 0f) return c
+        val a = c ushr 24
+        val r = (c shr 16) and 0xFF; val g = (c shr 8) and 0xFF; val b = c and 0xFF
+        val y = 0.299f * r + 0.587f * g + 0.114f * b
+        // cooler: toward the grey of the same lightness; warmer: toward paper under lamplight
+        val target = if (warmth < 0) intArrayOf(y.toInt(), y.toInt(), y.toInt())
+            else intArrayOf((y * 1.07f).toInt(), (y * 1.0f).toInt(), (y * 0.84f).toInt())
+        val t = kotlin.math.abs(warmth) * 2f
+        fun ch(v: Int, to: Int) = (v + (to.coerceIn(0, 255) - v) * t).toInt().coerceIn(0, 255)
+        return (a shl 24) or (ch(r, target[0]) shl 16) or (ch(g, target[1]) shl 8) or ch(b, target[2])
+    }
+    val bg = w(background).let { c ->
+        if (shade == 0f) c else Colors.blend(c, if (shade > 0) android.graphics.Color.BLACK else android.graphics.Color.WHITE, kotlin.math.abs(shade) * (if (dark) 0.3f else 0.18f))
+    }
+    return copy(
+        background = bg, surface = w(surface), surfacePressed = w(surfacePressed),
+        soft = w(soft), softPressed = w(softPressed), ink = w(ink), inkSoft = w(inkSoft), hint = w(hint),
+        popup = w(popup), divider = w(divider),
     )
 }
 

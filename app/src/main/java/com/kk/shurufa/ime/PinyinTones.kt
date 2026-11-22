@@ -30,7 +30,30 @@ class PinyinTones(private val context: Context) {
     private fun plain(s: String): String = Normalizer.normalize(s, Normalizer.Form.NFD)
         .replace("u\u0308", "v").replace("U\u0308", "V").replace(MARKS, "").lowercase()
 
-    private companion object { val MARKS = Regex("[\\u0300-\\u036f]") }
+    companion object {
+        private val MARKS = Regex("[\\u0300-\\u036f]")
+        private val TONED = mapOf(
+            'a' to "āáǎà", 'e' to "ēéěè", 'i' to "īíǐì", 'o' to "ōóǒò", 'u' to "ūúǔù", 'v' to "ǖǘǚǜ",
+        )
+
+        /**
+         * A typed syllable with tone [tone] (1–4) marked where pinyin puts it: on a or e, on the o
+         * of ou, otherwise on the last vowel (nǐ, hǎo, guī, liù, nǚ). v is written ü. Without a
+         * vowel (an initial typed alone) the syllable stays as it is.
+         */
+        fun mark(syllable: String, tone: Int): String {
+            val s = syllable.lowercase()
+            val at = when {
+                'a' in s -> s.indexOf('a')
+                'e' in s -> s.indexOf('e')
+                "ou" in s -> s.indexOf("ou")
+                else -> s.indexOfLast { it in "iouv" }
+            }
+            val out = StringBuilder(s)
+            if (at >= 0 && tone in 1..4) out.setCharAt(at, TONED.getValue(s[at])[tone - 1])
+            return out.toString().replace('v', 'ü')
+        }
+    }
 
     /**
      * 声调筛选: the tones (1–4, 5 for the neutral tone) [ch] has when read as [syllable] (what was

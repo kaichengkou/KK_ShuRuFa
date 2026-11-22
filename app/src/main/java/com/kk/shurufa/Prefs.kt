@@ -37,7 +37,8 @@ class Prefs(context: Context) {
     /** 角标: all (every key's slide characters), digits (the top row's numbers only), none. */
     val hintMode get() = s(HINT_MODE, if (b(SHOW_HINTS, true)) "all" else "none")
     /** 候选字体: sans (黑体) or serif (宋体); the paper style defaults to 宋体. */
-    val candFont get() = s(CAND_FONT, if (style == "paper") "serif" else "sans")
+    /** 字体, for everything on the keyboard: sans 黑体, serif 宋体, custom a font file the user chose. */
+    val font get() = s(CAND_FONT, if (style == "paper") "serif" else "sans")
     /** 节气: the space key names the solar term on its day. */
     val solarTerms get() = b(SOLAR_TERMS, true)
     val showAllHints get() = b(SHOW_ALL_HINTS, false)
@@ -45,6 +46,12 @@ class Prefs(context: Context) {
     val numberRow get() = b(NUMBER_ROW, false)
     val candidateScale get() = f(CAND_SCALE, 1f)
     val bottomPaddingDp get() = i(BOTTOM_PADDING, 4)
+    /** 色温: −50 (cooler, toward neutral grey) … 0 … +50 (warmer), for the keyboard's own colors. */
+    val themeWarmth get() = sp.getInt(THEME_WARMTH, 0)
+    /** 底色深浅: −50 (lighter) … +50 (deeper), the keyboard's background against its keys. */
+    val themeShade get() = sp.getInt(THEME_SHADE, 0)
+    /** The hue (0–359) of the 自定义 accent. */
+    val accentHue get() = sp.getInt(ACCENT_HUE, 200)
     val accent get() = s(ACCENT, "teal")                  // teal | indigo | coral | green | violet | graphite | system
     val cursorLabels get() = s(CURSOR_LABELS, "icon")    // icon | both | text
 
@@ -207,7 +214,7 @@ class Prefs(context: Context) {
         fun rebuildsKeyboard(key: String) = key in LOOK || key.startsWith("key_ovr_")
 
         private val LOOK by lazy {
-            setOf(THEME, STYLE, ACCENT, KEY_HEIGHT, KEY_GAP, ROW_GAP, KEY_RADIUS, LABEL_SCALE, HINT_SCALE, SHOW_HINTS, SHOW_ALL_HINTS, HINT_MODE, CAND_FONT,
+            setOf(THEME, STYLE, ACCENT, THEME_WARMTH, THEME_SHADE, ACCENT_HUE, FONT_STAMP, KEY_HEIGHT, KEY_GAP, ROW_GAP, KEY_RADIUS, LABEL_SCALE, HINT_SCALE, SHOW_HINTS, SHOW_ALL_HINTS, HINT_MODE, CAND_FONT,
                 KEY_BORDERS, NUMBER_ROW, CAND_SCALE, BOTTOM_PADDING, CURSOR_LABELS, LANGUAGES, TOP_ROW_SCRIPTS, LAYOUT_RELOAD)
         }
 
@@ -235,6 +242,13 @@ class Prefs(context: Context) {
         const val CAND_SCALE = "cand_scale"
         const val BOTTOM_PADDING = "bottom_padding"
         const val ACCENT = "accent"
+        const val THEME_WARMTH = "theme_warmth"
+        const val THEME_SHADE = "theme_shade"
+        const val ACCENT_HUE = "accent_hue"
+        /** Changes when a new font file is chosen, so the keyboard is built again with it. */
+        const val FONT_STAMP = "font_stamp"
+        /** Changes when a word is taken off the 不再出现 list in the settings. */
+        const val MUTED_STAMP = "muted_stamp"
         const val CURSOR_LABELS = "cursor_labels"
         /** Written by 布局文件 → 重新加载: the layouts are read again. */
         const val LAYOUT_RELOAD = "layout_reload"

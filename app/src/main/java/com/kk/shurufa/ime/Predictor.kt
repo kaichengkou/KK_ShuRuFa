@@ -46,7 +46,7 @@ class Predictor(private val context: Context) {
             lookup(han.takeLast(len)).forEach { out += it }
             if (out.size >= 12) break
         }
-        return out.take(16)
+        return out.filter { !Muted.has(context, it) }.take(16)
     }
 }
 

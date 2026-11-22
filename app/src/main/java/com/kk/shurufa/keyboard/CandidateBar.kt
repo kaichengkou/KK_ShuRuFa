@@ -373,7 +373,7 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
         val size = sp(Ui.CANDIDATE * prefs.candidateScale)
         val noteSize = sp(Ui.CAPTION - 1f)
         val r = dp(prefs.keyRadiusDp)
-        val face = if (prefs.candFont == "serif") Ui.serif else Ui.regular
+        val face = Ui.regular
         for (i in candidates.indices) {
             val s = candidates[i]
             tp.textSize = size; tp.typeface = face

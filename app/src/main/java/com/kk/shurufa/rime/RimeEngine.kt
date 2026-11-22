@@ -131,6 +131,7 @@ object RimeEngine {
             |  engine/filters/@before 0: lua_filter@*kk_typo_mark
             |  engine/filters/+:
             |    - lua_filter@*kk_emoji_order
+            |    - lua_filter@*kk_muted
             |""".trimMargin() + extra + if (prefs.packPoetry) """
             |  # 扩展词库：古诗文
             |  schema/dependencies/+:

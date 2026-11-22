@@ -87,6 +87,10 @@ import androidx.compose.material.icons.outlined.Animation
 import androidx.compose.material.icons.outlined.Apps
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Key
+import androidx.compose.material.icons.outlined.Restore
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.material.icons.outlined.Insights
 import androidx.compose.material.icons.outlined.Backup
 import androidx.compose.material.icons.outlined.Code
@@ -338,7 +342,10 @@ internal fun Toggle(prefs: Prefs, key: String, title: String, sub: String?, def:
     var v by remember { mutableStateOf(prefs.sp.getBoolean(key, def)) }
     Row(Modifier.fillMaxWidth().clickable { v = !v; prefs.put(key, v) }.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
-            Text(title)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(title)
+                ResetMark(v != def) { v = def; prefs.sp.edit().remove(key).apply() }
+            }
             if (sub != null) Text(sub, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Switch(checked = v, onCheckedChange = { v = it; prefs.put(key, it) })
@@ -382,7 +389,9 @@ private fun IntSlider(prefs: Prefs, key: String, title: String, def: Int, range:
     val step = intStep(range.last - range.first)
     Column(Modifier.padding(vertical = 4.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(title, Modifier.weight(1f))
+            Text(title)
+            ResetMark(v != def) { v = def; prefs.sp.edit().remove(key).apply(); onDone?.invoke() }
+            Spacer(Modifier.weight(1f))
             ValueLabel("$v$unit", title, unit) { t ->
                 val n = t.toIntOrNull() ?: return@ValueLabel false
                 if (n !in range) return@ValueLabel false
@@ -391,9 +400,9 @@ private fun IntSlider(prefs: Prefs, key: String, title: String, def: Int, range:
         }
         if (sub != null) Text(sub, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         // the value snaps to tidy steps by itself; the track stays clean, without tick marks
-        Slider(value = v.toFloat(), onValueChange = { v = (range.first + ((it - range.first) / step).roundToInt() * step).coerceIn(range) },
+        ThumbSlider(value = v.toFloat(), onValueChange = { v = (range.first + ((it - range.first) / step).roundToInt() * step).coerceIn(range) },
             onValueChangeFinished = { prefs.put(key, v); onDone?.invoke() },
-            valueRange = range.first.toFloat()..range.last.toFloat(), colors = cleanSlider())
+            valueRange = range.first.toFloat()..range.last.toFloat())
     }
 }
 
@@ -404,7 +413,9 @@ private fun FloatSlider(prefs: Prefs, key: String, title: String, def: Float, ra
     val step = floatStep(range.endInclusive - range.start)
     Column(Modifier.padding(vertical = 4.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(title, Modifier.weight(1f))
+            Text(title)
+            ResetMark(v != def) { v = def; prefs.sp.edit().remove(key).apply() }
+            Spacer(Modifier.weight(1f))
             ValueLabel("${fmt(v)}$unit", title, unit) { t ->
                 val n = t.toFloatOrNull() ?: return@ValueLabel false
                 if (n < range.start || n > range.endInclusive) return@ValueLabel false
@@ -412,9 +423,57 @@ private fun FloatSlider(prefs: Prefs, key: String, title: String, def: Float, ra
             }
         }
         if (sub != null) Text(sub, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Slider(value = v, onValueChange = { v = (range.start + ((it - range.start) / step).roundToInt() * step).coerceIn(range.start, range.endInclusive) },
-            onValueChangeFinished = { prefs.put(key, v) }, valueRange = range, colors = cleanSlider())
+        ThumbSlider(value = v, onValueChange = { v = (range.start + ((it - range.start) / step).roundToInt() * step).coerceIn(range.start, range.endInclusive) },
+            onValueChangeFinished = { prefs.put(key, v) }, valueRange = range)
     }
+}
+
+/**
+ * A slider that moves only when its knob is dragged: a tap on the track, or a finger that lands on
+ * it while scrolling the page, changes nothing. The knob is easy to catch (a 48 dp wide grip).
+ */
+@Composable
+internal fun ThumbSlider(value: Float, onValueChange: (Float) -> Unit, valueRange: ClosedFloatingPointRange<Float>, onValueChangeFinished: (() -> Unit)? = null) {
+    val active = MaterialTheme.colorScheme.primary
+    val track = MaterialTheme.colorScheme.secondaryContainer
+    val cur by androidx.compose.runtime.rememberUpdatedState(value)
+    val change by androidx.compose.runtime.rememberUpdatedState(onValueChange)
+    val done by androidx.compose.runtime.rememberUpdatedState(onValueChangeFinished)
+    var held by remember { mutableStateOf(false) }
+    val span = (valueRange.endInclusive - valueRange.start).takeIf { it > 0f } ?: 1f
+    androidx.compose.foundation.Canvas(Modifier.fillMaxWidth().height(40.dp).pointerInput(valueRange) {
+        val pad = 12.dp.toPx()
+        val grip = 24.dp.toPx()
+        fun xOf(v: Float) = pad + ((v - valueRange.start) / span).coerceIn(0f, 1f) * (size.width - 2 * pad)
+        var grab = 0f
+        detectHorizontalDragGestures(
+            onDragStart = { o -> held = kotlin.math.abs(o.x - xOf(cur)) <= grip; grab = o.x - xOf(cur) },
+            onDragEnd = { if (held) { held = false; done?.invoke() } },
+            onDragCancel = { if (held) { held = false; done?.invoke() } },
+        ) { ch, _ ->
+            if (!held) return@detectHorizontalDragGestures
+            ch.consume()
+            val f = ((ch.position.x - grab - pad) / (size.width - 2 * pad)).coerceIn(0f, 1f)
+            change(valueRange.start + f * span)
+        }
+    }) {
+        val pad = 12.dp.toPx()
+        val y = size.height / 2
+        val x = pad + ((value - valueRange.start) / span).coerceIn(0f, 1f) * (size.width - 2 * pad)
+        val h = 4.dp.toPx()
+        drawLine(track, androidx.compose.ui.geometry.Offset(pad, y), androidx.compose.ui.geometry.Offset(size.width - pad, y), h, androidx.compose.ui.graphics.StrokeCap.Round)
+        drawLine(active, androidx.compose.ui.geometry.Offset(pad, y), androidx.compose.ui.geometry.Offset(x, y), h, androidx.compose.ui.graphics.StrokeCap.Round)
+        if (held) drawCircle(active.copy(alpha = 0.16f), 20.dp.toPx(), androidx.compose.ui.geometry.Offset(x, y))
+        drawCircle(active, (if (held) 11 else 9).dp.toPx(), androidx.compose.ui.geometry.Offset(x, y))
+    }
+}
+
+/** 复原, after a setting's name: shown only while it differs from where it started. */
+@Composable
+internal fun ResetMark(changed: Boolean, onReset: () -> Unit) {
+    if (!changed) return
+    Icon(Icons.Outlined.Restore, "恢复默认", tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(start = 4.dp).clip(CircleShape).clickable { onReset() }.padding(6.dp).size(16.dp))
 }
 
 @Composable
@@ -425,7 +484,10 @@ private fun Choice(prefs: Prefs, key: String, title: String, options: List<Pair<
     LocalPageKeys.current?.add(key)
     var v by remember { mutableStateOf(prefs.sp.getString(key, def) ?: def) }
     Column(Modifier.padding(vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(title)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(title)
+            ResetMark(v != def) { v = def; prefs.sp.edit().remove(key).apply() }
+        }
         SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
             options.forEachIndexed { i, (id, name) ->
                 SegmentedButton(selected = v == id, onClick = { v = id; prefs.put(key, id) },
@@ -539,11 +601,11 @@ private fun LookPage(prefs: Prefs) {
     val ctx = LocalContext.current
     Group("主题") {
         Choice(prefs, Prefs.STYLE, "风格", listOf("modern" to "简约", "paper" to "纸墨"), def = "modern")
-        Note(if (prefs.style == "paper") "纸墨：宣纸色的底、细微的纸纹，墨色的字，候选用宋体，默认朱砂色。" else "简约：冷灰的底、白色的键，候选用黑体。")
+        Note(if (prefs.style == "paper") "纸墨：宣纸色的底、细微的纸纹，墨色的字，默认宋体、朱砂色。" else "简约：冷灰的底、白色的键，默认黑体。")
         Choice(prefs, Prefs.THEME, "明暗", listOf("system" to "跟随系统", "light" to "浅色", "dark" to "深色"))
         var accent by remember { mutableStateOf(prefs.accent) }
         Text("主体色", modifier = Modifier.padding(top = 6.dp))
-        Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+        Row(Modifier.fillMaxWidth().horizontalScroll(androidx.compose.foundation.rememberScrollState()).padding(vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
             KbTheme.ACCENTS.forEach { (id, v) ->
                 val name = v.first
                 // the swatches show each color as the keyboard would, in the theme it is in now
@@ -559,6 +621,11 @@ private fun LookPage(prefs: Prefs) {
                 }
             }
         }
+        if (accent == "custom") IntSlider(prefs, Prefs.ACCENT_HUE, "色相", 200, 0..359, "°", "拖动挑一种颜色，深浅和其他主体色一致")
+    }
+    Group("微调") {
+        IntSlider(prefs, Prefs.THEME_WARMTH, "色温", 0, -50..50, "", "往左偏冷、往右偏暖，只改底色、按键和文字，不改主体色。纸墨嫌黄就往左拉")
+        IntSlider(prefs, Prefs.THEME_SHADE, "底色深浅", 0, -50..50, "", "往左底色变浅，往右变深，按键更分明")
     }
     Group("按键") {
         IntSlider(prefs, Prefs.KEY_HEIGHT, "按键高度", 48, 36..64, "dp")
@@ -578,8 +645,52 @@ private fun LookPage(prefs: Prefs) {
         FloatSlider(prefs, Prefs.CAND_SCALE, "候选字号", 1f, 0.8f..1.4f, "×")
         Choice(prefs, Prefs.HINT_MODE, "角标", listOf("all" to "全部", "digits" to "只有数字", "none" to "不显示"), def = "all")
         Toggle(prefs, Prefs.SHOW_ALL_HINTS, "显示四个方向的角标", "下滑、左滑、右滑的字符也画出来（角标选“全部”时）", false)
-        Choice(prefs, Prefs.CAND_FONT, "候选字体", listOf("sans" to "黑体", "serif" to "宋体"), def = if (prefs.style == "paper") "serif" else "sans")
+        FontChoice(prefs)
         Toggle(prefs, Prefs.SOLAR_TERMS, "节气", "二十四节气当天，空格键上写出节气的名字，比如“中文 · 小雪”", true)
+    }
+}
+
+/** 字体: one font for keys, candidates and panels; 自选 takes a .ttf or .otf from the phone. */
+@Composable
+private fun FontChoice(prefs: Prefs) {
+    val ctx = LocalContext.current
+    val def = if (prefs.style == "paper") "serif" else "sans"
+    LocalPageKeys.current?.add(Prefs.CAND_FONT)
+    var v by remember { mutableStateOf(prefs.font) }
+    var hasFile by remember { mutableStateOf(com.kk.shurufa.keyboard.Ui.fontFile(ctx).isFile) }
+    var error by remember { mutableStateOf<String?>(null) }
+    val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        val dest = com.kk.shurufa.keyboard.Ui.fontFile(ctx)
+        val tmp = java.io.File(dest.path + ".new")
+        val ok = runCatching {
+            ctx.contentResolver.openInputStream(uri)!!.use { i -> tmp.outputStream().use { i.copyTo(it) } }
+            android.graphics.Typeface.createFromFile(tmp)   // throws on a file that is not a font
+            tmp.renameTo(dest)
+        }.getOrDefault(false)
+        tmp.delete()
+        if (ok) { hasFile = true; error = null; v = "custom"; prefs.put(Prefs.CAND_FONT, "custom"); prefs.put(Prefs.FONT_STAMP, System.currentTimeMillis()) }
+        else error = "这个文件不是能用的字体（要 .ttf 或 .otf）"
+    }
+    Column(Modifier.padding(vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("字体")
+            ResetMark(v != def) { v = def; prefs.sp.edit().remove(Prefs.CAND_FONT).apply() }
+        }
+        val options = listOf("sans" to "黑体", "serif" to "宋体", "custom" to "自选")
+        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+            options.forEachIndexed { i, (id, name) ->
+                SegmentedButton(selected = v == id, shape = SegmentedButtonDefaults.itemShape(i, options.size), onClick = {
+                    if (id == "custom" && !hasFile) pick.launch(arrayOf("font/*", "application/x-font-ttf", "application/x-font-otf", "application/octet-stream"))
+                    else { v = id; prefs.put(Prefs.CAND_FONT, id) }
+                }) { Text(name, maxLines = 1) }
+            }
+        }
+        Text("按键、候选和各个面板用同一种字体。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (v == "custom" || hasFile) TextButton(onClick = { pick.launch(arrayOf("font/*", "application/x-font-ttf", "application/x-font-otf", "application/octet-stream")) }) {
+            Text(if (hasFile) "换一个字体文件" else "选择字体文件（.ttf / .otf）")
+        }
+        error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
     }
 }
 
@@ -620,13 +731,13 @@ private fun HapticsPage(prefs: Prefs) {
             }
             if (type == "prim_click" || type == "prim_tick") {
                 Row { Text("力度", Modifier.weight(1f)); Text("${amp * 100 / 255}%", color = MaterialTheme.colorScheme.primary) }
-                Slider(value = amp.toFloat(), onValueChange = { amp = it.roundToInt() }, onValueChangeFinished = { prefs.put("hap_${e.id}_amp", amp); haptics.invalidate(); haptics.play(e) }, valueRange = 13f..255f)
+                ThumbSlider(value = amp.toFloat(), onValueChange = { amp = it.roundToInt() }, onValueChangeFinished = { prefs.put("hap_${e.id}_amp", amp); haptics.invalidate(); haptics.play(e) }, valueRange = 13f..255f)
             }
             if (type == "custom") {
                 Row { Text("强度", Modifier.weight(1f)); Text("$amp", color = MaterialTheme.colorScheme.primary) }
-                Slider(value = amp.toFloat(), onValueChange = { amp = it.roundToInt() }, onValueChangeFinished = { prefs.put("hap_${e.id}_amp", amp); haptics.invalidate(); haptics.play(e) }, valueRange = 1f..255f)
+                ThumbSlider(value = amp.toFloat(), onValueChange = { amp = it.roundToInt() }, onValueChangeFinished = { prefs.put("hap_${e.id}_amp", amp); haptics.invalidate(); haptics.play(e) }, valueRange = 1f..255f)
                 Row { Text("时长", Modifier.weight(1f)); Text("${ms}ms", color = MaterialTheme.colorScheme.primary) }
-                Slider(value = ms.toFloat(), onValueChange = { ms = it.roundToInt() }, onValueChangeFinished = { prefs.put("hap_${e.id}_ms", ms); haptics.invalidate(); haptics.play(e) }, valueRange = 3f..60f)
+                ThumbSlider(value = ms.toFloat(), onValueChange = { ms = it.roundToInt() }, onValueChangeFinished = { prefs.put("hap_${e.id}_ms", ms); haptics.invalidate(); haptics.play(e) }, valueRange = 3f..60f)
             }
         }
     }
@@ -649,7 +760,7 @@ private fun GesturesPage(prefs: Prefs) {
         Toggle(prefs, Prefs.TOP_ROW_SCRIPTS, "第一排左右滑输入上下角标数字", "左滑 ¹²³，右滑 ₁₂₃", false)
     }
     Group("落点自适应") {
-        Toggle(prefs, Prefs.TOUCH_ADAPT, "按我的点按习惯判断按键", "记住每个字母键你实际点在哪里：点在两个键交界附近时，按你平时点这两个键的位置来判断。点错后马上删除的那一下不计入。只存在本机", true)
+        Toggle(prefs, Prefs.TOUCH_ADAPT, "按我的点按习惯判断按键", "点在两个键中间时，按你平时点这两个键的位置判断。只存在本机", true)
         var reset by remember { mutableStateOf(false) }
         TextButton(enabled = !reset, onClick = {
             prefs.state.edit().remove(com.kk.shurufa.keyboard.TouchModel.KEY).apply(); reset = true
@@ -662,7 +773,7 @@ private fun GesturesPage(prefs: Prefs) {
     }
     Group("删除键") {
         Toggle(prefs, Prefs.BACKSPACE_SWIPE, "上滑清空、下滑撤销", "正在打拼音时上滑只清掉拼音", true)
-        Toggle(prefs, Prefs.BACKSPACE_RESELECT, "删除后按原拼音推荐", "删掉刚上屏的字后，候选栏按当初打的拼音重新给出候选，不会把字母放回去；直接打字就忽略它。没有拼音记录时按前文联想", true)
+        Toggle(prefs, Prefs.BACKSPACE_RESELECT, "删除后按原拼音推荐", "删掉刚上屏的字后，按原来的拼音重新给出候选", true)
         IntSlider(prefs, Prefs.BACKSPACE_REPEAT, "长按连删的间隔", 55, 25..150, "ms", "匀速连删，数值越小越快")
     }
 }
@@ -697,11 +808,11 @@ private fun LanguagesPage(prefs: Prefs) {
         Toggle(prefs, Prefs.DOUBLE_SPACE, "双击空格输入句号", null, true)
         Toggle(prefs, Prefs.DOUBLE_PERIOD, "双击句号输入省略号", "中文「。」点两下变成「……」，俄语和英语「.」点两下变成「…」", true)
         Toggle(prefs, Prefs.STRESS_MODE, "重音模式", "俄语元音上滑输入带重音的字母（а́ е́ и́ …）；不开时长按也有", false)
-        Toggle(prefs, Prefs.WORD_AUTOCORRECT, "自动纠错", "打完一个词按空格或标点时，只改词库里没有、又明显是按错一个键的词（рпивет → привет、teh → the），以及英语的 i → I、dont → don't。词库里有的词再生僻也不动，你用过的词、句中大写的名字、缩写都不碰。改错了紧接着按删除键，或点候选栏第一个标「原」的词，就退回原样，以后不再改它", true)
+        Toggle(prefs, Prefs.WORD_AUTOCORRECT, "自动纠错", "按空格或标点时，改掉明显按错一个键的词（teh → the），以及 i → I、dont → don't。词库里的词、用过的词和名字不改；紧接着按删除键退回原样", true)
     }
     Group("俄语和英语联想") {
-        Toggle(prefs, Prefs.WORD_PREDICT, "补全和下一个词", "打字时补全正在打的词，打完一个词、空格后推荐接下来的词（俄语 6.7 万词、英语 5.4 万词，按口语频率排序）", true)
-        Toggle(prefs, Prefs.WORD_LEARN, "从我打的字里学习", "记住你常用的词、搭配和写法：名字、父称、缩写（Андрей Леонидович、физфак МГУ）打过一次，下次就会接着推荐，大小写照你写的。密码、地址和无痕输入框不学。只存在本机", true)
+        Toggle(prefs, Prefs.WORD_PREDICT, "补全和下一个词", "补全正在打的词，空格后推荐下一个词", true)
+        Toggle(prefs, Prefs.WORD_LEARN, "从我打的字里学习", "记住常用的词、搭配和写法（名字、缩写、大小写），每三个月减半，不常用的会慢慢淡忘。只存在本机", true)
         val ctx = androidx.compose.ui.platform.LocalContext.current
         var cleared by remember { mutableStateOf(false) }
         TextButton(enabled = !cleared, onClick = { com.kk.shurufa.ime.WordPredictor.clearAll(ctx); cleared = true }) {
@@ -717,9 +828,9 @@ private fun ChinesePage(prefs: Prefs, openDict: () -> Unit) {
         Toggle(prefs, Prefs.ZH_TRAD, "输出繁体", null, false)
         Toggle(prefs, Prefs.ZH_EMOJI, "候选里带 emoji", "黄脸表情排在原位，其他 emoji 排在前五个词之后", true)
         Toggle(prefs, Prefs.ZH_PREDICT, "联想", "上屏后在候选栏推荐常接的词", true)
-        Toggle(prefs, Prefs.ZH_CORRECTION, "按键纠错", "按错相邻键、字母打反、漏打或多按一下也能出正确的词。只打声母的缩写（zjl、wsm）和名字不纠。切换后会重新部署", true)
+        Toggle(prefs, Prefs.ZH_CORRECTION, "按键纠错", "按错相邻键、字母打反也能出正确的词；缩写和名字不纠。切换后重新部署", true)
         Toggle(prefs, Prefs.PANGU, "中英文之间自动加空格", "盘古之白：汉字和英文字母、数字相邻时自动隔开，如「用 iPhone 拍了 3 张」", false)
-        Toggle(prefs, Prefs.TONE_FILTER, "声调筛选", "展开候选（候选栏右边的 ⌄）后，上方一行 全部 · 一声 · 二声 · 三声 · 四声，点一个只留第一个字是这个声调的候选（多音字按你打的拼音判断）。收起或改拼音后恢复全部", true)
+        Toggle(prefs, Prefs.TONE_FILTER, "声调筛选", "展开候选后按声调筛选，多个字时可以逐字挑声调", true)
         Toggle(prefs, Prefs.TYPO_MARK, "纠错批注", "纠错得到的候选后面用小字标出改了哪里，比如 p→o、no⇄on", true)
         Toggle(prefs, Prefs.RARE_ANNOTATE, "生僻字注音", "常用 3500 字以外的字，在候选后面标出读音", true)
         Note("长按候选词可以删除它的学习记录，下次同样的拼音就不会再把它排到前面。点候选栏上方的拼音，可以把光标放到那里直接改。")
@@ -882,7 +993,7 @@ private fun PacksPage(prefs: Prefs) {
     ImportGroup()
     DictUpdateGroup()
     Group("古诗文") {
-        Toggle(prefs, Prefs.PACK_POETRY, "启用古诗文词库", "唐诗三百首、宋词三百首、千家诗、诗经、论语、楚辞、古文观止，约 3.8 万句。整句拼音或首字母都能打出（比如 brysj → 白日依山尽），上屏一句后联想栏接出下一句。切换后会重新部署", true)
+        Toggle(prefs, Prefs.PACK_POETRY, "启用古诗文词库", "唐诗宋词、诗经、论语、古文观止等约 3.8 万句，首字母也能打出整句（brysj → 白日依山尽）。切换后重新部署", true)
         Note("数据来自 chinese-poetry 项目（MIT 许可）。")
     }
 }
@@ -1192,6 +1303,26 @@ private fun writePhrases(ctx: Context, header: List<String>, list: List<Phrase>)
     f.writeText((if (header.isEmpty()) "# Rime table\n# coding: utf-8\n#@/db_name\tcustom_phrase.txt\n#@/db_type\ttabledb\n#\n" else header.joinToString("\n") + "\n") + body + "\n")
 }
 
+/** 不再出现: the words taken off the candidates from the long-press menu, each can come back. */
+@Composable
+private fun MutedGroup() {
+    val ctx = LocalContext.current
+    val prefs = remember { Prefs(ctx) }
+    var list by remember { mutableStateOf(com.kk.shurufa.ime.Muted.all(ctx).sorted()) }
+    Group("不再出现的词") {
+        if (list.isEmpty()) Note("长按候选词，选「不再出现」，它就不会再出现在候选和联想里。")
+        list.forEach { w ->
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(w, Modifier.weight(1f))
+                TextButton(onClick = {
+                    com.kk.shurufa.ime.Muted.remove(ctx, w); list = com.kk.shurufa.ime.Muted.all(ctx).sorted()
+                    prefs.put(Prefs.MUTED_STAMP, System.currentTimeMillis())
+                }) { Text("恢复") }
+            }
+        }
+    }
+}
+
 @Composable
 private fun DictPage() {
     val ctx = LocalContext.current
@@ -1250,6 +1381,7 @@ private fun DictPage() {
             },
         )
     }
+    MutedGroup()
 }
 
 // ---- voice ---------------------------------------------------------------------------------
@@ -1521,7 +1653,7 @@ private fun OnlinePage(prefs: Prefs, openServices: () -> Unit) {
         Note("工具栏的 ✦：润色、纠错、正式、口语、精简、扩写，翻译成英文 / 俄语 / 中文，以及“输入指令”——直接用键盘打出想怎么改，回车执行。面板右上角可以临时换模型。")
     }
     Group("云联想") {
-        Toggle(prefs, Prefs.CLOUD_PREDICT, "打字停顿时请 AI 续写", "上屏一个词、打完一个空格或选了联想后稍停，把光标前最多 80 个字发给下面选的服务，它给出的 3 个接下来的说法排在联想栏最前，标着「云」。中文、俄语、英语都行。会把你写的内容发出去；临时模式、密码、地址和无痕输入框里不发", false)
+        Toggle(prefs, Prefs.CLOUD_PREDICT, "打字停顿时请 AI 续写", "打字停顿时，把光标前最多 80 个字发给 AI，它给的 3 种接法排在联想最前，标「云」。临时模式、密码和地址栏里不发", false)
         if (targets.isNotEmpty()) {
             var pickQuick by remember { mutableStateOf(false) }
             val q = prefs.quickTarget.takeIf { it.isNotEmpty() }?.let { com.kk.shurufa.online.Llm.resolve(prefs, it) }
@@ -1532,7 +1664,7 @@ private fun OnlinePage(prefs: Prefs, openServices: () -> Unit) {
         Note("今天已请求 ${com.kk.shurufa.online.AiBudget.today(prefs)} 次。每分钟最多 ${com.kk.shurufa.online.AiBudget.PER_MINUTE} 次，额度说明见「AI 服务」。")
     }
     Group("AI 候选") {
-        Toggle(prefs, Prefs.AI_CANDIDATE, "打长拼音时请 AI 给一个候选", "打了三个音节以上、停顿一下时，把这段拼音和光标前最多 20 个字发给上面选的 AI 服务，它给出的整句排在候选栏第二个，标着 AI。会把你正在打的内容发出去；密码、地址和无痕输入框里不会发。建议用快的模型，比如 Gemini 3.5 Flash Lite（约半秒）", false)
+        Toggle(prefs, Prefs.AI_CANDIDATE, "打长拼音时请 AI 给一个候选", "打三个音节以上停顿时，把拼音和前面 20 个字发给 AI，它给的整句排在第二个，标「AI」。密码和地址栏里不发", false)
     }
     Group("翻译") {
         val engines = listOf("auto" to "自动（有 AI 用 AI，否则离线）", "mlkit" to "离线（ML Kit）") + targets

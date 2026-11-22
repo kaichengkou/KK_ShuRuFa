@@ -99,13 +99,16 @@ class MenuRenderTest {
         bar.showPredictions(listOf("找时间一起去吧", "看看天安门和故宫", "买张高铁票就出发", "玩", "旅游", "看看"), "", listOf("云", "云", "云")); f.invalidate(); save("bar_cloud", f)
         // 声调筛选, now a row in the opened candidates
         run {
-            val tabs = com.kk.shurufa.keyboard.TabStrip(ctx, prefs).apply { compact = true; setTabs(com.kk.shurufa.ime.KkImeService.TONE_TABS, "3") }
+            // 你好: 你 already set to the third tone, the tones of hao being picked
+            val mark = com.kk.shurufa.ime.PinyinTones.Companion::mark
+            val syl = com.kk.shurufa.keyboard.TabStrip(ctx, prefs).apply { compact = true; setTabs(listOf("0" to mark("ni", 3), "1" to mark("hao", 0)), "1") }
+            val tabs = com.kk.shurufa.keyboard.TabStrip(ctx, prefs).apply { compact = true; setTabs(listOf("0" to "全部") + (1..4).map { "$it" to mark("hao", it) }, "3") }
             val grid = com.kk.shurufa.keyboard.GridPanel(ctx, prefs).apply {
                 cellStyle = com.kk.shurufa.keyboard.GridPanel.CellStyle.FLAT; columns = 8; rowHeightDp = 50f; textSp = 19f; highlightFirst = true
             }
-            val tf = frame(170, CandidateBar(ctx, prefs).apply { showCandidates("ma", listOf("马", "码", "吗", "玛", "蚂", "犸", "马上"), emptyList(), -1) }, tabs,
+            val tf = frame(200, CandidateBar(ctx, prefs).apply { showCandidates("ni hao", listOf("你好", "拟好", "你", "拟", "尼", "泥"), emptyList(), -1) }, syl, tabs,
                 grid.also { it.layoutParams = LinearLayout.LayoutParams(-1, (100 * d).toInt()) })
-            grid.setItems(listOf("马", "码", "吗", "玛", "蚂", "犸", "马上", "马上就", "码头", "马路", "吗啡", "玛丽", "马克", "蚂蚁", "马马虎虎", "犸"))
+            grid.setItems(listOf("你好", "拟好", "你", "拟", "旎", "伱", "妳", "祢", "儗", "苨"))
             tf.invalidate(); idle(300); save("cand_tone", tf)
         }
         bar.showCandidates("wo men zai xue xiao men kou jian mian", listOf("我们在学校门口", "我们在学校门口见面", "我们在", "我们", "我"), listOf("", "AI"), -1)

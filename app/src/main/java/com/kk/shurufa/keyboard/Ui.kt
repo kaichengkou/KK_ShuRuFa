@@ -4,15 +4,40 @@ import android.graphics.Typeface
 
 /**
  * One type scale, one set of shapes and one spacing grid for every surface of the keyboard, so
- * panels drawn by different views read as one design: a single sans family (regular and medium,
- * never synthetic bold or serif), a short list of text sizes, radii derived from the key radius,
- * and a 4 dp grid.
+ * panels drawn by different views read as one design: one font family for keys, candidates and
+ * panels alike (regular and medium), a short list of text sizes, radii derived from the key
+ * radius, and a 4 dp grid.
  */
 object Ui {
-    val regular: Typeface = Typeface.create("sans-serif", Typeface.NORMAL)
-    val medium: Typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-    /** 宋体 for candidates: the serif family, which Android pairs with Noto Serif CJK for Chinese. */
-    val serif: Typeface = Typeface.create(Typeface.SERIF, Typeface.NORMAL)
+    var regular: Typeface = Typeface.create("sans-serif", Typeface.NORMAL); private set
+    var medium: Typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL); private set
+    private var fontId = "sans"
+    private var fontStamp = 0L
+
+    /** Where a font file the user chose is kept. */
+    fun fontFile(context: android.content.Context) = java.io.File(context.filesDir, "kk_font")
+
+    /**
+     * 字体: sans (黑体, the system's), serif (宋体: Android pairs it with Noto Serif CJK) or custom
+     * (a .ttf / .otf the user chose). Set before the views are built; they read it as they draw.
+     */
+    fun useFont(context: android.content.Context, id: String) {
+        val file = fontFile(context)
+        val stamp = if (id == "custom") file.lastModified() else 0L
+        if (id == fontId && stamp == fontStamp) return
+        fontId = id; fontStamp = stamp
+        val base: Typeface? = when (id) {
+            "serif" -> Typeface.SERIF
+            "custom" -> runCatching { Typeface.createFromFile(file) }.getOrNull()
+            else -> null
+        }
+        if (base == null) {
+            regular = Typeface.create("sans-serif", Typeface.NORMAL); medium = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            return
+        }
+        regular = Typeface.create(base, Typeface.NORMAL)
+        medium = if (android.os.Build.VERSION.SDK_INT >= 28) Typeface.create(base, 500, false) else Typeface.create(base, Typeface.BOLD)
+    }
 
     // ---- type (sp) ----
     /** Hints in key corners. */

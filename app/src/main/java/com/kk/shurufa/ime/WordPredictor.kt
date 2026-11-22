@@ -240,6 +240,7 @@ class WordPredictor(private val context: Context, val lang: String) {
             if (!dirty) return
             dirty = false
             buildString {
+                append("t\t").append(agedAt).append('\n')
                 for ((w, n) in used) append("w\t").append(w).append('\t').append(n).append('\n')
                 for ((w, f) in forms) append("f\t").append(w).append('\t').append(f).append('\n')
                 for ((p, m) in after) for ((w, n) in m) append("b\t").append(p).append('\t').append(w).append('\t').append(n).append('\n')
@@ -252,18 +253,43 @@ class WordPredictor(private val context: Context, val lang: String) {
         }
     }
 
+    /** The month (yyyy-MM) the memory was last aged. */
+    private var agedAt = java.time.YearMonth.now().toString()
+
     private fun readLearned() {
         if (!file.exists()) return
         synchronized(this) {
+            var stamp: String? = null
             file.forEachLine { line ->
                 val p = line.split('\t')
                 when {
+                    p.size == 2 && p[0] == "t" -> stamp = p[1]
                     p.size == 3 && p[0] == "w" -> used[p[1]] = p[2].toIntOrNull() ?: 1
                     p.size == 3 && p[0] == "f" -> forms[p[1]] = p[2]
                     p.size == 4 && p[0] == "b" -> after.getOrPut(p[1]) { HashMap() }[p[2]] = p[3].toIntOrNull() ?: 1
                 }
             }
+            // 慢慢忘记: every three months what was learned counts half, so a name typed once last
+            // year fades while the words in daily use stay
+            val then = stamp?.let { runCatching { java.time.YearMonth.parse(it) }.getOrNull() }
+            val now = java.time.YearMonth.now()
+            if (then == null) { agedAt = now.toString(); dirty = true }
+            else {
+                val quarters = (java.time.temporal.ChronoUnit.MONTHS.between(then, now) / AGE_MONTHS).toInt()
+                if (quarters > 0) { age(quarters); agedAt = then.plusMonths(quarters.toLong() * AGE_MONTHS).toString(); dirty = true }
+                else agedAt = then.toString()
+            }
         }
+    }
+
+    /** Halves every count [times] times; what reaches nothing is forgotten (with its written form). */
+    private fun age(times: Int) {
+        val shift = times.coerceAtMost(30)
+        used.replaceAll { _, n -> n shr shift }
+        used.values.removeAll { it == 0 }
+        forms.keys.retainAll(used.keys)
+        for (m in after.values) { m.replaceAll { _, n -> n shr shift }; m.values.removeAll { it == 0 } }
+        after.values.removeAll { it.isEmpty() }
     }
 
     /** Keeps the most used words (and the pairs that lead to them) when the memory grows big. */
@@ -277,6 +303,8 @@ class WordPredictor(private val context: Context, val lang: String) {
 
     companion object {
         const val MAX_WORDS = 6000
+        /** How often learned counts are halved. */
+        const val AGE_MONTHS = 3
         private val live = java.util.Collections.newSetFromMap(java.util.WeakHashMap<WordPredictor, Boolean>())
 
         /** Forgets everything learned in every language (the settings' button). */
