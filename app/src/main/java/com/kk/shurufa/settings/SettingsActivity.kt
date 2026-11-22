@@ -837,7 +837,8 @@ private fun ChinesePage(prefs: Prefs, openDict: () -> Unit) {
     }
     Group("拼音") {
         Toggle(prefs, Prefs.PINYIN_MODE, "拼音模式", "选中候选后上屏带声调的拼音，比如 nǐ hǎo；多音字按你打的拼音判断", false)
-        Toggle(prefs, Prefs.ZH_PREEDIT_INLINE, "拼音显示在输入框里", "关闭时只显示在候选栏上方", false)
+        Choice(prefs, Prefs.PREEDIT_PLACE, "拼音显示在", listOf("float" to "键盘上方的浮条", "bar" to "候选栏里"), def = "float")
+        Toggle(prefs, Prefs.ZH_PREEDIT_INLINE, "拼音写进输入框", "打字时拼音直接出现在输入框里，键盘上就不再显示", false)
     }
     Group("词库") {
         Row(Modifier.fillMaxWidth().clickable { openDict() }.padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -1653,8 +1654,8 @@ private fun OnlinePage(prefs: Prefs, openServices: () -> Unit) {
         Note("工具栏的 ✦：润色、纠错、正式、口语、精简、扩写，翻译成英文 / 俄语 / 中文，以及“输入指令”——直接用键盘打出想怎么改，回车执行。面板右上角可以临时换模型。")
     }
     Group("显示在哪") {
-        Choice(prefs, Prefs.AI_PLACE, "AI 给的说法", listOf("float" to "右上角浮窗", "bar" to "候选栏里"), def = "float")
-        Note("浮窗在键盘右上角，不挤动候选栏，空格和第一个候选还在原来的位置；点 × 收起。")
+        Choice(prefs, Prefs.AI_PLACE, "AI 给的说法", listOf("float" to "键盘右上角", "bar" to "候选栏里"), def = "float")
+        Note("放在键盘右上角时，像一张小标签立在键盘边上，不挤动候选栏，空格和第一个候选还在原来的位置。")
     }
     Group("云联想") {
         Toggle(prefs, Prefs.CLOUD_PREDICT, "打字停顿时请 AI 续写", "打字停顿时，把光标前最多 80 个字发给 AI，它给的几种接法显示出来，标「云」。临时模式、密码和地址栏里不发", false)

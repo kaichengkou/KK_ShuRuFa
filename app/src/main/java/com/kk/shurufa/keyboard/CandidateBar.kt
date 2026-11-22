@@ -261,7 +261,10 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
     }
 
     /** Returns true while the indicator is still moving. */
-    private val lineCy get() = dp(LINE_DP)
+    /** The pinyin shows in the 浮条 above: the bar is all words, centred. */
+    var pinyinAbove = false
+        set(v) { if (field != v) { field = v; invalidate() } }
+    private val lineCy get() = if (pinyinAbove) height / 2f + dp(1f) else dp(LINE_DP)
 
     private fun drawToolbar(c: Canvas, a: Float): Boolean {
         val list = tools
@@ -339,7 +342,7 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
         val endW = dp(END_DP)
         val composing = mode == Mode.CANDIDATES
         preeditRect.setEmpty()
-        if (composing && preedit.isNotEmpty()) {
+        if (composing && preedit.isNotEmpty() && !pinyinAbove) {
             tp.textAlign = Paint.Align.LEFT
             tp.textSize = sp(Ui.SMALL)
             // what is being typed is read while typing: inkSoft, not the faint hint grey
@@ -355,7 +358,7 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
                 c.drawRect(cx - dp(0.8f), dp(3.5f), cx + dp(0.8f), dp(16f), bg)
             }
         }
-        if (!composing && predictionLabel.isNotEmpty()) {
+        if (!composing && predictionLabel.isNotEmpty() && !pinyinAbove) {
             // 按原拼音 / 查找: on the pinyin line, where what was typed always shows
             tp.textAlign = Paint.Align.LEFT; tp.textSize = sp(Ui.SMALL); tp.color = theme.accent; tp.alpha = (255 * a).toInt()
             ellipsizer.set(tp)
@@ -367,8 +370,8 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
         var x = dp(4f) - scrollX0
         // one line for the pinyin is always kept, so the words sit at the same height whether they
         // are candidates, predictions, or follow a deletion
-        val top = dp(16f)
-        val bottom = height - dp(3f)
+        val top = if (pinyinAbove) dp(4f) else dp(16f)
+        val bottom = height - if (pinyinAbove) dp(4f) else dp(3f)
         tp.textAlign = Paint.Align.LEFT
         val size = sp(Ui.CANDIDATE * prefs.candidateScale)
         val noteSize = sp(Ui.CAPTION - 1f)

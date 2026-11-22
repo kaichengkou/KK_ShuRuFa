@@ -63,26 +63,36 @@ class WaitRenderTest {
         save(ap, 230, "ai_waiting")
     }
 
-    @Test fun aiFloat() {
+    @Test fun floatStrip() {
         val prefs = Prefs(ctx).apply { put(Prefs.ANIMATIONS, false) }
         val ime = Robolectric.buildService(KkImeService::class.java).create().get()
         val view = ime.onCreateInputView()
         ime.onStartInputView(EditorInfo().apply { inputType = InputType.TYPE_CLASS_TEXT; packageName = "test.app" }, false)
-        val f = KkImeService::class.java.getDeclaredField("aiFloat").apply { isAccessible = true }.get(ime) as com.kk.shurufa.keyboard.AiFloat
-        f.show("云联想", listOf("周末一起去爬山吧", "顺便吃个饭", "你几点有空"))
-        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(300))
+        fun field(n: String) = KkImeService::class.java.getDeclaredField(n).apply { isAccessible = true }.get(ime)
+        val f = field("floats") as com.kk.shurufa.keyboard.FloatPills
+        val bar = field("bar") as com.kk.shurufa.keyboard.CandidateBar
         val w = ctx.resources.displayMetrics.widthPixels
-        view.measure(View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(ctx.resources.displayMetrics.heightPixels, View.MeasureSpec.AT_MOST))
-        view.layout(0, 0, view.measuredWidth, view.measuredHeight)
-        view.measure(View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(ctx.resources.displayMetrics.heightPixels, View.MeasureSpec.AT_MOST))
-        view.layout(0, 0, view.measuredWidth, view.measuredHeight)
-        val col = (view as ViewGroup).getChildAt(0)
-        val top = (f.top - (8 * d).toInt()).coerceAtLeast(0)
-        val b = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
-        Canvas(b).apply { drawColor(android.graphics.Color.parseColor("#F4F4F4")); view.draw(this) }
-        val out = Bitmap.createBitmap(b, 0, top, b.width, (col.bottom - top).coerceAtLeast(1))
-        File("build/screens/ai_float.png").outputStream().use { out.compress(Bitmap.CompressFormat.PNG, 100, it) }
-        org.junit.Assert.assertTrue(f.showing && f.height > 0 && f.bottom - (10 * d).toInt() <= col.top)
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(400))
+        fun shot(name: String) {
+            repeat(2) {
+                view.measure(View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(ctx.resources.displayMetrics.heightPixels, View.MeasureSpec.AT_MOST))
+                view.layout(0, 0, view.measuredWidth, view.measuredHeight)
+            }
+            val col = (view as ViewGroup).getChildAt(0)
+            val top = (col.top - (110 * d).toInt()).coerceAtLeast(0)
+            val b = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
+            Canvas(b).apply { drawColor(android.graphics.Color.parseColor("#F7F5F0")); view.draw(this) }
+            val out = Bitmap.createBitmap(b, 0, top, b.width, (col.top + (200 * d).toInt() - top).coerceAtMost(b.height - top))
+            File("build/screens/$name.png").outputStream().use { out.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        }
+        bar.pinyinAbove = true
+        bar.showCandidates("yun lian xiang shi shen me", listOf("云联想是什么", "云联想", "云联", "运", "云"), emptyList(), -1)
+        f.show("yun'lian'xiang'shi'shen'me", true, listOf("云联想是什么意思"))
+        shot("float_strip")
+        bar.showPredictions(listOf("吧", "了", "的"))
+        f.show("", false, listOf("周末一起去爬山吧", "顺便吃个饭", "你几点有空"))
+        shot("float_cloud")
+        org.junit.Assert.assertTrue(f.showing && f.tabRects.size == 3)
         ime.onDestroy()
     }
 

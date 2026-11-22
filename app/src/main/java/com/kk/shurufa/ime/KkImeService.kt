@@ -148,7 +148,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     private val cloud by lazy { CloudPredict(prefs) { syncBar() } }
     private var cloudShown: List<String> = emptyList()
     /** AI 浮窗, and what it shows now: 云联想's lines or the AI 候选. */
-    private lateinit var aiFloat: com.kk.shurufa.keyboard.AiFloat
+    private lateinit var floats: com.kk.shurufa.keyboard.FloatPills
     private var floatCloud: List<String> = emptyList()
     private var floatCand: String? = null
 
@@ -344,17 +344,19 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         column.addView(bar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         column.addView(content, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         root.addView(column, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM))
-        aiFloat = com.kk.shurufa.keyboard.AiFloat(this, prefs).also {
+        floats = com.kk.shurufa.keyboard.FloatPills(this, prefs).also {
             it.theme = kbTheme; it.visibility = View.GONE
             it.onFeedback = { haptics.play(HapticEvent.OPTION) }
-            it.onPick = { i -> floatCand?.let { commitAiCandidate() } ?: floatCloud.getOrNull(i)?.let { p -> pickCloud(p) } }
+            // the pencil: edit the pinyin, the caret at its end
+            it.onLeft = { if (composing) onPreeditTap(RimeBridge.preedit().length) }
+            it.onRight = { i -> floatCand?.let { commitAiCandidate() } ?: floatCloud.getOrNull(i)?.let { p -> pickCloud(p) } }
         }
-        root.addView(aiFloat, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.END))
-        // it sits just above the keyboard, whatever its height
+        root.addView(floats, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM))
+        // the tabs stand on the keyboard's top edge, whatever its height
         column.addOnLayoutChangeListener { _, _, top, _, bottom, _, _, _, _ ->
-            val lp = aiFloat.layoutParams as FrameLayout.LayoutParams
-            val m = bottom - top - dp(6f).toInt()
-            if (lp.bottomMargin != m) { lp.bottomMargin = m; lp.marginEnd = dp(4f).toInt(); aiFloat.layoutParams = lp }
+            val lp = floats.layoutParams as FrameLayout.LayoutParams
+            val m = bottom - top
+            if (lp.bottomMargin != m) { lp.bottomMargin = m; floats.layoutParams = lp }
         }
         root.addView(overlay, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         root.setOnApplyWindowInsetsListener { _, ins ->
@@ -398,8 +400,8 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         if (overlay.sticky) outInsets.touchableRegion.set(0, insetLoc[1], root.width, bottom)
         else outInsets.touchableRegion.set(0, minOf(top, bottom - shown), root.width, bottom)
         // the AI 浮窗 over the app takes its own taps
-        if (!overlay.sticky && aiFloat.visibility == View.VISIBLE && aiFloat.height > 0)
-            outInsets.touchableRegion.op(aiFloat.left, insetLoc[1] + aiFloat.top, aiFloat.right, insetLoc[1] + aiFloat.bottom, android.graphics.Region.Op.UNION)
+        if (!overlay.sticky && floats.visibility == View.VISIBLE) for (r in floats.tabRects)
+            outInsets.touchableRegion.op(r.left.toInt(), insetLoc[1] + floats.top + r.top.toInt(), r.right.toInt(), insetLoc[1] + floats.top + r.bottom.toInt(), android.graphics.Region.Op.UNION)
     }
 
     /** The system draws its IME buttons below the keys; give that strip the keyboard's color. */
@@ -730,8 +732,18 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     override fun syncBar() {
         if (!built) return
         floatCloud = emptyList(); floatCand = null
+        // the pinyin (or 按原拼音) in the 浮条, unless it is written into the field itself
+        val above = prefs.preeditPlace == "float" && !prefs.zhPreeditInline
+        bar.pinyinAbove = above
         syncBarOnly()
-        aiFloat.show(if (floatCand != null) "AI 候选" else "云联想", floatCand?.let { listOf(it) } ?: floatCloud)
+        val letters = panel == Panel.LETTERS || panel == Panel.CANDIDATES
+        val left = when {
+            !above || !letters || sink != null -> ""
+            composing && !pinyinEdit -> RimeBridge.preedit()
+            !composing && predictions.isNotEmpty() -> predictionLabel
+            else -> ""
+        }
+        floats.show(left, editable = composing, right = floatCand?.let { listOf(it) } ?: floatCloud)
     }
 
     private fun syncBarOnly() {
