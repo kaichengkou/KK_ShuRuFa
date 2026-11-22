@@ -125,8 +125,7 @@ class Prefs(context: Context) {
     val kayGreet get() = b(KAY_GREET, true)
     val kayAiGreet get() = b(KAY_AI_GREET, true)
     val kayChatCap get() = sp.getInt(KAY_CHAT_CAP, 30)
-    /** How 小K looks (see KayFace.STYLES), and whether it sits on the space key too. */
-    val kayStyle get() = s(KAY_STYLE, "mochi")
+    /** Whether 小K sits on the space key too. */
     val kayOnSpace get() = b(KAY_SPACE, true)
     /** 云联想: characters before the caret sent, the pause before asking (ms), how many continuations. */
     val cloudContext get() = sp.getInt(CLOUD_CONTEXT, 80)
@@ -239,7 +238,7 @@ class Prefs(context: Context) {
         fun rebuildsKeyboard(key: String) = key in LOOK || key.startsWith("key_ovr_")
 
         private val LOOK by lazy {
-            setOf(THEME, STYLE, ACCENT, KAY_STYLE, KAY_SPACE, THEME_WARMTH, THEME_SHADE, ACCENT_HUE, FONT_STAMP, KEY_HEIGHT, KEY_GAP, ROW_GAP, KEY_RADIUS, LABEL_SCALE, HINT_SCALE, SHOW_HINTS, SHOW_ALL_HINTS, HINT_MODE, CAND_FONT,
+            setOf(THEME, STYLE, ACCENT, KAY_SPACE, THEME_WARMTH, THEME_SHADE, ACCENT_HUE, FONT_STAMP, KEY_HEIGHT, KEY_GAP, ROW_GAP, KEY_RADIUS, LABEL_SCALE, HINT_SCALE, SHOW_HINTS, SHOW_ALL_HINTS, HINT_MODE, CAND_FONT,
                 KEY_BORDERS, NUMBER_ROW, CAND_SCALE, BOTTOM_PADDING, CURSOR_LABELS, LANGUAGES, TOP_ROW_SCRIPTS, LAYOUT_RELOAD)
         }
 
@@ -319,7 +318,6 @@ class Prefs(context: Context) {
         const val KAY_GREET = "kay_greet"
         const val KAY_AI_GREET = "kay_ai_greet"
         const val KAY_CHAT_CAP = "kay_chat_cap"
-        const val KAY_STYLE = "kay_style"
         const val KAY_SPACE = "kay_space"
         // 小K's state (kept with the state, not the settings)
         const val KAY_BORN = "kay_born"

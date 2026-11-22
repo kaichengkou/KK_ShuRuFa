@@ -392,7 +392,7 @@ class AiPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
         val lineT = cardT + dp(8f)
         val lineCy = lineT + lineH / 2
         val face = dp(22f)
-        val wait = KayFace.draw(c, cardL + inner + face / 2, lineCy, face, t.inkSoft, t.accentSoft, 0x8CF08C9B.toInt(), Motion.now(), java.time.LocalTime.now().hour)
+        val wait = Shark.drawLive(c, cardL + inner + face / 2, lineCy, face)
         tp.textAlign = Paint.Align.LEFT; tp.textSize = sp(Ui.SMALL + 1f); tp.typeface = Ui.medium; tp.color = if (running != null) t.accent else t.inkSoft
         drawText(c, if (running != null) "$kayName 在想" + dots() else kayName, cardL + inner + face + dp(8f), lineCy, tp)
         tp.typeface = Ui.regular

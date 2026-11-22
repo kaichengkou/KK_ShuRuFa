@@ -39,7 +39,7 @@ class AiFeature(private val host: Host, private val kay: Kay) {
                     "setup" -> host.openSettings("ai")
                     "replace" -> apply(replace = true)
                     "insert" -> apply(replace = false)
-                    "clear" -> { run++; panel.running = null; pendingSaid = ""; pendingAnswer = ""; kay.forgetTalk(); panel.status = ""; syncChat() }
+                    "clear" -> { run++; panel.running = null; com.kk.shurufa.keyboard.SharkLife.thinking = false; pendingSaid = ""; pendingAnswer = ""; kay.forgetTalk(); panel.status = ""; syncChat() }
                     "reply" -> { chatting = true; host.openSink(Sink.AI) }
                     "retry" -> action?.let { start(it) }
                     "stop" -> stop()
@@ -141,6 +141,7 @@ class AiFeature(private val host: Host, private val kay: Kay) {
         val id = ++run
         pendingSaid = said; pendingAnswer = ""
         panel.running = CHAT; panel.status = ""
+        com.kk.shurufa.keyboard.SharkLife.thinking = true
         syncChat()
         kay.talked()
         Thread {
@@ -153,6 +154,7 @@ class AiFeature(private val host: Host, private val kay: Kay) {
             handler.post {
                 if (id != run) return@post
                 panel.running = null
+                com.kk.shurufa.keyboard.SharkLife.thinking = false
                 pendingSaid = ""; pendingAnswer = ""
                 r.onSuccess { kay.heard(said, it) }
                  .onFailure { kay.talk += Kay.Turn(true, said); panel.status = it.message ?: "没连上" }
@@ -176,6 +178,7 @@ class AiFeature(private val host: Host, private val kay: Kay) {
         val id = ++run
         action = a
         panel.running = a.id; panel.doneTitle = a.title; panel.status = ""
+        com.kk.shurufa.keyboard.SharkLife.thinking = true
         panel.setResult("", null)
         val t = target() ?: run { panel.running = null; panel.status = "先在设置里添加 AI 服务"; return }
         Thread {
@@ -186,6 +189,7 @@ class AiFeature(private val host: Host, private val kay: Kay) {
             handler.post {
                 if (id != run) return@post
                 panel.running = null
+                com.kk.shurufa.keyboard.SharkLife.thinking = false
                 r.onSuccess { result = it; panel.setResult(it, if (a.diff) src else null) }
                  .onFailure { result = ""; panel.setResult("", null); panel.status = it.message ?: "出错了" }
                 host.haptics.play(HapticEvent.GESTURE)
@@ -209,6 +213,7 @@ class AiFeature(private val host: Host, private val kay: Kay) {
     /** Leaving the panel stops a run that is still streaming. */
     fun cancel() {
         run++
+        com.kk.shurufa.keyboard.SharkLife.thinking = false
         if (pendingSaid.isNotEmpty()) { kay.talk += Kay.Turn(true, pendingSaid); pendingSaid = ""; pendingAnswer = "" }
         if (::panel.isInitialized) panel.running = null
     }
@@ -218,6 +223,7 @@ class AiFeature(private val host: Host, private val kay: Kay) {
     /** 停止: the run is let go; what came so far stays, to use or retry. */
     private fun stop() {
         run++
+        com.kk.shurufa.keyboard.SharkLife.thinking = false
         panel.running = null
         host.haptics.play(HapticEvent.OPTION)
         if (panel.hasResult()) { result = panel.resultText(); panel.status = "" }

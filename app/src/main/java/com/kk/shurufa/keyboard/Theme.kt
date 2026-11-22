@@ -107,7 +107,6 @@ data class KbTheme(
             val id = if (prefs.style == "paper" && !prefs.sp.contains(Prefs.ACCENT)) "cinnabar" else prefs.accent
             val accent = accentFor(context, id, night)
             Ui.useFont(context, prefs.font)
-            KayFace.style = prefs.kayStyle
             if (prefs.incognito) return incognito()
             val base = if (prefs.style == "paper") paper(night, accent) else plain(night, accent)
             return base.tuned(prefs.themeWarmth / 100f, prefs.themeShade / 100f)

@@ -434,14 +434,12 @@ class KeyboardView(context: Context, prefs: Prefs) : KbView(context, prefs) {
             } else {
                 textPaint.alpha = (255 * fade * (1 - min(1f, abs(off) / rect.width()) * 0.5f)).toInt()
                 if (fixedLabel == null && listener?.kayOnSpace() == true) {
-                    // 小K, just before the language: seen while typing, quiet (it does not squish with every key)
-                    val face = dp(15.5f) * prefs.labelScale
+                    // 小K, just before the language: seen while typing, quiet (it does not float here)
+                    val face = dp(17f) * prefs.labelScale
                     val gap = dp(5f)
                     val start = cx + off - (face + gap + textPaint.measureText(label)) / 2
                     val a = textPaint.alpha / 255f
-                    val wait = KayFace.draw(c, start + face / 2, cy, face, Colors.fade(theme.hint, a),
-                        if (KayFace.style == "dots") 0 else Colors.fade(Colors.alpha(theme.ink, 0x16), a), Colors.fade(0x8CF08C9B.toInt(), a),
-                        Motion.now(), java.time.LocalTime.now().hour, accent = Colors.fade(theme.accent, a), squishes = false)
+                    val wait = Shark.drawLive(c, start + face / 2, cy, face * 0.9f, alpha = (255 * a).toInt(), still = true)
                     if (wait == 0L) postInvalidateOnAnimation() else postInvalidateDelayed(wait)
                     drawText(c, label, cx + off + (face + gap) / 2, cy, textPaint)
                 } else drawText(c, label, cx + off, cy, textPaint)

@@ -149,8 +149,7 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
         hits.add("greet:seen", 0f, 0f, width.toFloat(), height.toFloat())
         val face = dp(24f)
         val fx = dp(12f) + face / 2
-        val wait = KayFace.draw(c, fx, cy, face, Colors.fade(theme.inkSoft, a), Colors.fade(theme.accentSoft, a), Colors.fade(BLUSH, a),
-            Motion.now(), java.time.LocalTime.now().hour)
+        val wait = Shark.drawLive(c, fx, cy, face, alpha = (255 * a).toInt())
         val ch = dp(30f)
         var right = width - dp(10f)
         val seenW = chipWidth("已阅", textSp = Ui.SMALL + 1f)
@@ -337,8 +336,7 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
             val t = if (id == tappedTool) tapT.value else 1f
             if (id == "ai") {
                 // 小K lives here: a face, not an icon
-                val wait = KayFace.draw(c, cx, cy, dp(25f), ink, Colors.fade(if (active) theme.accentSoft else theme.soft, a),
-                    Colors.fade(BLUSH, a), Motion.now(), java.time.LocalTime.now().hour)
+                val wait = Shark.drawLive(c, cx, cy + dp(1f), dp(22f), alpha = (255 * a).toInt())
                 if (wait == 0L) kayMoving = true else postInvalidateDelayed(wait)
             } else if (glyph != null) {
                 tp.textAlign = Paint.Align.CENTER; tp.typeface = Ui.medium; tp.textSize = sp(Ui.TITLE + 1f)
@@ -360,8 +358,6 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
     companion object {
         /** How long a toolbar icon's tap motion runs. */
         const val TAP_MS = 560L
-        /** 小K's cheeks when patted, and its drop of sweat. */
-        private const val BLUSH = 0x8CF08C9B.toInt()
         const val HEIGHT_DP = 52f
         /**
          * Where everything in the bar is centered: tool icons, words, chips, the end button. The

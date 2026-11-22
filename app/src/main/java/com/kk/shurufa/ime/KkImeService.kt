@@ -479,8 +479,11 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         if (!restarting && panel == Panel.LETTERS && wordsHere && !prefs.incognito && clipboard.pendingChip() == null && kay.greetingDue() &&
             editor.textBefore(1).isEmpty() && editor.textAfter(1).isEmpty()) {
             greeting = kay.line(); kay.markGreeted(); greetingAt = SystemClock.uptimeMillis()
+            com.kk.shurufa.keyboard.SharkLife.greet(greetingAt)
         }
         if (!prefs.incognito) kay.prefetch()
+        // back after a long while: it wakes with a start
+        if (!restarting && greeting == null) com.kk.shurufa.keyboard.SharkLife.woke(SystemClock.uptimeMillis())
         if (built) { paintNavigationBar(); show(panel) }
         updateAutoCap()
     }
@@ -509,7 +512,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     override fun kayOnSpace() = prefs.kayOnSpace && !prefs.incognito && !editor.secret
 
     override fun onKayPat() {
-        com.kk.shurufa.keyboard.KayLife.pat(SystemClock.uptimeMillis())
+        com.kk.shurufa.keyboard.SharkLife.pat(SystemClock.uptimeMillis())
         haptics.play(HapticEvent.OPTION)
         // on the space key it simply smiles; otherwise it says so there
         if (kayOnSpace()) keyboard.invalidate() else spaceSay(listOf("嘿嘿 (｡>ω<｡)", "再摸一下 (〃∀〃)", "${kay.name}在呢 (・ω・)").random())
@@ -1424,7 +1427,13 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
                 sink == Sink.AI -> runInstruction()
                 sink == Sink.TRANSLATE -> translate.commit()
                 sink == Sink.EMOJI -> searchResults.firstOrNull()?.let { emoji.type(it) }
-                else -> { predictions = emptyList(); editor.performEnter(); updateAutoCap(); syncBar() }
+                else -> {
+                    // 发送: 小K jumps for the message that went out
+                    val info = currentInputEditorInfo
+                    if (info != null && (info.imeOptions and EditorInfo.IME_MASK_ACTION) == EditorInfo.IME_ACTION_SEND &&
+                        (info.imeOptions and EditorInfo.IME_FLAG_NO_ENTER_ACTION) == 0) { com.kk.shurufa.keyboard.SharkLife.sent(SystemClock.uptimeMillis()); keyboard.invalidate(); bar.invalidate() }
+                    predictions = emptyList(); editor.performEnter(); updateAutoCap(); syncBar()
+                }
             }
             "shift" -> {
                 val now = SystemClock.uptimeMillis()
@@ -1593,7 +1602,8 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     override fun onPress(key: Key) {
         // 小K feels the keys: quick typing, a run of deletes
         val now = SystemClock.uptimeMillis()
-        if (key.fn == "backspace") com.kk.shurufa.keyboard.KayLife.delete(now) else com.kk.shurufa.keyboard.KayLife.key(now)
+        if (key.fn == "backspace") com.kk.shurufa.keyboard.SharkLife.delete(now) else com.kk.shurufa.keyboard.SharkLife.key(now)
+        if (key.fn == "backspace" || key.fn == null) keyboard.invalidate()
         haptics.play(when (key.fn) {
             null -> HapticEvent.LETTER
             "space" -> HapticEvent.SPACE

@@ -1641,27 +1641,8 @@ private fun KayGroups(prefs: Prefs) {
             OutlinedTextField(name, { v -> name = v.take(8); prefs.put(Prefs.KAY_NAME, name.trim()) }, singleLine = true,
                 modifier = Modifier.width(150.dp), shape = RoundedCornerShape(14.dp), placeholder = { Text("小K") })
         }
-        Note("住在键盘里的小家伙，今天是它出生的第 ${kay.age()} 天。工具栏上那个会眨眼的就是它：点一下打开它，长按摸摸头。")
-        LocalPageKeys.current?.add(Prefs.KAY_STYLE)
-        var look by remember { mutableStateOf(prefs.kayStyle) }
-        Text("样子", modifier = Modifier.padding(top = 6.dp))
-        val kb = remember { com.kk.shurufa.keyboard.KbTheme.resolve(ctx, prefs) }
-        Row(Modifier.fillMaxWidth().horizontalScroll(androidx.compose.foundation.rememberScrollState()).padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            com.kk.shurufa.keyboard.KayFace.STYLES.forEach { (id, label) ->
-                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clip(RoundedCornerShape(14.dp))
-                    .then(if (look == id) Modifier.background(MaterialTheme.colorScheme.secondaryContainer) else Modifier)
-                    .clickable { look = id; prefs.put(Prefs.KAY_STYLE, id) }.padding(horizontal = 10.dp, vertical = 8.dp)) {
-                    androidx.compose.foundation.Canvas(Modifier.size(44.dp)) {
-                        drawIntoCanvas { cv ->
-                            com.kk.shurufa.keyboard.KayFace.draw(cv.nativeCanvas, size.width / 2, size.height / 2, size.width * 0.8f, kb.inkSoft, kb.accentSoft,
-                                0x8CF08C9B.toInt(), 1_000_000L, 12, com.kk.shurufa.keyboard.KayLife.Mood.CALM, kb.accent, id)
-                        }
-                    }
-                    Text(label, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 4.dp))
-                }
-            }
-        }
-        Toggle(prefs, Prefs.KAY_SPACE, "空格键上也有它", "在语言名字旁边，打字时也看得见。它在那里只眨眼、瞟一眼、删字多了皱眉、没人打字时打盹，不跟着每个键动", true)
+        Note("住在键盘里的小鲨鱼，今天是它出生的第 ${kay.age()} 天。工具栏上那个会眨眼的就是它：点一下打开它，长按摸摸头。")
+        Toggle(prefs, Prefs.KAY_SPACE, "空格键上也有它", "在语言名字旁边，打字时也看得见。它在那里不漂浮，只眨眼、甩甩背鳍、删多了捂眼睛、没人打字时打盹", true)
         Toggle(prefs, Prefs.KAY_GREET, "每天打个招呼", "每天第一次在空白输入框里打开键盘时，在工具栏说一句话。点「已阅」、按任何键或点别处就消失", true)
         Toggle(prefs, Prefs.KAY_AI_GREET, "这句话让 AI 来写", "每天傍晚请 AI 写好第二天的那一句（一天一次，只发日期、节日、节气和字数，不发你写的内容）。没有 AI 服务时用它自己的话", true)
     }

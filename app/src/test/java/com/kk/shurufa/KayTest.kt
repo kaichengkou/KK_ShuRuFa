@@ -15,10 +15,7 @@ import androidx.test.core.app.ApplicationProvider
 import com.kk.shurufa.ime.Kay
 import com.kk.shurufa.ime.KayLines
 import com.kk.shurufa.ime.KkImeService
-import com.kk.shurufa.keyboard.KayFace
-import com.kk.shurufa.keyboard.KayLife
 import com.kk.shurufa.keyboard.KbTheme
-import com.kk.shurufa.keyboard.Colors
 import com.kk.shurufa.keyboard.Key
 import com.kk.shurufa.keyboard.Output
 import org.junit.Assert.assertEquals
@@ -62,7 +59,7 @@ class KayTest {
         assertEquals("过年好，新的一年也一起 (｡･ω･｡)ﾉ", KayLines.local(LocalDate.of(2027, 2, 6), LocalTime.of(9, 0), 40, 0))
         val dongzhi = (18..24).map { LocalDate.of(2026, 12, it) }.first { com.kk.shurufa.ime.SolarTerms.on(it) == "冬至" }
         assertTrue(KayLines.local(dongzhi, LocalTime.of(9, 0), 40, 0).startsWith("冬至"))
-        assertEquals("初次见面，我住在这里了 (・ω・)ﾉ", KayLines.local(LocalDate.of(2027, 3, 3), LocalTime.of(9, 0), 1, 0))
+        assertEquals("初次见面，以后多指教 (・ω・)ﾉ", KayLines.local(LocalDate.of(2027, 3, 3), LocalTime.of(9, 0), 1, 0))
         assertTrue(KayLines.facts(dongzhi, 30, 1200).any { it.contains("冬至") })
         assertEquals("冬至。吃饺子 (｡･ω･｡)", KayLines.cleanLine("“冬至。吃饺子 (｡･ω･｡)”\n"))
         assertNull(KayLines.cleanLine("这是一句很长很长的话，长到放不进键盘上的那一行里，所以不要它了"))
@@ -97,57 +94,68 @@ class KayTest {
         File("build/screens").mkdirs(); File("build/screens/$name.png").outputStream().use { b.compress(Bitmap.CompressFormat.PNG, 100, it) }
     }
 
-    @Test fun faces() {
-        // every mood, and a blink, at a size to look at
-        val t = KbTheme.resolve(ctx, Prefs(ctx))
-        val size = 64 * d
-        val moods = KayLife.Mood.values()
-        val b = Bitmap.createBitmap(((moods.size + 1) * 90 * d).toInt(), (100 * d).toInt(), Bitmap.Config.ARGB_8888)
-        val c = Canvas(b); c.drawColor(t.background)
-        moods.forEachIndexed { i, m -> KayFace.draw(c, (45 + i * 90) * d, 50 * d, size, t.inkSoft, t.accentSoft, 0x8CF08C9B.toInt(), 1_000_000L, 12, m) }
-        save(b, "kay_faces")
-    }
-
-    /** 设计稿: every style in four moods, at the toolbar's size, and on the space key, light and dark. */
-    @Test fun designSheet() {
-        val prefs = Prefs(ctx)
-        prefs.put(Prefs.THEME, "light"); val light = KbTheme.resolve(ctx, prefs)
-        prefs.put(Prefs.THEME, "dark"); val dark = KbTheme.resolve(ctx, prefs)
-        prefs.sp.edit().remove(Prefs.THEME).apply()
-        val rowH = 96 * d
-        val styles = KayFace.STYLES.keys.toList()
-        val b = Bitmap.createBitmap((760 * d).toInt(), (rowH * styles.size + 40 * d).toInt(), Bitmap.Config.ARGB_8888)
-        val c = Canvas(b); c.drawColor(android.graphics.Color.WHITE)
-        val tp = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { textSize = 13 * d; color = 0xFF555555.toInt() }
-        val heads = listOf("平静" to 70f, "专注" to 140f, "被摸头" to 210f, "打盹" to 280f, "工具栏" to 355f, "空格键 · 浅色" to 470f, "空格键 · 深色" to 640f)
-        for ((h, x) in heads) { tp.textAlign = android.graphics.Paint.Align.CENTER; c.drawText(h, x * d, 24 * d, tp) }
-        val moods = listOf(KayLife.Mood.CALM, KayLife.Mood.BUSY, KayLife.Mood.HAPPY, KayLife.Mood.DOZE)
-        val blush = 0x8CF08C9B.toInt()
-        styles.forEachIndexed { row, st ->
-            val y = 40 * d + row * rowH + rowH / 2
-            tp.textAlign = android.graphics.Paint.Align.LEFT; tp.color = 0xFF222222.toInt(); tp.textSize = 15 * d
-            c.drawText("${'A' + row} ${KayFace.STYLES[st]}", 8 * d, y + 5 * d, tp)
-            tp.color = 0xFF555555.toInt(); tp.textSize = 13 * d
-            val t = light
-            moods.forEachIndexed { i, m -> KayFace.draw(c, (70 + i * 70) * d + 30 * d, y, 46 * d, t.inkSoft, t.accentSoft, blush, 1_000_000L, 12, m, t.accent, st) }
-            // the toolbar, as it is: a strip of background
-            val bg = android.graphics.Paint().apply { color = t.background }
-            c.drawRect(330 * d, y - 22 * d, 385 * d, y + 22 * d, bg)
-            KayFace.draw(c, 357 * d, y, 25 * d, t.inkSoft, t.soft, blush, 1_000_000L, 12, KayLife.Mood.CALM, t.accent, st)
-            // the space key, light and dark: the face just before the language
-            for ((k, th) in listOf(light, dark).withIndex()) {
-                val kx = (395 + k * 170) * d
-                bg.color = th.background; c.drawRect(kx - 6 * d, y - 26 * d, kx + 156 * d, y + 26 * d, bg)
-                bg.color = th.surface
-                c.drawRoundRect(kx, y - 20 * d, kx + 150 * d, y + 20 * d, 8 * d, 8 * d, bg)
-                val lp = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { textSize = 14.5f * d; color = th.hint; textAlign = android.graphics.Paint.Align.LEFT }
-                val label = "中文"; val lw = lp.measureText(label); val face = 17 * d
-                val start = kx + 75 * d - (face + 5 * d + lw) / 2
-                KayFace.draw(c, start + face / 2, y, face, th.hint, if (st == "dots") 0 else Colors.alpha(th.ink, 0x16), blush, 1_000_000L, 12, KayLife.Mood.CALM, th.accent, st)
-                c.drawText(label, start + face + 5 * d, y + 5 * d, lp)
-            }
+    /** 小鲨鱼: every face, what it wears, and its moves frame by frame (for build/screens/shark_frames). */
+    @Test fun shark() {
+        val S = com.kk.shurufa.keyboard.Shark
+        val cellPx = 8f
+        val faces = com.kk.shurufa.keyboard.Shark.Face.values()
+        val col = 20 * cellPx
+        val b = Bitmap.createBitmap((col * 6).toInt(), (col * 4).toInt(), Bitmap.Config.ARGB_8888)
+        val c = Canvas(b); c.drawColor(0xFFF7F5F0.toInt())
+        val tp = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { textSize = 22f; color = 0xFF666666.toInt(); textAlign = android.graphics.Paint.Align.CENTER }
+        faces.forEachIndexed { i, f ->
+            val x = (i % 6) * col + col / 2; val y = (i / 6) * col + col / 2
+            S.draw(c, x, y, 13 * cellPx, com.kk.shurufa.keyboard.Shark.Pose(f, blush = f == com.kk.shurufa.keyboard.Shark.Face.PAT || f == com.kk.shurufa.keyboard.Shark.Face.HAPPY), wear = null)
+            c.drawText(f.kaomoji, x, y + col / 2 - 8, tp)
         }
-        save(b, "kay_designs")
+        var d0 = LocalDate.of(2027, 1, 1)
+        val wears = LinkedHashMap<String, com.kk.shurufa.keyboard.Shark.Wear>()
+        while (d0.year == 2027) { S.wearFor(d0)?.let { wears.putIfAbsent(it.name, it) }; d0 = d0.plusDays(1) }
+        wears.values.forEachIndexed { i, w ->
+            val x = i * col + col / 2; val y = 2 * col + col / 2
+            S.draw(c, x, y, 13 * cellPx, com.kk.shurufa.keyboard.Shark.Pose(), wear = w)
+            c.drawText(w.name, x, y + col / 2 - 8, tp)
+        }
+        val moves = listOf("跳起" to com.kk.shurufa.keyboard.Shark.Pose(dy = -2), "挥鳍" to com.kk.shurufa.keyboard.Shark.Pose(com.kk.shurufa.keyboard.Shark.Face.HAPPY, wave = true),
+            "蓄力" to com.kk.shurufa.keyboard.Shark.Pose(squash = true), "甩背鳍" to com.kk.shurufa.keyboard.Shark.Pose(flick = true),
+            "吐泡泡" to com.kk.shurufa.keyboard.Shark.Pose(com.kk.shurufa.keyboard.Shark.Face.LOOKUP, extra = com.kk.shurufa.keyboard.Shark.Extra.BUBBLES, phase = 3),
+            "睡着" to com.kk.shurufa.keyboard.Shark.Pose(com.kk.shurufa.keyboard.Shark.Face.SLEEP, extra = com.kk.shurufa.keyboard.Shark.Extra.Z, phase = 1))
+        moves.forEachIndexed { i, (name, p) ->
+            val x = i * col + col / 2; val y = 3 * col + col / 2
+            S.draw(c, x, y, 13 * cellPx, p, wear = null)
+            c.drawText(name, x, y + col / 2 - 8, tp)
+        }
+        save(b, "shark_sheet")
+
+        // its moves, frame by frame every 40 ms, for an animation of them
+        val dir = File("build/screens/shark_frames").apply { deleteRecursively(); mkdirs() }
+        val L = com.kk.shurufa.keyboard.SharkLife
+        var t = 10_000_000L
+        var n = 0
+        fun film(label: String, ms: Long, act: (Long) -> Unit) {
+            act(t)
+            var k = 0L
+            while (k < ms) {
+                val fb = Bitmap.createBitmap(240, 250, Bitmap.Config.ARGB_8888)
+                val fc = Canvas(fb); fc.drawColor(0xFFF7F5F0.toInt())
+                val (pose, _) = L.frame(t + k, 14)
+                S.draw(fc, 120f, 125f, 13 * 9f, pose, wear = null)
+                tp.textSize = 24f; fc.drawText(label, 120f, 238f, tp)
+                File(dir, "%04d.png".format(n++)).outputStream().use { fb.compress(Bitmap.CompressFormat.PNG, 100, it) }
+                k += 40
+            }
+            t += ms + 60_000
+        }
+        film("打招呼", 1400) { L.greet(it) }
+        film("平常：眨眼、甩鳍", 1800) { L.key(it) }
+        film("打字飞快", 900) { now -> for (i in 0 until 20) L.key(now - i * 100) }
+        film("删太多：捂眼", 1600) { now -> for (i in 0 until 7) L.delete(now - (6 - i) * 120) }
+        film("被摸头", 1600) { L.pat(it) }
+        film("消息发出去了", 1100) { L.sent(it) }
+        film("思考中", 1600) { L.thinking = true }
+        L.thinking = false
+        film("很久没来：惊醒", 1100) { now -> L.woke(now) }
+        film("打盹", 2400) { now -> L.key(now - 120_000) }
     }
 
     @Test fun chatPanel() {
