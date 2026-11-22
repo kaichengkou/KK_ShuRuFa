@@ -36,6 +36,14 @@ class TranslateFeature(private val host: Host, private val service: TranslateSer
             onFeedback = { host.haptics.play(HapticEvent.FUNCTION) }
             onClose = { host.closeSink() }
             onCommit = { commit() }
+            onInsert = {
+                val (t, field) = insertable()
+                if (t.isNotEmpty()) {
+                    // taken from the field: the translation will replace it there
+                    fromField = field
+                    host.query.setLength(0); host.query.append(t); sync()
+                }
+            }
             onSwap = {
                 val src = if (from == "auto") TranslateService.guess(host.query.toString()) else from
                 from = to; to = src
@@ -52,7 +60,7 @@ class TranslateFeature(private val host: Host, private val service: TranslateSer
                 resultFor = ""; sync()
             }
             onEngine = {
-                if (Llm.targets(prefs).isEmpty()) host.notice("在 设置 → 联网功能 里添加 AI 服务后，可以用 AI 翻译")
+                if (Llm.targets(prefs).isEmpty()) host.notice("在 设置 → AI 服务 里填好 Key 后，可以用 AI 翻译")
                 sync()
             }
         }
@@ -64,6 +72,7 @@ class TranslateFeature(private val host: Host, private val service: TranslateSer
         to = prefs.translateTarget
         from = "auto"
         fromSelection = selection != null
+        fromField = ""
         result = ""; resultFor = ""
         strip.visibility = View.VISIBLE
         if (Motion.on(prefs)) {
@@ -94,6 +103,9 @@ class TranslateFeature(private val host: Host, private val service: TranslateSer
         st.engine = service.engine
         st.engines = listOf(PickList.Item("mlkit", "离线翻译", "ML Kit")) + aiItems(prefs, Llm.targets(prefs))
         st.source = q; st.sourceIsSelection = fromSelection
+        if (q.isEmpty()) fromField = ""
+        st.insertable = if (q.isEmpty() && !fromSelection) insertable().first else ""
+        st.replaces = fromSelection || fromField.isNotEmpty()
         val fresh = resultFor == q
         if (!fresh) { st.result = ""; st.busy = q.isNotBlank() }
         if (q.isBlank()) st.status = ""
@@ -116,11 +128,28 @@ class TranslateFeature(private val host: Host, private val service: TranslateSer
         }
     }
 
+    /**
+     * What 一键插入 puts in the box: what was just copied (a message to answer, most often), or
+     * else what is already written in the field.
+     */
+    private fun insertable(): Pair<String, String> {
+        val cm = host.context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+        val clip = runCatching { cm.primaryClip?.getItemAt(0)?.coerceToText(host.context)?.toString() }.getOrNull()?.trim().orEmpty()
+        if (clip.isNotEmpty() && clip.length <= 2000) return clip to ""
+        val raw = host.editor.textBefore(500)
+        return raw.trim() to raw
+    }
+    /** What 一键插入 took from the field (before the caret), to be replaced by the translation. */
+    private var fromField = ""
+
     /** ↵ or 上屏: sends the translation when it is for the text as it is now. */
     fun commit() {
         val t = result
         if (t.isEmpty() || resultFor != host.query.toString()) return
+        val field = fromField
         host.closeSink()
+        // what was taken from the field gives way to its translation
+        if (field.isNotEmpty() && host.editor.textBefore(field.length) == field) host.editor.replaceBefore(field.length, field.takeWhile { it.isWhitespace() })
         // a selection being translated is replaced: committing over it does that
         host.editor.type(t, pairable = false, source = TypingStats.Source.AI)
     }

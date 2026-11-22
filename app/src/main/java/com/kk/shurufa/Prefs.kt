@@ -110,7 +110,16 @@ class Prefs(context: Context) {
     /** 盘古之白: a space between Chinese and Latin letters or digits. */
     val pangu get() = b(PANGU, false)
     /** AI 候选: the AI service's reading of longer pinyin as the first candidate (sends the pinyin). */
-    val aiCandidate get() = b(AI_CANDIDATE, false)
+    /**
+     * AI 帮打字, one at a time: off, candidate (AI 候选 for long pinyin) or cloud (云联想 when
+     * typing pauses). Before it was one setting, each had its own switch; those are read once.
+     */
+    val aiAssist: String get() = sp.getString(AI_ASSIST, null) ?: when {
+        b(CLOUD_PREDICT, false) -> "cloud"
+        b(AI_CANDIDATE, false) -> "candidate"
+        else -> "off"
+    }
+    val aiCandidate get() = aiAssist == "candidate"
     /** Where AI suggestions show: float (a small card at the keyboard's top right) or bar (among the candidates). */
     val aiPlace get() = s(AI_PLACE, "float")
     /** Where the pinyin shows while typing: float (a tab on the keyboard's top edge) or bar (a line over the candidates). */
@@ -124,7 +133,7 @@ class Prefs(context: Context) {
     val aiCandPauseMs get() = sp.getInt(AI_CAND_PAUSE, 450)
     val aiCandContext get() = sp.getInt(AI_CAND_CONTEXT, 20)
     /** 云联想: the AI service suggests how the text goes on (sends the last 80 characters). */
-    val cloudPredict get() = b(CLOUD_PREDICT, false)
+    val cloudPredict get() = aiAssist == "cloud"
     /** The service and model for 云联想 and AI 候选 ("id|model"); empty: the one for 改写. */
     val quickTarget get() = s(QUICK_TARGET, "")
     val pinyinMode get() = b(PINYIN_MODE, false)
@@ -302,6 +311,7 @@ class Prefs(context: Context) {
         const val PANGU = "pangu"
         const val AI_CANDIDATE = "ai_candidate"
         const val AI_PLACE = "ai_place"
+        const val AI_ASSIST = "ai_assist"
         const val PREEDIT_PLACE = "preedit_place"
         const val CLOUD_CONTEXT = "cloud_context"
         const val CLOUD_PAUSE = "cloud_pause"

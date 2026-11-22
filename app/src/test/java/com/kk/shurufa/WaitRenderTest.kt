@@ -92,6 +92,17 @@ class WaitRenderTest {
         ime.onDestroy()
     }
 
+    @Test fun translateStrip() {
+        val prefs = Prefs(ctx).apply { put(Prefs.ANIMATIONS, false) }
+        val st = com.kk.shurufa.keyboard.TranslateStrip(ctx, prefs).apply {
+            theme = com.kk.shurufa.keyboard.KbTheme.resolve(ctx, prefs)
+            fromName = "自动·English"; toName = "Русский"; engineName = "Gemini"; insertable = "See you tomorrow at the station"
+        }
+        save(st, 136, "translate_empty")
+        st.source = "See you tomorrow at the station"; st.result = "Увидимся завтра на вокзале"; st.replaces = true; st.insertable = ""; st.refresh()
+        save(st, 136, "translate_done")
+    }
+
     @Test fun incognitoKeyboard() {
         val prefs = Prefs(ctx).apply { put(Prefs.ANIMATIONS, false) }
         prefs.state.edit().putBoolean(Prefs.INCOGNITO, true).commit()

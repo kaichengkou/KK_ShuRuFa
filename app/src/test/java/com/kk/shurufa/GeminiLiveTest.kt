@@ -44,7 +44,7 @@ class GeminiLiveTest {
 
     /** AI 候选: a pause on longer pinyin brings the service's reading of it. */
     @Test fun aiCandidate() {
-        val p = prefs(); p.put(Prefs.AI_CANDIDATE, true); p.put(Prefs.AI_PROVIDER, "gemini|gemini-3.5-flash-lite")
+        val p = prefs(); p.put(Prefs.AI_ASSIST, "candidate"); p.put(Prefs.AI_PROVIDER, "gemini|gemini-3.5-flash-lite")
         var ready = 0
         val ai = com.kk.shurufa.ime.AiCandidate(p) { ready++ }
         val input = "womenzaixuexiaomenkoujianmian"
@@ -66,7 +66,7 @@ class GeminiLiveTest {
 
     /** 云联想: a pause after some text brings three continuations of it. */
     @Test fun cloudPredict() {
-        val p = prefs(); p.put(Prefs.CLOUD_PREDICT, true); p.put(Prefs.AI_PROVIDER, "gemini|gemini-3.5-flash-lite")
+        val p = prefs(); p.put(Prefs.AI_ASSIST, "cloud"); p.put(Prefs.AI_PROVIDER, "gemini|gemini-3.5-flash-lite")
         val cloud = com.kk.shurufa.ime.CloudPredict(p) {}
         for (text in listOf("我想去北京", "спасибо за ", "how are ")) {
             val t0 = System.currentTimeMillis()

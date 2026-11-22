@@ -26,6 +26,11 @@ class TranslateStrip(context: Context, prefs: Prefs) : KbView(context, prefs) {
     var onClose: (() -> Unit)? = null
     var onCommit: (() -> Unit)? = null
     var onFeedback: (() -> Unit)? = null
+    /** 一键插入: fills the empty box with [insertable] (what was copied, or what is in the field). */
+    var onInsert: (() -> Unit)? = null
+    var insertable = ""
+    /** 上屏 replaces the text it came from (a selection, or what 一键插入 took from the field). */
+    var replaces = false
 
     var from = "auto"; var to = "en"
     var fromName = "自动"; var toName = "English"
@@ -77,22 +82,34 @@ class TranslateStrip(context: Context, prefs: Prefs) : KbView(context, prefs) {
         bg.color = t.surface
         c.drawRoundRect(card, rad, rad, bg)
         val cardL = card.left; val cardR = card.right; val cardT = card.top; val cardB = card.bottom
-        // header: from ⇄ to … engine ×
+        // header: from ⇄ to … engine ×. The right end is placed first; the two languages share what
+        // is left, their names shortened if they must be, so nothing ever overlaps
         val hy = cardT + dp(8f); val hh = dp(30f)
+        r.set(cardR - dp(6f) - hh - dp(6f), hy, cardR - dp(6f), hy + hh)
+        drawChip(c, r, "", ChipStyle.GHOST, pressed = pressed == "close", icon = "close")
+        hits.add("close", r, slop = dp(4f))
+        val engineLabel = fit(engineName, (cardR - cardL) * 0.3f, Ui.SMALL)
+        val ew = chipWidth(engineLabel, chevron = true, textSp = Ui.SMALL)
+        r.set(r.left - dp(4f) - ew, hy + dp(2f), r.left - dp(4f), hy + hh - dp(2f))
+        drawChip(c, r, engineLabel, if (picking == "engine") ChipStyle.ACTIVE else ChipStyle.SOFT, pressed = pressed == "engine", chevron = true, textSp = Ui.SMALL)
+        hits.add("engine", r, slop = dp(4f))
+        val engineLeft = r.left
         var x = cardL + dp(8f)
-        x = chip(c, "from", fromName, x, hy, hh, if (picking == "from") ChipStyle.ACTIVE else ChipStyle.SOFT, chevron = true)
+        val swapW = hh + dp(10f)
+        val room = engineLeft - dp(8f) - x - swapW
+        val fromW = chipWidth(fromName, chevron = true, textSp = Ui.SMALL + 1f)
+        val toW = chipWidth(toName, chevron = true, textSp = Ui.SMALL + 1f)
+        // the shorter keeps its name; the longer gets the rest
+        val (fromMax, toMax) = if (fromW + toW <= room) fromW to toW
+            else if (fromW <= room / 2) fromW to room - fromW
+            else if (toW <= room / 2) room - toW to toW
+            else room / 2 to room / 2
+        x = chip(c, "from", fit(fromName, fromMax, Ui.SMALL + 1f), x, hy, hh, if (picking == "from") ChipStyle.ACTIVE else ChipStyle.SOFT, chevron = true)
         r.set(x + dp(2f), hy, x + dp(2f) + hh + dp(6f), hy + hh)
         drawChip(c, r, "", ChipStyle.GHOST, pressed = pressed == "swap", icon = "swap")
         hits.add("swap", r, slop = dp(4f))
         x = r.right + dp(2f)
-        chip(c, "to", toName, x, hy, hh, if (picking == "to") ChipStyle.ACTIVE else ChipStyle.SOFT, chevron = true)
-        r.set(cardR - dp(6f) - hh - dp(6f), hy, cardR - dp(6f), hy + hh)
-        drawChip(c, r, "", ChipStyle.GHOST, pressed = pressed == "close", icon = "close")
-        hits.add("close", r, slop = dp(4f))
-        val ew = chipWidth(engineName, chevron = true, textSp = Ui.SMALL)
-        r.set(r.left - dp(4f) - ew, hy + dp(2f), r.left - dp(4f), hy + hh - dp(2f))
-        drawChip(c, r, engineName, if (picking == "engine") ChipStyle.ACTIVE else ChipStyle.SOFT, pressed = pressed == "engine", chevron = true, textSp = Ui.SMALL)
-        hits.add("engine", r, slop = dp(4f))
+        chip(c, "to", fit(toName, toMax, Ui.SMALL + 1f), x, hy, hh, if (picking == "to") ChipStyle.ACTIVE else ChipStyle.SOFT, chevron = true)
         val innerL = cardL + dp(14f); val innerR = cardR - dp(14f)
         val innerT = hy + hh + dp(4f); val innerB = cardB - dp(8f)
         if (picking == "engine") {
@@ -129,9 +146,16 @@ class TranslateStrip(context: Context, prefs: Prefs) : KbView(context, prefs) {
         val res = when { result.isNotEmpty() -> result; busy -> "翻译中…"; status.isNotEmpty() -> status; else -> "译文会显示在这里" }
         val rl = resLayout ?: layout(res, textW, if (result.isNotEmpty()) t.ink else t.hint, TextUtils.TruncateAt.END, medium = result.isNotEmpty()).also { resLayout = it }
         c.save(); c.translate(innerL, innerT + half + (half - rl.height) / 2); rl.draw(c); c.restore()
+        if (source.isEmpty() && !sourceIsSelection && insertable.isNotEmpty()) {
+            // 一键插入: the box is empty, and there is something to translate at hand
+            val iw = chipWidth("一键插入", icon = "clipboard", textSp = Ui.SMALL + 1f)
+            r.set(innerR - iw, innerT + (half - btnH) / 2, innerR, innerT + (half + btnH) / 2)
+            drawChip(c, r, "一键插入", ChipStyle.SOFT, pressed = pressed == "insert", icon = "clipboard", textSp = Ui.SMALL + 1f)
+            hits.add("insert", r, slop = dp(6f))
+        }
         if (result.isNotEmpty()) {
             r.set(innerR - btnW, innerT + half + (half - btnH) / 2, innerR, innerT + half + (half + btnH) / 2)
-            drawChip(c, r, if (sourceIsSelection) "替换" else "上屏", ChipStyle.PRIMARY, pressed = pressed == "commit", textSp = Ui.SMALL + 1f)
+            drawChip(c, r, if (replaces) "替换" else "上屏", ChipStyle.PRIMARY, pressed = pressed == "commit", textSp = Ui.SMALL + 1f)
             hits.add("commit", r, slop = dp(6f))
         }
     }
@@ -153,6 +177,14 @@ class TranslateStrip(context: Context, prefs: Prefs) : KbView(context, prefs) {
     }
 
     /** A header chip at [x]; returns its right edge. */
+    /** [label] shortened with … until its chip fits in [maxW]. */
+    private fun fit(label: String, maxW: Float, textSp: Float): String {
+        if (chipWidth(label, chevron = true, textSp = textSp) <= maxW) return label
+        var n = label.length
+        while (n > 1 && chipWidth(label.take(n) + "…", chevron = true, textSp = textSp) > maxW) n--
+        return label.take(n).trimEnd('·', ' ') + "…"
+    }
+
     private fun chip(c: Canvas, id: String, label: String, x: Float, y: Float, h: Float, style: ChipStyle, chevron: Boolean): Float {
         val w = chipWidth(label, chevron = chevron, textSp = Ui.SMALL + 1f)
         r.set(x, y, x + w, y + h)
@@ -189,6 +221,7 @@ class TranslateStrip(context: Context, prefs: Prefs) : KbView(context, prefs) {
                     "engine" -> { picking = if (picking == "engine") null else "engine"; if (picking != null) pick.reveal(); onEngine?.invoke() }
                     "close" -> onClose?.invoke()
                     "commit" -> onCommit?.invoke()
+                    "insert" -> onInsert?.invoke()
                     else -> if (p.startsWith("lang:")) { val w = picking ?: "to"; picking = null; onPick?.invoke(w, p.removePrefix("lang:")) }
                 }
                 pressed = null; refresh()
