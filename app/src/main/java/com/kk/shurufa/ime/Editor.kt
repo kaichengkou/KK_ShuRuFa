@@ -163,7 +163,8 @@ class Editor(private val ime: InputMethodService, private val prefs: Prefs) {
 
     /** Deletes [text] when it is right before the caret. */
     fun deleteIfBefore(text: String) {
-        if (text.isNotEmpty() && textBefore(text.length) == text) ic?.deleteSurroundingText(text.length, 0)
+        val ic = ic ?: return
+        if (text.isNotEmpty() && textBefore(text.length) == text) { ic.beginBatchEdit(); ic.deleteSurroundingText(text.length, 0); ic.commitText("", 1); ic.endBatchEdit() }
     }
 
     /** Deletes [before] characters, then types [text]: one step for undo. */
@@ -203,16 +204,22 @@ class Editor(private val ime: InputMethodService, private val prefs: Prefs) {
         if (!sel.isNullOrEmpty()) {
             history.push(EditHistory.Op.Delete(sel.toString()))
             last = ""
-            ic.commitText("", 1)
+            ic.beginBatchEdit(); ic.commitText("", 1); ic.endBatchEdit()
         } else {
             // at the start, as far as the field says: the key still goes, for what it cannot show
             if (window.isEmpty()) { ime.sendDownUpKeyEvents(KeyEvent.KEYCODE_DEL); return false }
             val after = ic.getTextAfterCursor(1, 0)?.toString()
             last = window.substring(window.offsetByCodePoints(window.length, -1))
             history.push(EditHistory.Op.Delete(last))
+            // Inside a batch, closed by an empty commit: some editors (Samsung Notes) apply a delete
+            // to the text they show the keyboard but redraw the page only when an edit is closed
+            // that way, as 上滑清空 and typing do. For every other editor the commit does nothing.
+            ic.beginBatchEdit()
             // an empty bracket pair goes together
             if (prefs.autoPair && PAIRS[last] == after) ic.deleteSurroundingText(last.length, 1)
             else if (!ic.deleteSurroundingTextInCodePoints(1, 0)) ic.deleteSurroundingText(last.length, 0)
+            ic.commitText("", 1)
+            ic.endBatchEdit()
         }
         // Some editors (Samsung Notes) agree to a delete and do nothing; they do take a selection
         // replaced by nothing, as 上滑清空 does. Found once, that way is used in that app from then on.
@@ -282,7 +289,7 @@ class Editor(private val ime: InputMethodService, private val prefs: Prefs) {
             is EditHistory.Op.Insert -> {
                 val ok = ic.getTextBeforeCursor(op.text.length, 0)?.toString() == op.text &&
                     (op.tail.isEmpty() || ic.getTextAfterCursor(op.tail.length, 0)?.toString() == op.tail)
-                if (ok) ic.deleteSurroundingText(op.text.length, op.tail.length) else ctrlZ()
+                if (ok) { ic.beginBatchEdit(); ic.deleteSurroundingText(op.text.length, op.tail.length); ic.commitText("", 1); ic.endBatchEdit() } else ctrlZ()
             }
             is EditHistory.Op.Delete -> ic.commitText(op.text, 1)
             is EditHistory.Op.Replace -> {
