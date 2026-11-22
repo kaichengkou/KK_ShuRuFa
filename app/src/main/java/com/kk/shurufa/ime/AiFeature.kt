@@ -12,8 +12,8 @@ import com.kk.shurufa.online.AiWriter
 import com.kk.shurufa.online.Llm
 
 /**
- * 小K's panel. 聊天: talking with 小K (回话 types through the AI sink; the answer streams in; what it
- * decides to remember is kept by [Kay]). 改写 · 翻译: the selection (or else the whole field) goes
+ * 小K's panel. 聊天: talking with 小K (回话 types through the AI sink; the answer streams in).
+ * 改写 · 翻译: the selection (or else the whole field) goes
  * to the chosen model with one of the actions or an instruction typed on the keyboard (输入指令);
  * the answer streams into the panel and can replace the text, go in after it, or be copied.
  */
@@ -146,7 +146,7 @@ class AiFeature(private val host: Host, private val kay: Kay) {
             com.kk.shurufa.online.AiBudget.asked(prefs)
             val r = runCatching {
                 Llm.completeTarget(prefs, t, kay.chatSystem(), kay.chatUser(said),
-                    onText = { s -> handler.post { if (id == run) { pendingAnswer = s.substringBefore("〔").trim(); syncChat() } } },
+                    onText = { s -> handler.post { if (id == run) { pendingAnswer = s.trim(); syncChat() } } },
                     cancelled = { id != run })
             }
             handler.post {

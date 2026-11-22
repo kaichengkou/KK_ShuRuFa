@@ -12,8 +12,8 @@ import java.time.temporal.ChronoUnit
 /**
  * 小K: the small life that lives in the keyboard. It was born the day the keyboard was first used,
  * feels each key, sleeps while nobody types, says one line the first time the keyboard opens on a
- * new day, talks when asked (接着聊, the 小K key), remembers a few things it was told, and answers a
- * few words on the space key (晚安, 生日快乐 …).
+ * new day, and talks when asked (接着聊, the 小K key). Nothing of what it is told is kept beyond
+ * the conversation.
  *
  * The rules that keep it from being a nuisance: one line a day, never a question, gone at the
  * first touch; never in passwords, addresses or 临时模式; nothing typed is ever sent anywhere
@@ -22,6 +22,11 @@ import java.time.temporal.ChronoUnit
  */
 class Kay(private val context: Context, private val prefs: Prefs) {
     val name get() = prefs.kayName
+
+    init {
+        // 0.16.0 kept notes of conversations; it no longer does
+        File(context.filesDir, "kay_memory.txt").delete()
+    }
 
     // ---- age ----
 
@@ -71,7 +76,7 @@ class Kay(private val context: Context, private val prefs: Prefs) {
         val recent = listOfNotNull(st.getString(Prefs.KAY_LINE, null))
         Background.download({
             com.kk.shurufa.online.AiBudget.asked(prefs)
-            Llm.completeQuick(prefs, target, KayLines.greetSystem(name), KayLines.greetUser(facts, notes().map { it.second }, recent))
+            Llm.completeQuick(prefs, target, KayLines.greetSystem(name), KayLines.greetUser(facts, recent))
         }) { raw ->
             val line = KayLines.cleanLine(raw) ?: return@download
             st.edit().putString(Prefs.KAY_LINE_FOR, tomorrow.toString()).putString(Prefs.KAY_LINE, line).apply()
@@ -101,7 +106,7 @@ class Kay(private val context: Context, private val prefs: Prefs) {
         return s.substringBefore('|') to (s.substringAfter('|', "0").toIntOrNull() ?: 0)
     }
 
-    fun chatSystem() = KayLines.chatSystem(name, age(), notes().map { it.second })
+    fun chatSystem() = KayLines.chatSystem(name, age())
 
     /** The conversation so far and [said], as the request's text. */
     fun chatUser(said: String): String = buildString {
@@ -115,69 +120,15 @@ class Kay(private val context: Context, private val prefs: Prefs) {
         append("主人：").append(said)
     }
 
-    /** 小K's answer, cleaned; what it decided to remember (〔记住：…〕) is kept and taken out. */
+    /** 小K's answer, kept in the conversation. */
     fun heard(said: String, raw: String): String {
-        val keep = Regex("〔记住[:：]\\s*([^〕]+)〕").findAll(raw).map { it.groupValues[1].trim() }.toList()
-        for (k in keep) remember(k)
-        val answer = raw.replace(Regex("〔记住[:：][^〕]*〕"), "").trim()
+        val answer = raw.trim()
         talk += Turn(true, said); talk += Turn(false, answer)
         while (talk.size > 20) talk.removeAt(0)
         return answer
     }
 
-    // ---- what it remembers ----
+    /** Forgets this conversation. */
+    fun forgetTalk() = talk.clear()
 
-    private val memoryFile get() = File(context.filesDir, "kay_memory.txt")
-
-    /** (day, note), oldest first; a month at most, thirty at most. */
-    fun notes(): List<Pair<String, String>> {
-        if (!memoryFile.isFile) return emptyList()
-        val since = LocalDate.now().minusDays(30).toString()
-        return memoryFile.readLines().mapNotNull { l -> l.split('\t', limit = 2).takeIf { it.size == 2 && it[0] >= since }?.let { it[0] to it[1] } }
-    }
-
-    fun remember(note: String) {
-        if (note.isBlank() || note.length > 80 || prefs.incognito) return
-        val list = (notes() + (LocalDate.now().toString() to note.replace('\n', ' '))).distinctBy { it.second }.takeLast(30)
-        memoryFile.writeText(list.joinToString("") { "${it.first}\t${it.second}\n" })
-    }
-
-    fun forget(note: String) {
-        val list = notes().filter { it.second != note }
-        memoryFile.writeText(list.joinToString("") { "${it.first}\t${it.second}\n" })
-    }
-
-    fun forgetAll() { memoryFile.delete(); talk.clear() }
-
-    // ---- the space key: 小K's little window ----
-
-    private val heardText = StringBuilder()
-
-    /**
-     * What was just typed ([text], committed): a few words get an answer on the space key
-     * (晚安 → 晚安 ( ˘ω˘ )). Returns the answer, or null.
-     */
-    fun typed(text: String): String? {
-        if (!prefs.kayEggs) return null
-        heardText.append(text)
-        if (heardText.length > 24) heardText.delete(0, heardText.length - 24)
-        val tail = heardText.toString().lowercase()
-        // called by its name
-        if (name.length >= 2 && tail.trimEnd(*TRAIL).endsWith(name.lowercase())) { heardText.setLength(0); return "在呢 (・ω・)" }
-        val hit = KayLines.EGGS.firstOrNull { (keys, _) -> keys.any { tail.endsWith(it) || tail.trimEnd(*TRAIL).endsWith(it) } } ?: return null
-        heardText.setLength(0)
-        return hit.second
-    }
-
-    /** The first key after midnight, once a night: 夜深了. */
-    fun lateNight(now: LocalTime = LocalTime.now(), today: LocalDate = LocalDate.now()): String? {
-        if (!prefs.kayEggs || now.hour !in 0..4) return null
-        if (prefs.state.getString(Prefs.KAY_NIGHT, "") == today.toString()) return null
-        prefs.state.edit().putString(Prefs.KAY_NIGHT, today.toString()).apply()
-        return "夜深了 (－_－)zZ"
-    }
-
-    private companion object {
-        val TRAIL = charArrayOf('！', '!', '。', '.', '~', '～', ' ', '，', ',', '❤', '♥')
-    }
 }

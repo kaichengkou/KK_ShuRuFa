@@ -120,12 +120,14 @@ class Prefs(context: Context) {
     val aiCandidate get() = aiAssist == "candidate"
     /** Where AI suggestions show: float (a small card at the keyboard's top right) or bar (among the candidates). */
     val aiPlace get() = s(AI_PLACE, "float")
-    /** 小K: its name, the line of the day, written by the AI or not, the space-key answers, talks a day. */
+    /** 小K: its name, the line of the day (written by the AI or not), talks a day. */
     val kayName get() = s(KAY_NAME, "小K").ifBlank { "小K" }
     val kayGreet get() = b(KAY_GREET, true)
     val kayAiGreet get() = b(KAY_AI_GREET, true)
-    val kayEggs get() = b(KAY_EGGS, true)
     val kayChatCap get() = sp.getInt(KAY_CHAT_CAP, 30)
+    /** How 小K looks (see KayFace.STYLES), and whether it sits on the space key too. */
+    val kayStyle get() = s(KAY_STYLE, "mochi")
+    val kayOnSpace get() = b(KAY_SPACE, true)
     /** 云联想: characters before the caret sent, the pause before asking (ms), how many continuations. */
     val cloudContext get() = sp.getInt(CLOUD_CONTEXT, 80)
     val cloudPauseMs get() = sp.getInt(CLOUD_PAUSE, 350)
@@ -237,7 +239,7 @@ class Prefs(context: Context) {
         fun rebuildsKeyboard(key: String) = key in LOOK || key.startsWith("key_ovr_")
 
         private val LOOK by lazy {
-            setOf(THEME, STYLE, ACCENT, THEME_WARMTH, THEME_SHADE, ACCENT_HUE, FONT_STAMP, KEY_HEIGHT, KEY_GAP, ROW_GAP, KEY_RADIUS, LABEL_SCALE, HINT_SCALE, SHOW_HINTS, SHOW_ALL_HINTS, HINT_MODE, CAND_FONT,
+            setOf(THEME, STYLE, ACCENT, KAY_STYLE, KAY_SPACE, THEME_WARMTH, THEME_SHADE, ACCENT_HUE, FONT_STAMP, KEY_HEIGHT, KEY_GAP, ROW_GAP, KEY_RADIUS, LABEL_SCALE, HINT_SCALE, SHOW_HINTS, SHOW_ALL_HINTS, HINT_MODE, CAND_FONT,
                 KEY_BORDERS, NUMBER_ROW, CAND_SCALE, BOTTOM_PADDING, CURSOR_LABELS, LANGUAGES, TOP_ROW_SCRIPTS, LAYOUT_RELOAD)
         }
 
@@ -316,8 +318,9 @@ class Prefs(context: Context) {
         const val KAY_NAME = "kay_name"
         const val KAY_GREET = "kay_greet"
         const val KAY_AI_GREET = "kay_ai_greet"
-        const val KAY_EGGS = "kay_eggs"
         const val KAY_CHAT_CAP = "kay_chat_cap"
+        const val KAY_STYLE = "kay_style"
+        const val KAY_SPACE = "kay_space"
         // 小K's state (kept with the state, not the settings)
         const val KAY_BORN = "kay_born"
         const val KAY_GREETED = "kay_greeted"
@@ -325,7 +328,6 @@ class Prefs(context: Context) {
         const val KAY_LINE = "kay_line"
         const val KAY_ASKED = "kay_asked"
         const val KAY_TALKS = "kay_talks"
-        const val KAY_NIGHT = "kay_night"
         const val CLOUD_CONTEXT = "cloud_context"
         const val CLOUD_PAUSE = "cloud_pause"
         const val CLOUD_COUNT = "cloud_count"

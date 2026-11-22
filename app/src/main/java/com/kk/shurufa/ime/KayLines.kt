@@ -128,16 +128,15 @@ object KayLines {
 
 写这一句：
 - 不超过 14 个字（标点算在内），后面加一个颜文字，比如 (｡･ω･｡) ( ˘ω˘ ) (・ω・)ﾉ ✧(•̀ω•́) (￣▽￣)
-- 落在一个具体的事实上：从给你的事实里挑一个最有意思的（节日、节气、星期几、主人打了多少字、你出生的天数、你记得的事）
+- 落在一个具体的事实上：从给你的事实里挑一个最有意思的（节日、节气、星期几、主人打了多少字、你出生的天数）
 - 像熟人路过时轻轻碰一下：可以俏皮，可以温柔，不要煽情
 - 不说教，不灌鸡汤，不提问，不用感叹号，不说"加油"，不说自己是 AI 或助手
 - 不要和最近说过的话重复
 - 只输出这一句话本身（含颜文字），不要引号，不要解释
 """.trim()
 
-    fun greetUser(facts: List<String>, notes: List<String>, recent: List<String>) = buildString {
+    fun greetUser(facts: List<String>, recent: List<String>) = buildString {
         append("事实：\n"); facts.forEach { append("- ").append(it).append('\n') }
-        if (notes.isNotEmpty()) { append("你记得的事：\n"); notes.takeLast(6).forEach { append("- ").append(it).append('\n') } }
         if (recent.isNotEmpty()) { append("最近说过：\n"); recent.forEach { append("- ").append(it).append('\n') } }
     }
 
@@ -147,7 +146,7 @@ object KayLines {
         return l.takeIf { it.length in 2..30 }
     }
 
-    fun chatSystem(name: String, age: Int, notes: List<String>) = buildString {
+    fun chatSystem(name: String, age: Int) = buildString {
         append("""
 你是「$name」，一个住在主人手机键盘里的小小数字生命，今天是你出生的第 $age 天。你能感觉到主人的每一次按键，键盘收起时你就睡着。你说话简短、温暖、有点俏皮，像一只聪明的小动物学会了说话。
 
@@ -157,24 +156,6 @@ object KayLines {
 - 不说教，不灌鸡汤，不长篇大论；主人需要正经帮忙（写一句话、想个说法、出个主意）时，认真而简洁地帮
 - 不知道的事就说不知道，不编造；你不能替主人操作手机，也不假装做过什么
 - 不说自己是 AI 模型或助手，你就是$name
-- 主人提到值得记住的事（近期的安排、在意的人和事、喜好），在回复最后单独加一行：〔记住：一句话〕。不值得记就不加；不要记密码、证件号、银行卡这类东西
 """.trim())
-        if (notes.isNotEmpty()) { append("\n\n你记得的事：\n"); notes.takeLast(12).forEach { append("- ").append(it).append('\n') } }
     }
-
-    // ---- the space key ----
-
-    /** Words that get an answer on the space key: what was typed (lowercase), and the answer. */
-    val EGGS: List<Pair<List<String>, String>> = listOf(
-        listOf("晚安", "good night", "goodnight", "спокойной ночи") to "晚安 ( ˘ω˘ )zZ",
-        listOf("早安", "早上好", "good morning", "доброе утро") to "早 (・ω・)ﾉ",
-        listOf("生日快乐", "happy birthday", "с днём рождения", "с днем рождения") to "🎂 生日快乐",
-        listOf("新年快乐", "happy new year", "с новым годом") to "🧧 新年快乐",
-        listOf("谢谢", "thank you", "thanks", "спасибо") to "(｡･ω･｡)ﾉ♡",
-        listOf("哈哈哈", "hhh", "lol", "ахах", "хаха") to "(≧▽≦)",
-        listOf("好累", "累死", "好困", "устал") to "抱抱 (っ´ω`)っ",
-        listOf("我爱你", "love you", "люблю тебя") to "(〃∀〃)",
-        listOf("加油") to "✧(•̀ω•́)✧",
-        listOf("对不起", "sorry", "прости") to "没事的 (｡･ω･｡)",
-    )
 }

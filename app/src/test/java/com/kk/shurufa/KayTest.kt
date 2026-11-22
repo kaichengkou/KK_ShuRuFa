@@ -18,6 +18,7 @@ import com.kk.shurufa.ime.KkImeService
 import com.kk.shurufa.keyboard.KayFace
 import com.kk.shurufa.keyboard.KayLife
 import com.kk.shurufa.keyboard.KbTheme
+import com.kk.shurufa.keyboard.Colors
 import com.kk.shurufa.keyboard.Key
 import com.kk.shurufa.keyboard.Output
 import org.junit.Assert.assertEquals
@@ -67,7 +68,7 @@ class KayTest {
         assertNull(KayLines.cleanLine("这是一句很长很长的话，长到放不进键盘上的那一行里，所以不要它了"))
     }
 
-    @Test fun oneLineADayAndItsMemory() {
+    @Test fun oneLineADayAndTalking() {
         val prefs = Prefs(ctx)
         prefs.state.edit().clear().commit()
         val kay = Kay(ctx, prefs)
@@ -78,20 +79,12 @@ class KayTest {
         assertFalse(kay.greetingDue(LocalTime.of(9, 0), today))
         assertTrue(kay.greetingDue(LocalTime.of(9, 0), today.plusDays(1)))
         assertEquals(1, kay.age(today))
-        // what it is told to remember is kept, and taken out of what it says
-        kay.forgetAll()
-        val said = kay.heard("周五要考俄语", "那周四早点睡 (・ω・)\n〔记住：周五考俄语〕")
-        assertEquals("那周四早点睡 (・ω・)", said)
-        assertEquals(listOf("周五考俄语"), kay.notes().map { it.second })
-        assertTrue(kay.chatSystem().contains("周五考俄语"))
+        // what was said stays in the conversation only
+        kay.forgetTalk()
+        assertEquals("那周四早点睡 (・ω・)", kay.heard("周五要考俄语", "那周四早点睡 (・ω・)\n"))
         assertTrue(kay.chatUser("在吗").contains("主人：周五要考俄语"))
-        kay.forget("周五考俄语")
-        assertTrue(kay.notes().isEmpty())
-        // a few words get an answer on the space key
-        assertEquals("晚安 ( ˘ω˘ )zZ", kay.typed("那我先睡了，晚安"))
-        assertNull(kay.typed("好的"))
-        assertEquals("(｡･ω･｡)ﾉ♡", kay.typed("Спасибо!"))
-        assertEquals("在呢 (・ω・)", kay.typed("小k"))
+        assertFalse(kay.chatSystem().contains("记住"))
+        assertFalse(File(ctx.filesDir, "kay_memory.txt").exists())
         // the cap on talking
         prefs.put(Prefs.KAY_CHAT_CAP, 2)
         assertTrue(kay.mayTalk()); kay.talked(); kay.talked()
@@ -113,6 +106,48 @@ class KayTest {
         val c = Canvas(b); c.drawColor(t.background)
         moods.forEachIndexed { i, m -> KayFace.draw(c, (45 + i * 90) * d, 50 * d, size, t.inkSoft, t.accentSoft, 0x8CF08C9B.toInt(), 1_000_000L, 12, m) }
         save(b, "kay_faces")
+    }
+
+    /** 设计稿: every style in four moods, at the toolbar's size, and on the space key, light and dark. */
+    @Test fun designSheet() {
+        val prefs = Prefs(ctx)
+        prefs.put(Prefs.THEME, "light"); val light = KbTheme.resolve(ctx, prefs)
+        prefs.put(Prefs.THEME, "dark"); val dark = KbTheme.resolve(ctx, prefs)
+        prefs.sp.edit().remove(Prefs.THEME).apply()
+        val rowH = 96 * d
+        val styles = KayFace.STYLES.keys.toList()
+        val b = Bitmap.createBitmap((760 * d).toInt(), (rowH * styles.size + 40 * d).toInt(), Bitmap.Config.ARGB_8888)
+        val c = Canvas(b); c.drawColor(android.graphics.Color.WHITE)
+        val tp = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { textSize = 13 * d; color = 0xFF555555.toInt() }
+        val heads = listOf("平静" to 70f, "专注" to 140f, "被摸头" to 210f, "打盹" to 280f, "工具栏" to 355f, "空格键 · 浅色" to 470f, "空格键 · 深色" to 640f)
+        for ((h, x) in heads) { tp.textAlign = android.graphics.Paint.Align.CENTER; c.drawText(h, x * d, 24 * d, tp) }
+        val moods = listOf(KayLife.Mood.CALM, KayLife.Mood.BUSY, KayLife.Mood.HAPPY, KayLife.Mood.DOZE)
+        val blush = 0x8CF08C9B.toInt()
+        styles.forEachIndexed { row, st ->
+            val y = 40 * d + row * rowH + rowH / 2
+            tp.textAlign = android.graphics.Paint.Align.LEFT; tp.color = 0xFF222222.toInt(); tp.textSize = 15 * d
+            c.drawText("${'A' + row} ${KayFace.STYLES[st]}", 8 * d, y + 5 * d, tp)
+            tp.color = 0xFF555555.toInt(); tp.textSize = 13 * d
+            val t = light
+            moods.forEachIndexed { i, m -> KayFace.draw(c, (70 + i * 70) * d + 30 * d, y, 46 * d, t.inkSoft, t.accentSoft, blush, 1_000_000L, 12, m, t.accent, st) }
+            // the toolbar, as it is: a strip of background
+            val bg = android.graphics.Paint().apply { color = t.background }
+            c.drawRect(330 * d, y - 22 * d, 385 * d, y + 22 * d, bg)
+            KayFace.draw(c, 357 * d, y, 25 * d, t.inkSoft, t.soft, blush, 1_000_000L, 12, KayLife.Mood.CALM, t.accent, st)
+            // the space key, light and dark: the face just before the language
+            for ((k, th) in listOf(light, dark).withIndex()) {
+                val kx = (395 + k * 170) * d
+                bg.color = th.background; c.drawRect(kx - 6 * d, y - 26 * d, kx + 156 * d, y + 26 * d, bg)
+                bg.color = th.surface
+                c.drawRoundRect(kx, y - 20 * d, kx + 150 * d, y + 20 * d, 8 * d, 8 * d, bg)
+                val lp = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { textSize = 14.5f * d; color = th.hint; textAlign = android.graphics.Paint.Align.LEFT }
+                val label = "中文"; val lw = lp.measureText(label); val face = 17 * d
+                val start = kx + 75 * d - (face + 5 * d + lw) / 2
+                KayFace.draw(c, start + face / 2, y, face, th.hint, if (st == "dots") 0 else Colors.alpha(th.ink, 0x16), blush, 1_000_000L, 12, KayLife.Mood.CALM, th.accent, st)
+                c.drawText(label, start + face + 5 * d, y + 5 * d, lp)
+            }
+        }
+        save(b, "kay_designs")
     }
 
     @Test fun chatPanel() {

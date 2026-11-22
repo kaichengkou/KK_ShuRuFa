@@ -194,8 +194,6 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
 
     override fun onCreate() {
         super.onCreate()
-        // 小K listens for a few words (晚安, 生日快乐 …) and answers on the space key
-        editor.onTyped = { t -> if (!prefs.incognito) kay.typed(t)?.let { spaceSay(it) } }
         haptics = Haptics(this, prefs)
         repo = LayoutRepo(this, overrides = { KeyOverrides.load(prefs, it) })
         predictor = Predictor(this)
@@ -491,7 +489,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     private fun dropGreeting(wave: Boolean = false) {
         if (greeting == null) return
         greeting = null
-        if (wave) spaceSay("(・ω・)ﾉ")
+        if (wave && !kayOnSpace()) spaceSay("(・ω・)ﾉ")
         if (built) syncBar()
     }
 
@@ -508,10 +506,13 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         keyboard.postDelayed({ if (SystemClock.uptimeMillis() >= spaceNoteUntil) { spaceNote = null; keyboard.invalidate() } }, ms + 20)
     }
 
+    override fun kayOnSpace() = prefs.kayOnSpace && !prefs.incognito && !editor.secret
+
     override fun onKayPat() {
         com.kk.shurufa.keyboard.KayLife.pat(SystemClock.uptimeMillis())
         haptics.play(HapticEvent.OPTION)
-        spaceSay(listOf("嘿嘿 (｡>ω<｡)", "再摸一下 (〃∀〃)", "${kay.name}在呢 (・ω・)").random())
+        // on the space key it simply smiles; otherwise it says so there
+        if (kayOnSpace()) keyboard.invalidate() else spaceSay(listOf("嘿嘿 (｡>ω<｡)", "再摸一下 (〃∀〃)", "${kay.name}在呢 (・ω・)").random())
         bar.invalidate()
     }
 
@@ -1574,10 +1575,9 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     }
 
     override fun onPress(key: Key) {
-        // 小K feels the keys: quick typing, a run of deletes, and the first key after midnight
+        // 小K feels the keys: quick typing, a run of deletes
         val now = SystemClock.uptimeMillis()
         if (key.fn == "backspace") com.kk.shurufa.keyboard.KayLife.delete(now) else com.kk.shurufa.keyboard.KayLife.key(now)
-        if (!editor.secret && !prefs.incognito) kay.lateNight()?.let { spaceSay(it, 3200) }
         haptics.play(when (key.fn) {
             null -> HapticEvent.LETTER
             "space" -> HapticEvent.SPACE

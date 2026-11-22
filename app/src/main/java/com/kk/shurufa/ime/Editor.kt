@@ -42,11 +42,7 @@ class Editor(private val ime: InputMethodService, private val prefs: Prefs) {
 
     private fun record(text: String, source: TypingStats.Source) {
         if (recording) stats?.record(text, source)
-        if (!secret) onTyped?.invoke(text)
     }
-
-    /** Everything that goes into the field, as it goes in (小K listens for a few words). */
-    var onTyped: ((String) -> Unit)? = null
 
     /** Selection as last reported by the editor. */
     var selStart = 0

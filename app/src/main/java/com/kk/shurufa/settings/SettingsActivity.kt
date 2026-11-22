@@ -90,6 +90,8 @@ import androidx.compose.material.icons.outlined.Key
 import androidx.compose.material.icons.outlined.Restore
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.material.icons.outlined.Insights
 import androidx.compose.material.icons.outlined.Backup
@@ -1640,27 +1642,31 @@ private fun KayGroups(prefs: Prefs) {
                 modifier = Modifier.width(150.dp), shape = RoundedCornerShape(14.dp), placeholder = { Text("小K") })
         }
         Note("住在键盘里的小家伙，今天是它出生的第 ${kay.age()} 天。工具栏上那个会眨眼的就是它：点一下打开它，长按摸摸头。")
-        Toggle(prefs, Prefs.KAY_GREET, "每天打个招呼", "每天第一次在空白输入框里打开键盘时，在工具栏说一句话。点「已阅」、按任何键或点别处就消失", true)
-        Toggle(prefs, Prefs.KAY_AI_GREET, "这句话让 AI 来写", "每天傍晚请 AI 写好第二天的那一句（一天一次，只发日期、节日、节气和字数，不发你写的内容）。没有 AI 服务时用它自己的话", true)
-        Toggle(prefs, Prefs.KAY_EGGS, "空格键上的小回应", "打出「晚安」「谢谢」「生日快乐」或它的名字，它在空格键上回一句；深夜第一次打字时也会提醒一声", true)
-    }
-    Group("聊天和记忆") {
-        IntSlider(prefs, Prefs.KAY_CHAT_CAP, "每天最多聊", 30, 5..100, " 句", "聊天会把你说的话发给 AI 服务；到了上限它就去睡了")
-        var notes by remember { mutableStateOf(kay.notes()) }
-        if (notes.isEmpty()) Note("它记得的事会列在这里：聊天时你提到的安排、在意的事。只存在这台手机上。")
-        else {
-            Text("它记得的事", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 4.dp))
-            notes.reversed().forEach { (day, note) ->
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text(note, style = MaterialTheme.typography.bodyMedium)
-                        Text(day, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        LocalPageKeys.current?.add(Prefs.KAY_STYLE)
+        var look by remember { mutableStateOf(prefs.kayStyle) }
+        Text("样子", modifier = Modifier.padding(top = 6.dp))
+        val kb = remember { com.kk.shurufa.keyboard.KbTheme.resolve(ctx, prefs) }
+        Row(Modifier.fillMaxWidth().horizontalScroll(androidx.compose.foundation.rememberScrollState()).padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            com.kk.shurufa.keyboard.KayFace.STYLES.forEach { (id, label) ->
+                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clip(RoundedCornerShape(14.dp))
+                    .then(if (look == id) Modifier.background(MaterialTheme.colorScheme.secondaryContainer) else Modifier)
+                    .clickable { look = id; prefs.put(Prefs.KAY_STYLE, id) }.padding(horizontal = 10.dp, vertical = 8.dp)) {
+                    androidx.compose.foundation.Canvas(Modifier.size(44.dp)) {
+                        drawIntoCanvas { cv ->
+                            com.kk.shurufa.keyboard.KayFace.draw(cv.nativeCanvas, size.width / 2, size.height / 2, size.width * 0.8f, kb.inkSoft, kb.accentSoft,
+                                0x8CF08C9B.toInt(), 1_000_000L, 12, com.kk.shurufa.keyboard.KayLife.Mood.CALM, kb.accent, id)
+                        }
                     }
-                    TextButton(onClick = { kay.forget(note); notes = kay.notes() }) { Text("忘掉") }
+                    Text(label, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 4.dp))
                 }
             }
-            TextButton(onClick = { kay.forgetAll(); notes = emptyList() }) { Text("全部忘掉") }
         }
+        Toggle(prefs, Prefs.KAY_SPACE, "空格键上也有它", "在语言名字旁边，打字时也看得见。它在那里只眨眼、瞟一眼、删字多了皱眉、没人打字时打盹，不跟着每个键动", true)
+        Toggle(prefs, Prefs.KAY_GREET, "每天打个招呼", "每天第一次在空白输入框里打开键盘时，在工具栏说一句话。点「已阅」、按任何键或点别处就消失", true)
+        Toggle(prefs, Prefs.KAY_AI_GREET, "这句话让 AI 来写", "每天傍晚请 AI 写好第二天的那一句（一天一次，只发日期、节日、节气和字数，不发你写的内容）。没有 AI 服务时用它自己的话", true)
+    }
+    Group("聊天") {
+        IntSlider(prefs, Prefs.KAY_CHAT_CAP, "每天最多聊", 30, 5..100, " 句", "聊天会把你说的话发给 AI 服务；到了上限它就去睡了。聊过的话不保存，键盘关掉就忘了")
     }
 }
 
