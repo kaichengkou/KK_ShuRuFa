@@ -303,6 +303,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     // ---- the input view -----------------------------------------------------------------
 
     override fun onCreateInputView(): View {
+        editor.onStubborn = { notice("这个应用不接受普通删除，已改用「选中再删」的方式") }
         // a rebuilt view starts without a query: the strip it typed into is replaced
         if (sink != null) dropSink()
         ghost = null

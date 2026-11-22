@@ -70,6 +70,33 @@ class BackspaceTest {
         Prefs(ctx).sp.edit().remove(Prefs.LANGUAGES).apply()
     }
 
+    /** Like Samsung Notes: shows its text, agrees to deletes and keys and ignores them, but takes a selection replaced. */
+    private class SelectOnly(view: View) : BaseInputConnection(view, true) {
+        val text: Editable = SpannableStringBuilder("abc").also { Selection.setSelection(it, 3) }
+        override fun getEditable(): Editable = text
+        override fun deleteSurroundingText(b: Int, a: Int) = true
+        override fun deleteSurroundingTextInCodePoints(b: Int, a: Int) = true
+        override fun sendKeyEvent(event: KeyEvent) = true
+        override fun getExtractedText(request: android.view.inputmethod.ExtractedTextRequest?, flags: Int) =
+            android.view.inputmethod.ExtractedText().apply {
+                this.text = SpannableStringBuilder(this@SelectOnly.text).toString(); startOffset = 0
+                selectionStart = Selection.getSelectionStart(this@SelectOnly.text); selectionEnd = Selection.getSelectionEnd(this@SelectOnly.text)
+            }
+    }
+
+    @Test fun editorsThatOnlyReplaceASelection() {
+        Prefs(ctx).apply { put(Prefs.ANIMATIONS, false); put(Prefs.LANGUAGES, "en,zh") }
+        val ime = Robolectric.buildService(KkImeService::class.java).create().get()
+        val view = ime.onCreateInputView()
+        val field = SelectOnly(view)
+        android.inputmethodservice.InputMethodService::class.java.getDeclaredField("mStartedInputConnection").apply { isAccessible = true }.set(ime, field)
+        ime.onStartInputView(EditorInfo().apply { inputType = InputType.TYPE_CLASS_TEXT; packageName = "com.samsung.android.app.notes" }, false)
+        repeat(2) { ime.onFunction(Key(fn = "backspace")); shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(20)) }
+        assertEquals("a", field.text.toString())
+        ime.onDestroy()
+        Prefs(ctx).sp.edit().remove(Prefs.LANGUAGES).apply()
+    }
+
     @Test fun richEditorsGetARealKey() {
         Prefs(ctx).apply { put(Prefs.ANIMATIONS, false); put(Prefs.LANGUAGES, "en,zh") }
         val ime = Robolectric.buildService(KkImeService::class.java).create().get()
