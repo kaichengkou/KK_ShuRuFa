@@ -44,6 +44,32 @@ class BackspaceTest {
         }
     }
 
+    /** Says what is before the caret, claims a selection that is not there, and agrees to deletes it ignores. */
+    private class Liar(view: View) : BaseInputConnection(view, true) {
+        val text: Editable = SpannableStringBuilder("abc").also { Selection.setSelection(it, 3) }
+        override fun getEditable(): Editable = text
+        override fun getSelectedText(flags: Int): CharSequence = "abc"
+        override fun deleteSurroundingText(b: Int, a: Int) = true
+        override fun deleteSurroundingTextInCodePoints(b: Int, a: Int) = true
+        override fun sendKeyEvent(event: KeyEvent): Boolean {
+            if (event.action == KeyEvent.ACTION_DOWN && event.keyCode == KeyEvent.KEYCODE_DEL) { val e = Selection.getSelectionEnd(text); if (e > 0) text.delete(e - 1, e) }
+            return true
+        }
+    }
+
+    @Test fun editorsThatSayYesAndDoNothing() {
+        Prefs(ctx).apply { put(Prefs.ANIMATIONS, false); put(Prefs.LANGUAGES, "en,zh") }
+        val ime = Robolectric.buildService(KkImeService::class.java).create().get()
+        val view = ime.onCreateInputView()
+        val field = Liar(view)
+        android.inputmethodservice.InputMethodService::class.java.getDeclaredField("mStartedInputConnection").apply { isAccessible = true }.set(ime, field)
+        ime.onStartInputView(EditorInfo().apply { inputType = InputType.TYPE_CLASS_TEXT; packageName = "com.samsung.android.app.notes" }, false)
+        repeat(2) { ime.onFunction(Key(fn = "backspace")); shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(20)) }
+        assertEquals("a", field.text.toString())
+        ime.onDestroy()
+        Prefs(ctx).sp.edit().remove(Prefs.LANGUAGES).apply()
+    }
+
     @Test fun richEditorsGetARealKey() {
         Prefs(ctx).apply { put(Prefs.ANIMATIONS, false); put(Prefs.LANGUAGES, "en,zh") }
         val ime = Robolectric.buildService(KkImeService::class.java).create().get()
