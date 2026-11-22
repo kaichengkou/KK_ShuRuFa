@@ -241,14 +241,26 @@ class Editor(private val ime: InputMethodService, private val prefs: Prefs) {
     /** Told when an app turns out to need [deleteBySelecting]. */
     var onStubborn: (() -> Unit)? = null
 
-    /** Apps whose editor deletes only by replacing a selection (see [deleteBackward]). */
-    private val stubborn = HashSet<String>()
+    /**
+     * Apps whose editor deletes only by replacing a selection (see [deleteBackward]). Samsung Notes
+     * is known: it takes a delete into the text it shows the keyboard but never onto the page,
+     * while a selection replaced by nothing (上滑清空, a selection deleted) works.
+     */
+    private val stubborn = hashSetOf("com.samsung.android.app.notes", "com.samsung.android.app.memo")
 
     /** Deletes the selection, or the character before the caret, by selecting it and putting nothing in its place. */
     private fun deleteBySelecting(ic: InputConnection, known: android.view.inputmethod.ExtractedText? = null): Boolean {
         val et = known ?: ic.getExtractedText(ExtractedTextRequest(), 0)
         val text = et?.text
-        if (et == null || text == null) { ime.sendDownUpKeyEvents(KeyEvent.KEYCODE_DEL); return true }
+        if (et == null || text == null) {
+            // no full text: the caret as the editor last reported it, and the character before it
+            val before = ic.getTextBeforeCursor(2, 0)?.toString()
+            if (before.isNullOrEmpty() || selEnd <= 0) { ime.sendDownUpKeyEvents(KeyEvent.KEYCODE_DEL); return !before.isNullOrEmpty() || before == null }
+            val from = if (hasSelection) minOf(selStart, selEnd) else selEnd - Character.charCount(Character.codePointBefore(before, before.length))
+            if (!hasSelection) { val gone = before.substring(before.offsetByCodePoints(before.length, -1)); history.push(EditHistory.Op.Delete(gone)); onCharDeleted(gone) }
+            ic.beginBatchEdit(); ic.setSelection(from, maxOf(selStart, selEnd)); ic.commitText("", 1); ic.endBatchEdit()
+            return true
+        }
         val s = minOf(et.selectionStart, et.selectionEnd).coerceIn(0, text.length)
         val e = maxOf(et.selectionStart, et.selectionEnd).coerceIn(0, text.length)
         val from = if (s != e) s else if (e > 0) e - Character.charCount(Character.codePointBefore(text, e)) else return false

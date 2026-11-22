@@ -63,7 +63,7 @@ class BackspaceTest {
         val view = ime.onCreateInputView()
         val field = Liar(view)
         android.inputmethodservice.InputMethodService::class.java.getDeclaredField("mStartedInputConnection").apply { isAccessible = true }.set(ime, field)
-        ime.onStartInputView(EditorInfo().apply { inputType = InputType.TYPE_CLASS_TEXT; packageName = "com.samsung.android.app.notes" }, false)
+        ime.onStartInputView(EditorInfo().apply { inputType = InputType.TYPE_CLASS_TEXT; packageName = "com.example.notes" }, false)
         repeat(2) { ime.onFunction(Key(fn = "backspace")); shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(20)) }
         assertEquals("a", field.text.toString())
         ime.onDestroy()
@@ -84,6 +84,7 @@ class BackspaceTest {
             }
     }
 
+    /** Samsung Notes: deletes are taken into what it tells the keyboard but never reach the page; it is not even asked. */
     @Test fun editorsThatOnlyReplaceASelection() {
         Prefs(ctx).apply { put(Prefs.ANIMATIONS, false); put(Prefs.LANGUAGES, "en,zh") }
         val ime = Robolectric.buildService(KkImeService::class.java).create().get()
@@ -103,7 +104,7 @@ class BackspaceTest {
         val view = ime.onCreateInputView()
         val field = Rich(view)
         android.inputmethodservice.InputMethodService::class.java.getDeclaredField("mStartedInputConnection").apply { isAccessible = true }.set(ime, field)
-        ime.onStartInputView(EditorInfo().apply { inputType = InputType.TYPE_CLASS_TEXT; packageName = "com.samsung.android.app.notes" }, false)
+        ime.onStartInputView(EditorInfo().apply { inputType = InputType.TYPE_CLASS_TEXT; packageName = "com.example.richnotes" }, false)
         repeat(2) { ime.onFunction(Key(fn = "backspace")); shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(20)) }
         assertEquals("a", field.text.toString())
         assertTrue(field.keys >= 2)
