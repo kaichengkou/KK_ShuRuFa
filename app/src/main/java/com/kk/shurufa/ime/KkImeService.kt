@@ -460,6 +460,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         learning.flush(all = true)
         if (sink != null) dropSink()
         stopBackgroundWork()
+        editor.selectMode = false
         if (RimeEngine.ready) RimeBridge.clearComposition()
         zh.reset()
         predictions = emptyList()
@@ -582,6 +583,8 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         if (p != Panel.LETTERS && sink != null) dropSink()
         if (from == Panel.VOICE && p != Panel.VOICE) voice.onClosed()
         if (from == Panel.AI && p != Panel.AI) ai.cancel()
+        // 选择 ends with the cursor panel: opened again, it starts as 选择, not 选择中
+        if (from == Panel.CURSOR && p != Panel.CURSOR) editor.selectMode = false
         panel = p
         if (p != Panel.LETTERS && p != Panel.CANDIDATES) pinyinEdit = false
         val oldTotal = (if (bar.visibility == View.VISIBLE) bar.height else 0) + content.height

@@ -29,7 +29,9 @@ class Predictor(private val context: Context) {
     fun nextLine(before: String): String? {
         val p = poetry ?: return null
         val t = before.trimEnd { !Character.isLetterOrDigit(it) && Character.UnicodeScript.of(it.code) != Character.UnicodeScript.HAN }
-        for (len in minOf(14, t.length) downTo 4) p[t.takeLast(len)]?.let { return it }
+        // the next line comes with its marks (，疑是地上霜。); one already typed is not doubled
+        val marked = t.length < before.length
+        for (len in minOf(14, t.length) downTo 4) p[t.takeLast(len)]?.let { return if (marked) it.trimStart { c -> c in "，。！？；：、" } else it }
         return null
     }
 

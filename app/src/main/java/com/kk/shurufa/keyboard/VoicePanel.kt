@@ -94,6 +94,50 @@ class VoicePanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
 
     override fun onDetachedFromWindow() { super.onDetachedFromWindow(); handler.removeCallbacks(repeat); pressed = null }
 
+    private val wave = android.graphics.Path()
+    /** The voice, slowed: the waves swell with a phrase and settle in a pause, never twitch. */
+    private var swell = 0f
+    private var lastWave = 0L
+
+    /**
+     * 听的样子: three soft layers of water around the button. Each is a circle whose edge is moved
+     * by a few slow sine waves going round at their own pace, so the outline never repeats; the
+     * voice lifts the waves and the whole shape, the outer layers later and fainter, like ripples
+     * on a cup of tea. Silent, it breathes, barely.
+     */
+    private fun drawWaves(c: Canvas, cx: Float, cy: Float, r: Float, l: Float) {
+        val now = Motion.now()
+        val dt = if (lastWave == 0L) 16f else (now - lastWave).coerceIn(1, 64).toFloat()
+        lastWave = now
+        // rises quickly, falls slowly
+        val target = level.value
+        val k = if (target > swell) 1f - kotlin.math.exp(-dt / 70f) else 1f - kotlin.math.exp(-dt / 320f)
+        swell += (target - swell) * k
+        val sec = now / 1000f
+        val breath = 0.5f + 0.5f * kotlin.math.sin(sec * 2.1f)
+        val layers = 3
+        for (i in layers - 1 downTo 0) {
+            val f = i / (layers - 1f)                     // 0 inner … 1 outer
+            val v = swell * (1f - 0.35f * f)
+            val base = r * (1.06f + 0.16f * f + (0.22f + 0.2f * f) * v + 0.02f * breath)
+            val amp = r * (0.012f + (0.05f + 0.04f * f) * v)
+            wave.reset()
+            val n = 96
+            for (j in 0..n) {
+                val a = (j % n) * (2 * Math.PI.toFloat() / n)
+                val d = kotlin.math.sin(3 * a + sec * (1.3f + 0.4f * i)) * 0.55f +
+                    kotlin.math.sin(5 * a - sec * (1.9f - 0.3f * i) + i) * 0.3f +
+                    kotlin.math.sin(8 * a + sec * 2.7f + 2f * i) * 0.15f * v
+                val rr = base + amp * d
+                val x = cx + rr * kotlin.math.cos(a); val y = cy + rr * kotlin.math.sin(a)
+                if (j == 0) wave.moveTo(x, y) else wave.lineTo(x, y)
+            }
+            wave.close()
+            bg.color = Colors.fade(theme.accentSoft, l * (1f - 0.42f * f))
+            c.drawPath(wave, bg)
+        }
+    }
+
     override fun onDraw(c: Canvas) {
         val t = theme
         c.drawColor(t.background)
@@ -123,17 +167,7 @@ class VoicePanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
         var again = level.running || lit.running
         val l = lit.value
         if (l > 0.01f) {
-            val lv = level.value
-            // listening: rings keep flowing out from the button, faster and wider as the voice rises
-            val period = 1700f - 700f * lv
-            val ph = (Motion.now() % period.toLong()) / period
-            for (k in 0..1) {
-                val p = (ph + k * 0.5f) % 1f
-                bg.color = Colors.fade(t.accentSoft, l * (1f - p) * 0.9f)
-                c.drawCircle(cx, cy, r * (1.02f + (0.55f + 0.45f * lv) * p), bg)
-            }
-            bg.color = Colors.fade(t.accentSoft, l)
-            c.drawCircle(cx, cy, r * (1.08f + 0.42f * lv), bg)
+            drawWaves(c, cx, cy, r, l)
             again = true
         }
         val idle = if (pressed == "mic") t.softPressed else t.soft

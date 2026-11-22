@@ -50,6 +50,12 @@ class WaitRenderTest {
         val vp = VoicePanel(ctx, prefs).apply { language = "中文"; engineName = "Gemini"; mode = "转文字"; look = VoicePanel.Look.LISTENING; status = "正在听…" }
         vp.setLevel(0.7f); shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(200))
         save(vp, 220, "voice_listening")
+        // the waves through a phrase: quiet, speaking, loud, then settling
+        for ((i, lv) in listOf(0f, 0.35f, 0.7f, 1f, 0.6f, 0.1f).withIndex()) {
+            vp.setLevel(lv)
+            repeat(12) { Thread.sleep(16); shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(16)); vp.draw(Canvas(Bitmap.createBitmap(4, 4, Bitmap.Config.ARGB_8888))) }
+            save(vp, 220, "voice_wave_$i")
+        }
         vp.look = VoicePanel.Look.WORKING; vp.status = "正在识别…"; since(vp, "workSince", 2600)
         save(vp, 220, "voice_waiting")
         val ap = AiPanel(ctx, prefs).apply { doneTitle = "润色"; running = "polish" }

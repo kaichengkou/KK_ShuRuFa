@@ -63,6 +63,13 @@ collections = [
     ("古文观止", 60, guwen(os.path.join(src, "蒙学/guwenguanzhi.json"))),
 ]
 
+def mark(sep):
+    """The one mark kept from what separates two clauses: the first real one, full width."""
+    for ch in sep:
+        ch = {",": "，", ".": "。", "!": "！", "?": "？", ";": "；", ":": "："}.get(ch, ch)
+        if ch in "，。！？；：、": return ch
+    return "，" if sep.strip() else ""
+
 SPLIT = re.compile(r"[，。！？；：、,.!?;:“”‘’「」『』《》（）()\s—…·]+")
 HAN = re.compile(r"^[一-鿿]+$")
 entries, nexts = {}, {}
@@ -75,7 +82,13 @@ for name, weight, poems in collections:
             elif isinstance(x, list):
                 for v in x: yield from strings(v)
         text = simp("".join(strings(paragraphs)))
-        clauses = [c for c in SPLIT.split(text) if c]
+        # clauses with the punctuation after each (，苔深不能扫。): the 联想 offers the next line
+        # with its marks, so a poem can be written on without typing them
+        parts = re.split("(" + SPLIT.pattern + ")", text)
+        clauses, marks = [], []
+        for j in range(0, len(parts), 2):
+            if parts[j]:
+                clauses.append(parts[j]); marks.append(mark(parts[j + 1] if j + 1 < len(parts) else ""))
         for i, c in enumerate(clauses):
             ok = HAN.match(c) and 4 <= len(c) <= 12
             if ok and c not in entries:
@@ -83,7 +96,7 @@ for name, weight, poems in collections:
             if ok and i + 1 < len(clauses):
                 n = clauses[i + 1]
                 if HAN.match(n) and 2 <= len(n) <= 14 and c not in nexts:
-                    nexts[c] = n
+                    nexts[c] = marks[i] + n + marks[i + 1]
 
 os.makedirs("rime-data/packs", exist_ok=True)
 with open("rime-data/packs/kk_poetry.dict.yaml", "w", encoding="utf-8") as f:
