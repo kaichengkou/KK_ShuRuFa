@@ -185,7 +185,7 @@ private val SECTIONS = listOf(
     "外观与手感" to listOf("look", "motion", "haptics", "gestures"),
     "输入" to listOf("languages", "chinese", "dict", "packs", "keys"),
     "工具" to listOf("toolbar", "symbols", "clipboard", "voice", "stats"),
-    "AI" to listOf("ai", "online"),
+    "小K 与 AI" to listOf("online", "ai"),
     "高级" to listOf("backup", "files"),
 )
 
@@ -213,7 +213,7 @@ private val PAGES = listOf(
     PageInfo("toolbar", "工具栏", "选择和排列键盘上方的按钮"),
     PageInfo("voice", "语音输入", "本地识别模型、识别语言、系统识别"),
     PageInfo("ai", "AI 服务", "填 Key、选模型、今天的用量"),
-    PageInfo("online", "AI 功能", "改写、翻译、云联想、AI 候选"),
+    PageInfo("online", "小K", "名字、每日一句、聊天、帮写、帮打字、翻译"),
     PageInfo("backup", "备份与恢复", "设置、学到的词和自定义词库，换手机不丢"),
     PageInfo("files", "布局文件", "导出和重新加载 YAML 布局"),
     PageInfo("stats", "打字数据", "每天的字数、时段、常用词云"),
@@ -646,7 +646,6 @@ private fun LookPage(prefs: Prefs) {
         Choice(prefs, Prefs.HINT_MODE, "角标", listOf("all" to "全部", "digits" to "只有数字", "none" to "不显示"), def = "all")
         Toggle(prefs, Prefs.SHOW_ALL_HINTS, "显示四个方向的角标", "下滑、左滑、右滑的字符也画出来（角标选“全部”时）", false)
         FontChoice(prefs)
-        Toggle(prefs, Prefs.SOLAR_TERMS, "节气", "二十四节气当天，空格键上写出节气的名字，比如“中文 · 小雪”", true)
     }
 }
 
@@ -1627,6 +1626,44 @@ private fun AiServicesPage(prefs: Prefs) {
     }
 }
 
+/** 小K: its name, the line of the day, the space key, talking and what it remembers. */
+@Composable
+private fun KayGroups(prefs: Prefs) {
+    val ctx = LocalContext.current
+    val kay = remember { com.kk.shurufa.ime.Kay(ctx, prefs) }
+    Group("小K") {
+        LocalPageKeys.current?.add(Prefs.KAY_NAME)
+        var name by remember { mutableStateOf(prefs.kayName) }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("名字", Modifier.weight(1f))
+            OutlinedTextField(name, { v -> name = v.take(8); prefs.put(Prefs.KAY_NAME, name.trim()) }, singleLine = true,
+                modifier = Modifier.width(150.dp), shape = RoundedCornerShape(14.dp), placeholder = { Text("小K") })
+        }
+        Note("住在键盘里的小家伙，今天是它出生的第 ${kay.age()} 天。工具栏上那个会眨眼的就是它：点一下打开它，长按摸摸头。")
+        Toggle(prefs, Prefs.KAY_GREET, "每天打个招呼", "每天第一次在空白输入框里打开键盘时，在工具栏说一句话。点「已阅」、按任何键或点别处就消失", true)
+        Toggle(prefs, Prefs.KAY_AI_GREET, "这句话让 AI 来写", "每天傍晚请 AI 写好第二天的那一句（一天一次，只发日期、节日、节气和字数，不发你写的内容）。没有 AI 服务时用它自己的话", true)
+        Toggle(prefs, Prefs.KAY_EGGS, "空格键上的小回应", "打出「晚安」「谢谢」「生日快乐」或它的名字，它在空格键上回一句；深夜第一次打字时也会提醒一声", true)
+    }
+    Group("聊天和记忆") {
+        IntSlider(prefs, Prefs.KAY_CHAT_CAP, "每天最多聊", 30, 5..100, " 句", "聊天会把你说的话发给 AI 服务；到了上限它就去睡了")
+        var notes by remember { mutableStateOf(kay.notes()) }
+        if (notes.isEmpty()) Note("它记得的事会列在这里：聊天时你提到的安排、在意的事。只存在这台手机上。")
+        else {
+            Text("它记得的事", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 4.dp))
+            notes.reversed().forEach { (day, note) ->
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(note, style = MaterialTheme.typography.bodyMedium)
+                        Text(day, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    TextButton(onClick = { kay.forget(note); notes = kay.notes() }) { Text("忘掉") }
+                }
+            }
+            TextButton(onClick = { kay.forgetAll(); notes = emptyList() }) { Text("全部忘掉") }
+        }
+    }
+}
+
 /** 用 AI 做什么: each feature and the model it uses. The services themselves are on [AiServicesPage]. */
 @Composable
 private fun OnlinePage(prefs: Prefs, openServices: () -> Unit) {
@@ -1643,14 +1680,15 @@ private fun OnlinePage(prefs: Prefs, openServices: () -> Unit) {
             TextButton(onClick = openServices) { Text("管理") }
         }
     }
-    Group("AI 改写") {
+    KayGroups(prefs)
+    Group("帮写") {
         if (targets.isEmpty()) Note("没有可用的模型。")
         else {
             val cur = com.kk.shurufa.online.Llm.resolve(prefs, prefs.aiProvider)
             PickRow("使用", cur?.let { com.kk.shurufa.online.Llm.targetLabel(prefs, it) } ?: "未选择") { pickAi = true }
-            if (pickAi) PickerDialog("AI 改写使用", targets, cur, onPick = { prefs.put(Prefs.AI_PROVIDER, it); tick++ }, onClose = { pickAi = false })
+            if (pickAi) PickerDialog("帮写使用", targets, cur, onPick = { prefs.put(Prefs.AI_PROVIDER, it); tick++ }, onClose = { pickAi = false })
         }
-        Note("工具栏的 ✦：润色、纠错、正式、口语、精简、扩写，翻译成英文 / 俄语 / 中文，以及“输入指令”——直接用键盘打出想怎么改，回车执行。面板右上角可以临时换模型。")
+        Note("点工具栏上的小K，切到「改写」「翻译」：润色、纠错、正式、口语、精简、扩写，翻译成英文 / 俄语 / 中文，以及“输入指令”——用键盘打出想怎么改，回车执行。面板右上角可以临时换模型。")
     }
     Group("AI 帮打字") {
         LocalPageKeys.current?.add(Prefs.AI_ASSIST)

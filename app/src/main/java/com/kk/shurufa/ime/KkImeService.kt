@@ -147,6 +147,10 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     /** 云联想, and the continuations at the front of the suggestions now. */
     private val cloud by lazy { CloudPredict(prefs) { syncBar() } }
     private var cloudShown: List<String> = emptyList()
+    /** 小K, and its line of the day while it shows. */
+    private val kay by lazy { Kay(this, prefs) }
+    private var greeting: String? = null
+    private var greetingAt = 0L
     /** AI 浮窗, and what it shows now: 云联想's lines or the AI 候选. */
     private lateinit var floats: com.kk.shurufa.keyboard.FloatPills
     private var floatCloud: List<String> = emptyList()
@@ -190,6 +194,8 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
 
     override fun onCreate() {
         super.onCreate()
+        // 小K listens for a few words (晚安, 生日快乐 …) and answers on the space key
+        editor.onTyped = { t -> if (!prefs.incognito) kay.typed(t)?.let { spaceSay(it) } }
         haptics = Haptics(this, prefs)
         repo = LayoutRepo(this, overrides = { KeyOverrides.load(prefs, it) })
         predictor = Predictor(this)
@@ -200,7 +206,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         emoji = EmojiFeature(this).also { it.load(); it.maybeUpdate() }
         clipboard = ClipboardFeature(this).also { it.register() }
         translate = TranslateFeature(this, translateService)
-        ai = AiFeature(this)
+        ai = AiFeature(this, kay)
         voice = VoiceFeature(this, translateService)
         prefs.sp.registerOnSharedPreferenceChangeListener(settingsListener)
         prefs.state.registerOnSharedPreferenceChangeListener(stateListener)
@@ -470,8 +476,49 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
             else -> Panel.LETTERS
         }
         shift = 0; autoShift = false
+        // 小K's line of the day: the first time the keyboard opens on a plain, empty text field
+        greeting = null
+        if (!restarting && panel == Panel.LETTERS && wordsHere && !prefs.incognito && clipboard.pendingChip() == null && kay.greetingDue() &&
+            editor.textBefore(1).isEmpty() && editor.textAfter(1).isEmpty()) {
+            greeting = kay.line(); kay.markGreeted(); greetingAt = SystemClock.uptimeMillis()
+        }
+        if (!prefs.incognito) kay.prefetch()
         if (built) { paintNavigationBar(); show(panel) }
         updateAutoCap()
+    }
+
+    /** The line of the day goes (a key, a tap, the field changing); [wave]: 小K waves on the space key. */
+    private fun dropGreeting(wave: Boolean = false) {
+        if (greeting == null) return
+        greeting = null
+        if (wave) spaceSay("(・ω・)ﾉ")
+        if (built) syncBar()
+    }
+
+    // ---- the space key: 小K's little window ----
+
+    private var spaceNote: String? = null
+    private var spaceNoteUntil = 0L
+
+    /** 小K says [text] on the space key for a moment. */
+    private fun spaceSay(text: String, ms: Long = 2600) {
+        if (!built) return
+        spaceNote = text; spaceNoteUntil = SystemClock.uptimeMillis() + ms
+        keyboard.invalidate()
+        keyboard.postDelayed({ if (SystemClock.uptimeMillis() >= spaceNoteUntil) { spaceNote = null; keyboard.invalidate() } }, ms + 20)
+    }
+
+    override fun onKayPat() {
+        com.kk.shurufa.keyboard.KayLife.pat(SystemClock.uptimeMillis())
+        haptics.play(HapticEvent.OPTION)
+        spaceSay(listOf("嘿嘿 (｡>ω<｡)", "再摸一下 (〃∀〃)", "${kay.name}在呢 (・ω・)").random())
+        bar.invalidate()
+    }
+
+    override fun onGreeting(action: String) {
+        val line = greeting
+        dropGreeting(wave = action != "chat")
+        if (action == "chat") ai.openChat(line)
     }
 
     override fun onFinishInputView(finishingInput: Boolean) {
@@ -481,6 +528,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         if (sink != null) dropSink()
         stopBackgroundWork()
         editor.selectMode = false
+        greeting = null
         if (RimeEngine.ready) RimeBridge.clearComposition()
         zh.reset()
         predictions = emptyList()
@@ -505,6 +553,8 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     override fun onUpdateSelection(oldSelStart: Int, oldSelEnd: Int, newSelStart: Int, newSelEnd: Int, candidatesStart: Int, candidatesEnd: Int) {
         super.onUpdateSelection(oldSelStart, oldSelEnd, newSelStart, newSelEnd, candidatesStart, candidatesEnd)
         editor.onSelection(newSelStart, newSelEnd)
+        // a tap in the field (the caret moved by the app, not by typing) puts the line away
+        if (greeting != null && SystemClock.uptimeMillis() - greetingAt > 800 && (newSelStart != oldSelStart || newSelEnd != oldSelEnd)) dropGreeting()
         if (built && panel == Panel.CURSOR) syncEditPanel()
     }
 
@@ -603,6 +653,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         if (p != Panel.LETTERS && sink != null) dropSink()
         if (from == Panel.VOICE && p != Panel.VOICE) voice.onClosed()
         if (from == Panel.AI && p != Panel.AI) ai.cancel()
+        if (p != Panel.LETTERS) greeting = null
         // 选择 ends with the cursor panel: opened again, it starts as 选择, not 选择中
         if (from == Panel.CURSOR && p != Panel.CURSOR) editor.selectMode = false
         panel = p
@@ -745,8 +796,10 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
             s == Sink.TRANSLATE && !composing && letters -> { bar.showToolbar(); translate.sync() }
             s == Sink.AI && !composing && letters -> {
                 val q = query.toString()
-                bar.showQuery("AI 指令", q, "说说想怎么改，比如“改成适合发朋友圈的语气”", if (q.isBlank()) null else "执行")
+                if (ai.chatting) bar.showQuery("和${kay.name}说", q, "想说什么都行，回车发送", if (q.isBlank()) null else "发送")
+                else bar.showQuery("AI 指令", q, "说说想怎么改，比如“改成适合发朋友圈的语气”", if (q.isBlank()) null else "执行")
             }
+            greeting != null && s == null && letters && !composing && predictions.isEmpty() -> bar.showGreeting(greeting!!, com.kk.shurufa.online.Llm.resolve(prefs, prefs.quickTarget.ifEmpty { prefs.aiProvider }) != null)
             s == Sink.EMOJI && !composing && letters -> {
                 val q = query.toString().trim()
                 searchResults = emoji.search(q)
@@ -1213,17 +1266,17 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     override fun spaceLabel(): String {
         if (panel != Panel.LETTERS) return "空格"
         val name = layout(curLang).label
-        // 节气: on the day of a solar term the space key names it, quietly
-        val term = if (prefs.solarTerms) SolarTerms.on() else null
+        val note = spaceNote?.takeIf { SystemClock.uptimeMillis() < spaceNoteUntil }
         return when {
             prefs.incognito -> "$name · 临时"
-            term != null -> "$name · $term"
+            note != null -> note
             else -> name
         }
     }
 
     override fun onOutput(key: Key, output: Output) {
         corrected = null
+        dropGreeting()
         if (panel == Panel.MATH) { mathOut(output); return }
         val t = output.text
         val isMain = output === key.main
@@ -1312,6 +1365,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     }
 
     override fun onFunction(key: Key) {
+        dropGreeting()
         when (key.fn) {
             "backspace" -> {
                 predictions = emptyList()
@@ -1520,6 +1574,10 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     }
 
     override fun onPress(key: Key) {
+        // 小K feels the keys: quick typing, a run of deletes, and the first key after midnight
+        val now = SystemClock.uptimeMillis()
+        if (key.fn == "backspace") com.kk.shurufa.keyboard.KayLife.delete(now) else com.kk.shurufa.keyboard.KayLife.key(now)
+        if (!editor.secret && !prefs.incognito) kay.lateNight()?.let { spaceSay(it, 3200) }
         haptics.play(when (key.fn) {
             null -> HapticEvent.LETTER
             "space" -> HapticEvent.SPACE

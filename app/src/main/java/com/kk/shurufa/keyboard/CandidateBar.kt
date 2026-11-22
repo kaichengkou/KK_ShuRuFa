@@ -49,6 +49,10 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
         fun onMessageTap() {}
         /** "press" when a candidate, chip or button is touched, "popup" when a menu opens. */
         fun onFeedback(kind: String) {}
+        /** 小K was held (摸摸头). */
+        fun onKayPat() {}
+        /** The greeting's 接着聊 ("chat"), or 已阅 / a tap anywhere else on it ("seen"). */
+        fun onGreeting(action: String) {}
     }
 
     var listener: Listener? = null
@@ -70,7 +74,7 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
             invalidate()
         }
 
-    enum class Mode { TOOLBAR, CANDIDATES, PREDICTIONS, CLIP, MATH, MESSAGE, EDIT, QUERY }
+    enum class Mode { TOOLBAR, CANDIDATES, PREDICTIONS, CLIP, MATH, MESSAGE, EDIT, QUERY, GREETING }
 
     /** When set, vertical drags on the toolbar resize the open panel (phase 0 start, 1 move, 2 end). */
     var onVerticalDrag: ((phase: Int, rawY: Float, velocityY: Float) -> Unit)? = null
@@ -132,6 +136,44 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
     }
 
     fun showToolbar() = switchTo(Mode.TOOLBAR)
+
+    // ---- 小K's greeting: one line where the toolbar is, with 接着聊 and 已阅 ----
+    private var greetText = ""
+    private var greetChat = false
+    /** 小K's line of the day; [canChat] when an AI service is there to talk on. */
+    fun showGreeting(text: String, canChat: Boolean) { greetText = text; greetChat = canChat; switchTo(Mode.GREETING) }
+
+    private fun drawGreeting(c: Canvas, a: Float): Boolean {
+        val cy = lineCy
+        // a tap anywhere on the line puts it away; the chips, added after, come first
+        hits.add("greet:seen", 0f, 0f, width.toFloat(), height.toFloat())
+        val face = dp(24f)
+        val fx = dp(12f) + face / 2
+        val wait = KayFace.draw(c, fx, cy, face, Colors.fade(theme.inkSoft, a), Colors.fade(theme.accentSoft, a), Colors.fade(BLUSH, a),
+            Motion.now(), java.time.LocalTime.now().hour)
+        val ch = dp(30f)
+        var right = width - dp(10f)
+        val seenW = chipWidth("已阅", textSp = Ui.SMALL + 1f)
+        val r = RectF(right - seenW, cy - ch / 2, right, cy + ch / 2)
+        drawChip(c, r, "已阅", ChipStyle.GHOST, pressed = pressedGreet == "seen", textSp = Ui.SMALL + 1f)
+        hits.add("greet:seen2", r, slop = dp(4f))
+        right = r.left - dp(4f)
+        if (greetChat) {
+            val w = chipWidth("接着聊", textSp = Ui.SMALL + 1f)
+            r.set(right - w, cy - ch / 2, right, cy + ch / 2)
+            drawChip(c, r, "接着聊", ChipStyle.ACTIVE, pressed = pressedGreet == "chat", textSp = Ui.SMALL + 1f)
+            hits.add("greet:chat", r, slop = dp(4f))
+            right = r.left - dp(6f)
+        }
+        tp.textAlign = Paint.Align.LEFT; tp.typeface = Ui.regular; tp.textSize = sp(Ui.BODY + 1f)
+        tp.color = Colors.fade(theme.ink, a)
+        ellipsizer.set(tp)
+        val x = fx + face / 2 + dp(8f)
+        drawText(c, android.text.TextUtils.ellipsize(greetText, ellipsizer, right - x, android.text.TextUtils.TruncateAt.END), x, cy, tp)
+        if (wait > 0) postInvalidateDelayed(wait)
+        return wait == 0L
+    }
+    private var pressedGreet: String? = null
 
     /** Updates the candidates. Only the first switch into this mode fades; later updates are instant. */
     fun showCandidates(pre: String, cands: List<String>, annotations: List<String> = emptyList(), caretIndex: Int = -1) {
@@ -226,6 +268,7 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
         tp.typeface = Ui.regular
         if (a > 0.01f) when (mode) {
             Mode.TOOLBAR -> again = drawToolbar(c, a) || again
+            Mode.GREETING -> again = drawGreeting(c, a) || again
             Mode.CANDIDATES, Mode.PREDICTIONS -> drawCandidates(c, a)
             Mode.CLIP -> drawClip(c, a)
             Mode.MATH -> again = drawMath(c, a) || again
@@ -263,7 +306,10 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
     /** Returns true while the indicator is still moving. */
     private val lineCy get() = dp(LINE_DP)
 
+    private var kayMoving = false
+
     private fun drawToolbar(c: Canvas, a: Float): Boolean {
+        kayMoving = false
         val list = tools
         val slot = width / list.size.toFloat()
         val cy = lineCy
@@ -289,7 +335,12 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
             val glyph = TOOL_GLYPHS[id]
             // the tapped tool plays its little motion
             val t = if (id == tappedTool) tapT.value else 1f
-            if (glyph != null) {
+            if (id == "ai") {
+                // 小K lives here: a face, not an icon
+                val wait = KayFace.draw(c, cx, cy, dp(25f), ink, Colors.fade(if (active) theme.accentSoft else theme.soft, a),
+                    Colors.fade(BLUSH, a), Motion.now(), java.time.LocalTime.now().hour)
+                if (wait == 0L) kayMoving = true else postInvalidateDelayed(wait)
+            } else if (glyph != null) {
                 tp.textAlign = Paint.Align.CENTER; tp.typeface = Ui.medium; tp.textSize = sp(Ui.TITLE + 1f)
                 tp.color = ink
                 val pop = 1f + 0.22f * kotlin.math.sin(Math.PI.toFloat() * t)
@@ -303,12 +354,14 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
             }
             hits.add("tool:$id", cx - slot / 2, 0f, cx + slot / 2, height.toFloat())
         }
-        return indicator.running || indicatorAlpha.running || tapT.running
+        return indicator.running || indicatorAlpha.running || tapT.running || kayMoving
     }
 
     companion object {
         /** How long a toolbar icon's tap motion runs. */
         const val TAP_MS = 560L
+        /** 小K's cheeks when patted, and its drop of sweat. */
+        private const val BLUSH = 0x8CF08C9B.toInt()
         const val HEIGHT_DP = 52f
         /**
          * Where everything in the bar is centered: tool icons, words, chips, the end button. The
@@ -320,7 +373,7 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
         val TOOL_GLYPHS = mapOf("symbols" to "§", "math" to "π")
         /** Every tool the toolbar can hold: id to name. */
         val ALL_TOOLS = listOf(
-            "ai" to "AI 改写", "emoji" to "表情", "mic" to "语音", "translate" to "翻译", "cursor" to "文字编辑",
+            "ai" to "小K", "emoji" to "表情", "mic" to "语音", "translate" to "翻译", "cursor" to "文字编辑",
             "clipboard" to "剪贴板", "symbols" to "符号", "math" to "学术键盘", "undo" to "撤销", "settings" to "设置",
         )
         /** The end button of the candidate row (expand, or close). */
@@ -667,6 +720,14 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
     /** Where the pinyin-edit area ends (the 完成 button is to its right). */
     private val editLimit get() = width - chipWidth("完成") - dp(16f)
 
+    private var patted = false
+    private val patRunnable = Runnable {
+        if (pressedTool != "ai" || mode != Mode.TOOLBAR) return@Runnable
+        patted = true
+        listener?.onKayPat()
+        postInvalidateOnAnimation()
+    }
+
     private val longRunnable = Runnable {
         val i = pressedCand
         if (i < 0 || dragging || i >= candCount) return@Runnable
@@ -715,6 +776,9 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
                 if (pressedCand >= 0 && mode == Mode.CANDIDATES) handler.postDelayed(longRunnable, 450)
                 val hit = hits.at(e.x, e.y)
                 pressedTool = hit?.takeIf { mode == Mode.TOOLBAR && it.startsWith("tool:") }?.removePrefix("tool:")
+                patted = false
+                if (pressedTool == "ai") handler.postDelayed(patRunnable, 420)
+                pressedGreet = hit?.takeIf { mode == Mode.GREETING && it.startsWith("greet:") }?.removePrefix("greet:")?.takeIf { it != "seen" }
                 pressedClip = hit == "clip"
                 pressedDone = hit == "done"
                 pressedQuery = hit == "query"
@@ -722,6 +786,7 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
                 invalidate()
             }
             MotionEvent.ACTION_MOVE -> {
+                if (abs(e.x - downX) > slop || abs(e.y - downY) > slop) handler.removeCallbacks(patRunnable)
                 if (mode == Mode.EDIT && e.x < editLimit) {
                     val p = editCaretAt(e.x)
                     if (p != editCaret) { editCaret = p; listener?.onEditCaret(p); invalidate() }
@@ -753,6 +818,10 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
             }
             MotionEvent.ACTION_UP -> {
                 handler.removeCallbacks(longRunnable)
+                handler.removeCallbacks(patRunnable)
+                pressedGreet = null
+                // held 小K: the pat was the whole gesture
+                if (patted) { patted = false; pressedTool = null; invalidate(); vt?.recycle(); vt = null; return true }
                 if (mode == Mode.EDIT && e.x < editLimit) return true
                 if (vDrag) {
                     vt?.computeCurrentVelocity(1000)
@@ -799,6 +868,7 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
             }
             MotionEvent.ACTION_CANCEL -> {
                 handler.removeCallbacks(longRunnable)
+                handler.removeCallbacks(patRunnable); patted = false
                 if (menuOpen) { overlay?.hideOptions(); menuOpen = false }
                 if (dragging) { scroller.springBack(scrollX0.toInt(), 0, 0, scrollMax.toInt(), 0, 0); postInvalidateOnAnimation() }
                 pressedCand = -1; pressedTool = null; pressedClip = false; pressedDone = false; pressedQuery = false
@@ -817,6 +887,8 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
                 l.onTool(tool)
             }
             id == "expand" -> l.onExpand()
+            id == "greet:chat" -> l.onGreeting("chat")
+            id.startsWith("greet:") -> l.onGreeting("seen")
             id == "dismiss" -> l.onDismissSuggestions()
             id == "query" -> l.onQueryAction()
             id == "clip" -> l.onClipChip(clipText)

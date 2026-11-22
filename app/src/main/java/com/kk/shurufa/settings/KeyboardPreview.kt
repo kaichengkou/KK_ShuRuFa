@@ -40,7 +40,7 @@ internal fun KeyboardPreview(prefs: Prefs) {
         kb.requestLayout(); bar.requestLayout()
     }
     DisposableEffect(Unit) {
-        val l = SharedPreferences.OnSharedPreferenceChangeListener { _, k -> if (k == null || Prefs.rebuildsKeyboard(k) || k == Prefs.SOLAR_TERMS) refresh() }
+        val l = SharedPreferences.OnSharedPreferenceChangeListener { _, k -> if (k == null || Prefs.rebuildsKeyboard(k)) refresh() }
         prefs.sp.registerOnSharedPreferenceChangeListener(l)
         onDispose { prefs.sp.unregisterOnSharedPreferenceChangeListener(l) }
     }

@@ -39,8 +39,6 @@ class Prefs(context: Context) {
     /** 候选字体: sans (黑体) or serif (宋体); the paper style defaults to 宋体. */
     /** 字体, for everything on the keyboard: sans 黑体, serif 宋体, custom a font file the user chose. */
     val font get() = s(CAND_FONT, if (style == "paper") "serif" else "sans")
-    /** 节气: the space key names the solar term on its day. */
-    val solarTerms get() = b(SOLAR_TERMS, true)
     val showAllHints get() = b(SHOW_ALL_HINTS, false)
     val keyBorders get() = b(KEY_BORDERS, true)
     val numberRow get() = b(NUMBER_ROW, false)
@@ -122,6 +120,12 @@ class Prefs(context: Context) {
     val aiCandidate get() = aiAssist == "candidate"
     /** Where AI suggestions show: float (a small card at the keyboard's top right) or bar (among the candidates). */
     val aiPlace get() = s(AI_PLACE, "float")
+    /** 小K: its name, the line of the day, written by the AI or not, the space-key answers, talks a day. */
+    val kayName get() = s(KAY_NAME, "小K").ifBlank { "小K" }
+    val kayGreet get() = b(KAY_GREET, true)
+    val kayAiGreet get() = b(KAY_AI_GREET, true)
+    val kayEggs get() = b(KAY_EGGS, true)
+    val kayChatCap get() = sp.getInt(KAY_CHAT_CAP, 30)
     /** 云联想: characters before the caret sent, the pause before asking (ms), how many continuations. */
     val cloudContext get() = sp.getInt(CLOUD_CONTEXT, 80)
     val cloudPauseMs get() = sp.getInt(CLOUD_PAUSE, 350)
@@ -250,7 +254,6 @@ class Prefs(context: Context) {
         const val STYLE = "style"
         const val HINT_MODE = "hint_mode"
         const val CAND_FONT = "cand_font"
-        const val SOLAR_TERMS = "solar_terms"
         const val KEY_RADIUS = "key_radius"
         const val LABEL_SCALE = "label_scale"
         const val HINT_SCALE = "hint_scale"
@@ -310,6 +313,19 @@ class Prefs(context: Context) {
         const val AI_CANDIDATE = "ai_candidate"
         const val AI_PLACE = "ai_place"
         const val AI_ASSIST = "ai_assist"
+        const val KAY_NAME = "kay_name"
+        const val KAY_GREET = "kay_greet"
+        const val KAY_AI_GREET = "kay_ai_greet"
+        const val KAY_EGGS = "kay_eggs"
+        const val KAY_CHAT_CAP = "kay_chat_cap"
+        // 小K's state (kept with the state, not the settings)
+        const val KAY_BORN = "kay_born"
+        const val KAY_GREETED = "kay_greeted"
+        const val KAY_LINE_FOR = "kay_line_for"
+        const val KAY_LINE = "kay_line"
+        const val KAY_ASKED = "kay_asked"
+        const val KAY_TALKS = "kay_talks"
+        const val KAY_NIGHT = "kay_night"
         const val CLOUD_CONTEXT = "cloud_context"
         const val CLOUD_PAUSE = "cloud_pause"
         const val CLOUD_COUNT = "cloud_count"

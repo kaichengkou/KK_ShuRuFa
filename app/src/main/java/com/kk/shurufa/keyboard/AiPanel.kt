@@ -25,7 +25,11 @@ import kotlin.math.max
 import kotlin.math.sin
 
 /**
- * AI 改写. On top, a switch between the kinds of action (改写 · 翻译) and the model they go to;
+ * 小K's panel. On top, a switch between 聊天 (talking with 小K) and the kinds of action it can do
+ * with the text (改写 · 翻译), and the model they go to. 聊天 shows the conversation, the newest
+ * at the bottom, with 回话 (type to it) and 插入 (its last answer into the field).
+ *
+ * For the actions:
  * below, every action of the kind picked, wrapped onto as many lines as they need and ending with
  * 输入指令, so nothing has to be slid into view. Once an answer comes the actions fold away and the
  * answer gets the panel: it fills in while it streams (following its last line), the changed
@@ -38,8 +42,20 @@ class AiPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
 
     var actions: List<Act> = emptyList()
         set(v) { field = v; if (group !in groups) group = groups.firstOrNull().orEmpty(); invalidate() }
-    /** The kinds of action, in the order they first appear. */
-    private val groups get() = actions.map { it.group }.distinct()
+    /** The 聊天 tab's name (empty: no chat). */
+    var chatTab = ""
+    /** 小K's name, on the conversation's title line. */
+    var kayName = "小K"
+    /** The conversation, ready to draw (who said what, styled). */
+    var chat: CharSequence = ""
+        set(v) { field = v; resLayout = null; if (group == chatTab) { follow = true }; invalidate() }
+    /** Whether 小K has answered at least once (插入 has something to put in). */
+    var chatHasAnswer = false
+    /** The kinds of action, in the order they first appear, after 聊天. */
+    private val groups get() = (if (chatTab.isNotEmpty()) listOf(chatTab) else emptyList()) + actions.map { it.group }.distinct()
+    /** Shows the tab [name] (聊天, 改写 …). */
+    fun selectGroup(name: String) { if (name in groups) { group = name; resLayout = null; invalidate() } }
+    val inChat get() = group == chatTab && chatTab.isNotEmpty()
     /** The kind of action shown. */
     private var group = ""
     var onAction: ((String) -> Unit)? = null
@@ -125,6 +141,11 @@ class AiPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
         if (picking) {
             // 选择模型: every enabled service and model, in a list that scrolls
             if (pick.draw(c, r.apply { set(pad, y, width - pad, height - dp(10f)) }, t, Ui.radiusLarge(dp(prefs.keyRadiusDp), dp(1f)))) again = true
+            if (again) postInvalidateOnAnimation()
+            return
+        }
+        if (inChat) {
+            again = drawResult(c, y) || again
             if (again) postInvalidateOnAnimation()
             return
         }
@@ -281,6 +302,7 @@ class AiPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
         c.drawRoundRect(card, rad, rad, bg)
         val cardL = card.left; val cardR = card.right; val cardT = card.top; val cardB = card.bottom
         val inner = dp(12f)
+        if (inChat) return drawChat(c, cardL, cardT, cardR, cardB, inner)
         if (result.isEmpty() && running != null && status.isEmpty()) {
             // waiting for the first words: what is being done, the seconds, 停止, and lines of
             // text-to-be with a light sweeping across them
@@ -363,6 +385,52 @@ class AiPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
         return moving || running != null
     }
 
+    /** The conversation card: 小K and its name, 回话 · 插入, and what was said, newest at the bottom. */
+    private fun drawChat(c: Canvas, cardL: Float, cardT: Float, cardR: Float, cardB: Float, inner: Float): Boolean {
+        val t = theme
+        val lineH = dp(30f)
+        val lineT = cardT + dp(8f)
+        val lineCy = lineT + lineH / 2
+        val face = dp(22f)
+        val wait = KayFace.draw(c, cardL + inner + face / 2, lineCy, face, t.inkSoft, t.accentSoft, 0x8CF08C9B.toInt(), Motion.now(), java.time.LocalTime.now().hour)
+        tp.textAlign = Paint.Align.LEFT; tp.textSize = sp(Ui.SMALL + 1f); tp.typeface = Ui.medium; tp.color = if (running != null) t.accent else t.inkSoft
+        drawText(c, if (running != null) "$kayName 在想" + dots() else kayName, cardL + inner + face + dp(8f), lineCy, tp)
+        tp.typeface = Ui.regular
+        var bx = cardR - dp(8f)
+        if (running != null) bx = drawStop(c, bx, lineT, lineH) - dp(6f)
+        else {
+            val w = chipWidth("回话", textSp = Ui.SMALL + 1f)
+            r.set(bx - w, lineT, bx, lineT + lineH)
+            drawChip(c, r, "回话", ChipStyle.PRIMARY, pressed = pressed == "reply", textSp = Ui.SMALL + 1f)
+            hits.add("reply", r, slop = dp(5f))
+            bx = r.left - dp(6f)
+            if (chatHasAnswer) {
+                val iw = chipWidth("插入", textSp = Ui.SMALL + 1f)
+                r.set(bx - iw, lineT, bx, lineT + lineH)
+                drawChip(c, r, "插入", ChipStyle.SOFT, pressed = pressed == "insert", textSp = Ui.SMALL + 1f)
+                hits.add("insert", r, slop = dp(5f))
+            }
+        }
+        resView.set(cardL + inner, lineT + lineH + dp(6f), cardR - inner, cardB - dp(10f))
+        if (chat.isEmpty()) {
+            tp.textAlign = Paint.Align.CENTER; tp.textSize = sp(Ui.SMALL + 1f); tp.color = t.hint
+            drawText(c, status.ifEmpty { "点「回话」，想说什么都行" }, resView.centerX(), resView.centerY(), tp)
+            return wait == 0L || running != null
+        }
+        val lay = resLayout ?: run {
+            body.textSize = sp(Ui.BODY + 1f); body.color = t.ink
+            StaticLayout.Builder.obtain(chat, 0, chat.length, body, resView.width().toInt().coerceAtLeast(1))
+                .setAlignment(Layout.Alignment.ALIGN_NORMAL).setLineSpacing(dp(2f), 1.1f).build().also { resLayout = it }
+        }
+        resMax = (lay.height - resView.height()).coerceAtLeast(0f)
+        if (resScroller.computeScrollOffset()) resScroll = resScroller.currY.toFloat()
+        if (follow) resScroll = resMax
+        resScroll = resScroll.coerceIn(0f, resMax)
+        c.save(); c.clipRect(resView); c.translate(resView.left, resView.top - resScroll); lay.draw(c); c.restore()
+        if (wait > 0 && running == null) postInvalidateDelayed(wait)
+        return wait == 0L || running != null || !resScroller.isFinished
+    }
+
     /** What an action will work on, said where the answer will appear. */
     private fun idleNote(): String = when {
         source.isBlank() -> "输入框是空的，可以用「输入指令」直接写"
@@ -417,7 +485,7 @@ class AiPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
     private fun scrollResult(e: MotionEvent): Boolean {
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                if (picking || resMax <= 0f || result.isEmpty() || !resView.contains(e.x, e.y)) { resDragY = -1f; return false }
+                if (picking || resMax <= 0f || (result.isEmpty() && !inChat) || !resView.contains(e.x, e.y)) { resDragY = -1f; return false }
                 resScroller.forceFinished(true)
                 vt?.recycle(); vt = VelocityTracker.obtain().also { it.addMovement(e) }
                 resDragY = e.y; resDownY = e.y; resDragging = false
@@ -472,7 +540,7 @@ class AiPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
                     p == null -> picking = false
                     p == "provider" -> { picking = !picking; if (picking) pick.reveal() }
                     picking -> picking = false
-                    p.startsWith("tab:") -> group = p.removePrefix("tab:")
+                    p.startsWith("tab:") -> { group = p.removePrefix("tab:"); resLayout = null; onButton?.invoke("group:$group") }
                     // ✕: the answer goes, the actions come back
                     p == "back" -> { result = ""; diffBase = null; resLayout = null; status = "" }
                     p in BUTTON_IDS -> onButton?.invoke(p)
@@ -488,6 +556,6 @@ class AiPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
     private companion object {
         /** Result buttons, drawn right to left. */
         val BUTTONS = listOf("replace" to "替换", "insert" to "插入", "copy" to "复制", "retry" to "重试")
-        val BUTTON_IDS = setOf("replace", "insert", "copy", "retry", "setup", "custom", "stop")
+        val BUTTON_IDS = setOf("replace", "insert", "copy", "retry", "setup", "custom", "stop", "reply")
     }
 }
