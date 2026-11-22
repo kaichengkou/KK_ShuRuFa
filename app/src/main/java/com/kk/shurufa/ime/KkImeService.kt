@@ -1521,8 +1521,9 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     }
 
     override fun onBackspaceRepeat() {
-        haptics.play(HapticEvent.REPEAT)
-        if (composing) rimeKey(RimeBridge.XK_BackSpace) else editor.deleteBackward()
+        // it buzzes for what it deletes: once the field is empty, a held key goes quiet
+        val deleted = if (composing) { rimeKey(RimeBridge.XK_BackSpace); true } else editor.deleteBackward()
+        if (deleted) haptics.play(HapticEvent.REPEAT)
     }
 
     override fun onBackspaceGesture(action: String) {

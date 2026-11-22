@@ -54,7 +54,7 @@ class VoiceFeature(private val host: Host, private val translate: TranslateServi
                 syncChips()
                 onOpened()
             }
-            onDelete = { repeat -> host.haptics.play(if (repeat) HapticEvent.REPEAT else HapticEvent.BACKSPACE); host.editor.deleteBackward() }
+            onDelete = { repeat -> if (host.editor.deleteBackward() || !repeat) host.haptics.play(if (repeat) HapticEvent.REPEAT else HapticEvent.BACKSPACE) }
         }
         val panel = LinearLayout(host.context).apply { orientation = LinearLayout.VERTICAL }
         panel.addView(view, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))

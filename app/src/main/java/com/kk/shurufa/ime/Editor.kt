@@ -177,20 +177,32 @@ class Editor(private val ime: InputMethodService, private val prefs: Prefs) {
         history.push(EditHistory.Op.Replace(old, text))
     }
 
-    fun deleteBackward() {
-        val ic = ic ?: return
-        if (ime.currentInputEditorInfo?.inputType == InputType.TYPE_NULL) { ime.sendDownUpKeyEvents(KeyEvent.KEYCODE_DEL); return }
+    /**
+     * Deletes what is before the caret (or the selection). Returns false when there was plainly
+     * nothing left to delete, so a held backspace can stop buzzing.
+     *
+     * Rich editors (Samsung Notes and other note apps) often do not say what is before the caret,
+     * or refuse to delete through the input connection: they get a real ⌫ key instead, which they
+     * always handle (and which also takes images, list marks and paragraph breaks).
+     */
+    fun deleteBackward(): Boolean {
+        val ic = ic ?: return false
+        if (ime.currentInputEditorInfo?.inputType == InputType.TYPE_NULL) { ime.sendDownUpKeyEvents(KeyEvent.KEYCODE_DEL); return true }
         val sel = ic.getSelectedText(0)
-        if (!sel.isNullOrEmpty()) { history.push(EditHistory.Op.Delete(sel.toString())); ic.commitText("", 1); return }
-        val before = ic.getTextBeforeCursor(2, 0)?.toString().orEmpty()
-        if (before.isEmpty()) return
+        if (!sel.isNullOrEmpty()) { history.push(EditHistory.Op.Delete(sel.toString())); ic.commitText("", 1); return true }
+        val raw = ic.getTextBeforeCursor(2, 0)
+        if (raw == null) { ime.sendDownUpKeyEvents(KeyEvent.KEYCODE_DEL); return true }
+        val before = raw.toString()
+        // at the start, as far as the field says: the key still goes, for what it cannot show
+        if (before.isEmpty()) { ime.sendDownUpKeyEvents(KeyEvent.KEYCODE_DEL); return false }
         val after = ic.getTextAfterCursor(1, 0)?.toString()
         val last = before.substring(before.offsetByCodePoints(before.length, -1))
         // an empty bracket pair goes together
-        if (prefs.autoPair && PAIRS[last] == after) { ic.deleteSurroundingText(last.length, 1); return }
+        if (prefs.autoPair && PAIRS[last] == after && ic.deleteSurroundingText(last.length, 1)) return true
         history.push(EditHistory.Op.Delete(last))
-        ic.deleteSurroundingTextInCodePoints(1, 0)
+        if (!ic.deleteSurroundingTextInCodePoints(1, 0) && !ic.deleteSurroundingText(last.length, 0)) ime.sendDownUpKeyEvents(KeyEvent.KEYCODE_DEL)
         onCharDeleted(last)
+        return true
     }
 
     /** 上滑清空: the whole field, undoable. Returns false when there was nothing to clear. */
