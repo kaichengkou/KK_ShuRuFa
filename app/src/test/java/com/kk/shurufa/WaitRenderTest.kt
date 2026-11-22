@@ -85,10 +85,6 @@ class WaitRenderTest {
             val out = Bitmap.createBitmap(b, 0, top, b.width, (col.top + (200 * d).toInt() - top).coerceAtMost(b.height - top))
             File("build/screens/$name.png").outputStream().use { out.compress(Bitmap.CompressFormat.PNG, 100, it) }
         }
-        bar.pinyinAbove = true
-        bar.showCandidates("yun lian xiang shi shen me", listOf("云联想是什么", "云联想", "云联", "运", "云"), emptyList(), -1)
-        f.show("yun'lian'xiang'shi'shen'me", true, listOf("云联想是什么意思"))
-        shot("float_strip")
         bar.showPredictions(listOf("吧", "了", "的"))
         f.show("", false, listOf("周末一起去爬山吧", "顺便吃个饭", "你几点有空"))
         shot("float_cloud")

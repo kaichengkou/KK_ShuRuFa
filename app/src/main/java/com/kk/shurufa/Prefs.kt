@@ -114,7 +114,7 @@ class Prefs(context: Context) {
     /** Where AI suggestions show: float (a small card at the keyboard's top right) or bar (among the candidates). */
     val aiPlace get() = s(AI_PLACE, "float")
     /** Where the pinyin shows while typing: float (a tab on the keyboard's top edge) or bar (a line over the candidates). */
-    val preeditPlace get() = s(PREEDIT_PLACE, "float")
+    val preeditPlace get() = s(PREEDIT_PLACE, "bar")
     /** 云联想: characters before the caret sent, the pause before asking (ms), how many continuations. */
     val cloudContext get() = sp.getInt(CLOUD_CONTEXT, 80)
     val cloudPauseMs get() = sp.getInt(CLOUD_PAUSE, 350)

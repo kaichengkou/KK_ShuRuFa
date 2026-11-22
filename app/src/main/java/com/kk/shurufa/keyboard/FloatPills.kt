@@ -53,9 +53,9 @@ class FloatPills(context: Context, prefs: Prefs) : KbView(context, prefs) {
         invalidate()
     }
 
-    private val tabH get() = dp(46f)
+    private val tabH get() = dp(36f)
     private val gap get() = dp(4f)
-    private val textSize get() = sp(Ui.TITLE + 2f)
+    private val textSize get() = sp(Ui.BODY + 1f)
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val rows = max(1, right.size)
@@ -64,7 +64,7 @@ class FloatPills(context: Context, prefs: Prefs) : KbView(context, prefs) {
 
     /** A tab standing on the keyboard: rounded on top, square where it meets the bar. */
     private fun tab(c: Canvas, r: RectF, roundBottom: Boolean) {
-        val rad = dp(10f)
+        val rad = dp(9f)
         path.reset()
         path.addRoundRect(r, if (roundBottom) floatArrayOf(rad, rad, rad, rad, rad, rad, rad, rad)
             else floatArrayOf(rad, rad, rad, rad, 0f, 0f, 0f, 0f), Path.Direction.CW)
@@ -77,12 +77,12 @@ class FloatPills(context: Context, prefs: Prefs) : KbView(context, prefs) {
         // translucent, so the app shows through: dark glass by day, light glass at night
         val fill = if (t.dark) Colors.alpha(0xFFFFFFFF.toInt(), 0x2E) else Colors.alpha(0xFF3A3A3A.toInt(), 0x8C)
         val ink = if (t.dark) t.ink else 0xFFFFFFFF.toInt()
-        val pad = dp(14f)
+        val pad = dp(11f)
         val maxW = width * 0.62f
         tp.typeface = Ui.regular; tp.textSize = textSize; tp.textAlign = Paint.Align.LEFT
         ellipsizer.set(tp)
         // the AI's line keeps its room first; the pinyin takes what is left, cut at its start
-        val iconW = dp(24f)
+        val iconW = dp(19f)
         val firstW = right.firstOrNull()?.let { min(tp.measureText(it) + pad * 2 + iconW, maxW) } ?: 0f
         if (left.isNotEmpty()) {
             val pencil = if (leftEditable) dp(26f) else 0f
@@ -112,7 +112,7 @@ class FloatPills(context: Context, prefs: Prefs) : KbView(context, prefs) {
             bg.color = Colors.fade(if (pressed == "r$i") Colors.blend(fill, ink, 0.12f) else fill, a)
             tab(c, r, roundBottom = i > 0)
             ip.color = Colors.fade(ink, a * 0.8f); ip.style = Paint.Style.FILL
-            Icons.draw(c, "ai", r.left + pad + dp(8f), r.centerY(), dp(16f), ip)
+            Icons.draw(c, "ai", r.left + pad + dp(6f), r.centerY(), dp(13f), ip)
             tp.color = Colors.fade(ink, a)
             drawText(c, shown, r.left + pad + iconW, r.centerY(), tp)
             c.restore()

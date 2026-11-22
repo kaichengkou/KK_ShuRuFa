@@ -837,7 +837,7 @@ private fun ChinesePage(prefs: Prefs, openDict: () -> Unit) {
     }
     Group("拼音") {
         Toggle(prefs, Prefs.PINYIN_MODE, "拼音模式", "选中候选后上屏带声调的拼音，比如 nǐ hǎo；多音字按你打的拼音判断", false)
-        Choice(prefs, Prefs.PREEDIT_PLACE, "拼音显示在", listOf("float" to "键盘上方的浮条", "bar" to "候选栏里"), def = "float")
+        Choice(prefs, Prefs.PREEDIT_PLACE, "拼音显示在", listOf("bar" to "候选栏里", "float" to "键盘上方的浮条"), def = "bar")
         Toggle(prefs, Prefs.ZH_PREEDIT_INLINE, "拼音写进输入框", "打字时拼音直接出现在输入框里，键盘上就不再显示", false)
     }
     Group("词库") {
