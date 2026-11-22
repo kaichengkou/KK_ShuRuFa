@@ -116,6 +116,12 @@ class DetailsTest {
         assertEquals("ok. ", field.text.toString())
         back(); assertEquals("ok  ", field.text.toString())
         back(); assertEquals("ok ", field.text.toString())
+        // 3, then Chinese: the comma was a sentence's, full-width again
+        field.text.clear(); field.text.append("共3,"); Selection.setSelection(field.text, 3)
+        KkImeService::class.java.getDeclaredField("halfAfterDigit").apply { isAccessible = true }.set(ime, "," to "，")
+        KkImeService::class.java.getDeclaredMethod("restoreFullWidth", String::class.java).apply { isAccessible = true }.invoke(ime, "好的")
+        assertEquals("共3，", field.text.toString())
+        field.text.clear(); field.text.append("ok "); Selection.setSelection(field.text, 3)
         // 双击句号 made an ellipsis: backspace gives the two periods back
         type("..")
         assertEquals("ok …", field.text.toString())

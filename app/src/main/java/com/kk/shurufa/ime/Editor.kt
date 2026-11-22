@@ -174,7 +174,12 @@ class Editor(private val ime: InputMethodService, private val prefs: Prefs) {
         val ic = ic ?: return
         val old = textBefore(before)
         ic.beginBatchEdit()
-        ic.deleteSurroundingText(before, 0)
+        // where a plain delete does not reach the page (Samsung Notes), the characters are selected and replaced
+        val et = if (app in stubborn) ic.getExtractedText(ExtractedTextRequest(), 0) else null
+        if (et != null) {
+            val end = et.startOffset + maxOf(et.selectionStart, et.selectionEnd)
+            ic.setSelection(end - old.length, end)
+        } else ic.deleteSurroundingText(before, 0)
         ic.commitText(text, 1)
         ic.endBatchEdit()
         history.push(EditHistory.Op.Replace(old, text))

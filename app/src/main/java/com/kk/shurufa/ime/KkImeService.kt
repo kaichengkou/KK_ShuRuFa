@@ -1183,6 +1183,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
             zh.reset()
             // learned later if it stays (a slip deleted right away teaches nothing)
             if (learnHere && commit.any { isCjk(it) }) learning.committed(syl.joinToString(""), commit)
+            restoreFullWidth(out)
             val spaced = pangu(out)
             editor.type(spaced, pairable = false, syllables = if (out == commit) syl else null)
             corrected = null; madeAuto(spaced, out)
@@ -1304,9 +1305,12 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
             }
             finishComposing()
             if (ellipsis(t)) { syncBar(); return }
-            val made = pangu(smartPunct(t))
+            val half = smartPunct(t)
+            val made = pangu(half)
             editor.type(made)
             madeAuto(made, t)
+            // 3, stays half-width before more digits; Chinese after it turns it back (3，好的)
+            halfAfterDigit = if (half != t) half to t else null
             syncBar()
             return
         }
@@ -1356,6 +1360,18 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         return true
     }
     private var lastPeriodAt = 0L
+
+    /** A mark made half-width after a digit (",", "，"), until something else is typed after it. */
+    private var halfAfterDigit: Pair<String, String>? = null
+
+    /** Chinese going in right after such a mark: it was a sentence's after all, so it is full-width again. */
+    private fun restoreFullWidth(next: String) {
+        val (half, full) = halfAfterDigit ?: return
+        halfAfterDigit = null
+        if (next.firstOrNull()?.let { isCjk(it) } != true) return
+        val before = editor.textBefore(2)
+        if (before.length == 2 && before[0].isDigit() && before.substring(1) == half) editor.replaceBefore(1, full)
+    }
 
     /** 数字后的标点保持半角: after a digit, Chinese punctuation that would break a number is typed half-width. */
     private fun smartPunct(t: String): String {
