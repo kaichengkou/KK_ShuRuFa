@@ -437,11 +437,19 @@ class KeyboardView(context: Context, prefs: Prefs) : KbView(context, prefs) {
                     // 小K, just before the language: seen while typing, quiet (it does not float here)
                     val face = dp(17f) * prefs.labelScale
                     val gap = dp(5f)
-                    val start = cx + off - (face + gap + textPaint.measureText(label)) / 2
+                    val now = Motion.now()
+                    // now and then it says something of its own in place of the name
+                    val words = SharkLife.saying(now)
+                    val shown = words ?: label
+                    val start = cx + off - (face + gap + textPaint.measureText(shown)) / 2
                     val a = textPaint.alpha / 255f
                     val wait = Shark.drawLive(c, start + face / 2, cy, face * 0.9f, alpha = (255 * a).toInt(), still = true)
                     if (wait == 0L) postInvalidateOnAnimation() else postInvalidateDelayed(wait)
-                    drawText(c, label, cx + off + (face + gap) / 2, cy, textPaint)
+                    // a nibble nudges the name
+                    val push = SharkLife.push(now) * Shark.cellFor(face * 0.9f)
+                    if (words != null) textPaint.color = theme.accent
+                    drawText(c, shown, cx + off + (face + gap) / 2 + push, cy, textPaint)
+                    textPaint.color = theme.hint
                 } else drawText(c, label, cx + off, cy, textPaint)
                 if (abs(off) > dp(8f)) {
                     // which way the language list turns

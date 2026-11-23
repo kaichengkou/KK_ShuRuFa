@@ -38,6 +38,18 @@ object Icons {
         moveTo(18f, 13.5f); lineTo(18.9f, 15.6f); lineTo(21f, 16.5f); lineTo(18.9f, 17.4f); lineTo(18f, 19.5f)
         lineTo(17.1f, 17.4f); lineTo(15f, 16.5f); lineTo(17.1f, 15.6f); close()
     }
+    /** 小K: a shark swimming right, in the same line as the other icons. */
+    private val shark = p {
+        moveTo(21f, 12.6f); quadTo(19.2f, 9f, 14.2f, 8.7f)
+        lineTo(12.6f, 4.6f); lineTo(10.6f, 8.9f)
+        quadTo(6.8f, 9.6f, 4.8f, 11.6f)
+        lineTo(2.4f, 8.6f); lineTo(3.4f, 12.7f); lineTo(2.4f, 16.6f); lineTo(4.9f, 13.9f)
+        quadTo(9.2f, 16.6f, 14.2f, 16.3f); quadTo(19.2f, 15.9f, 21f, 12.6f); close()
+        moveTo(11.2f, 16.1f); lineTo(10.2f, 18.9f); lineTo(13.4f, 16.3f)
+        moveTo(18.1f, 14.1f); quadTo(19.1f, 14.6f, 20f, 14.1f)
+        // the eye: a ring this small under a 1.7 stroke is a dot
+        addCircle(17.2f, 11.6f, 0.35f, Path.Direction.CW)
+    }
     private val smile = p {
         addCircle(12f, 12f, 8.5f, Path.Direction.CW)
         moveTo(8.2f, 13.6f); cubicTo(9.6f, 16.4f, 14.4f, 16.4f, 15.8f, 13.6f)
@@ -164,7 +176,7 @@ object Icons {
         "home" to lineStart, "end" to lineEnd, "abc" to keyboardIcon,
         "quick" to quick, "close" to close, "up" to up, "down" to down, "pin" to pin,
         "backspace" to backspace, "enter" to enter, "shift" to shift, "language" to globe,
-        "left" to left, "right" to right, "next_slot" to next, "mic" to mic, "ai" to spark,
+        "left" to left, "right" to right, "next_slot" to next, "mic" to mic, "ai" to spark, "shark" to shark,
         "emoji" to smile, "translate" to translate, "cursor" to cursor, "clipboard" to clip,
         "settings" to gear, "collapse" to chevDown, "expand" to chevUp, "lock" to lock, "unlock" to unlock,
     )
@@ -241,6 +253,11 @@ object Icons {
                 c.drawPath(beam, paint)
                 val d = 2.2f * hop(t)
                 around(dx = -d, path = arrowL); around(dx = d, path = arrowR)
+            }
+            // 小K: a little swim forward and back, the tail swishing
+            "shark" -> {
+                around(dx = 1.8f * shake(t, 1), deg = 6f * shake(t, 3))
+                return true
             }
             // AI: the spark twists and twinkles
             "ai" -> {

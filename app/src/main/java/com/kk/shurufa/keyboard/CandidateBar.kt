@@ -305,10 +305,7 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
     /** Returns true while the indicator is still moving. */
     private val lineCy get() = dp(LINE_DP)
 
-    private var kayMoving = false
-
     private fun drawToolbar(c: Canvas, a: Float): Boolean {
-        kayMoving = false
         val list = tools
         val slot = width / list.size.toFloat()
         val cy = lineCy
@@ -335,9 +332,9 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
             // the tapped tool plays its little motion
             val t = if (id == tappedTool) tapT.value else 1f
             if (id == "ai") {
-                // 小K lives here: a face, not an icon
-                val wait = Shark.drawLive(c, cx, cy + dp(1f), dp(22f), alpha = (255 * a).toInt())
-                if (wait == 0L) kayMoving = true else postInvalidateDelayed(wait)
+                // 小K's door: an icon like the others; 小K itself lives on the space key
+                ip.color = ink
+                Icons.draw(c, "shark", cx, cy, dp(Ui.TOOL_ICON + 1f), ip, t = t)
             } else if (glyph != null) {
                 tp.textAlign = Paint.Align.CENTER; tp.typeface = Ui.medium; tp.textSize = sp(Ui.TITLE + 1f)
                 tp.color = ink
@@ -352,7 +349,7 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
             }
             hits.add("tool:$id", cx - slot / 2, 0f, cx + slot / 2, height.toFloat())
         }
-        return indicator.running || indicatorAlpha.running || tapT.running || kayMoving
+        return indicator.running || indicatorAlpha.running || tapT.running
     }
 
     companion object {
@@ -720,6 +717,8 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
     private val patRunnable = Runnable {
         if (pressedTool != "ai" || mode != Mode.TOOLBAR) return@Runnable
         patted = true
+        // the icon swims a little too
+        if (Motion.on(prefs)) { tappedTool = "ai"; tapT.set(0f); tapT.animateTo(1f, dur(TAP_MS), Motion.LINEAR) }
         listener?.onKayPat()
         postInvalidateOnAnimation()
     }

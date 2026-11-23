@@ -136,11 +136,17 @@ class KayTest {
             act(t)
             var k = 0L
             while (k < ms) {
-                val fb = Bitmap.createBitmap(240, 250, Bitmap.Config.ARGB_8888)
-                val fc = Canvas(fb); fc.drawColor(0xFFF7F5F0.toInt())
-                val (pose, _) = L.frame(t + k, 14)
-                S.draw(fc, 120f, 125f, 13 * 9f, pose, wear = null)
-                tp.textSize = 24f; fc.drawText(label, 120f, 238f, tp)
+                // a space key, large: 小K, then the language (or what it says), nudged by a nibble
+                val fb = Bitmap.createBitmap(520, 250, Bitmap.Config.ARGB_8888)
+                val fc = Canvas(fb); fc.drawColor(0xFFECEEF2.toInt())
+                val key = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFFFFFFF.toInt() }
+                fc.drawRoundRect(20f, 40f, 500f, 190f, 28f, 28f, key)
+                val (pose, _) = L.frame(t + k, 14, still = true)
+                S.draw(fc, 130f, 118f, 13 * 7f, pose, wear = null)
+                val words = L.saying(t + k)
+                val lp = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { textSize = 46f; color = if (words != null) 0xFF0E6A73.toInt() else 0xFF737A86.toInt() }
+                fc.drawText(words ?: "中文", 200f + L.push(t + k) * 7f, 134f, lp)
+                tp.textSize = 24f; fc.drawText(label, 260f, 232f, tp)
                 File(dir, "%04d.png".format(n++)).outputStream().use { fb.compress(Bitmap.CompressFormat.PNG, 100, it) }
                 k += 40
             }
@@ -156,6 +162,7 @@ class KayTest {
         L.thinking = false
         film("很久没来：惊醒", 1100) { now -> L.woke(now) }
         film("打盹", 2400) { now -> L.key(now - 120_000) }
+        film("停下来不打字时：它自己找点事做", 30_000) { now -> L.key(now) }
     }
 
     @Test fun chatPanel() {
