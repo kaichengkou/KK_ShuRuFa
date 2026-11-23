@@ -194,6 +194,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
 
     override fun onCreate() {
         super.onCreate()
+        com.kk.shurufa.keyboard.FrameRate.window = window.window
         haptics = Haptics(this, prefs)
         repo = LayoutRepo(this, overrides = { KeyOverrides.load(prefs, it) })
         predictor = Predictor(this)
@@ -214,6 +215,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     }
 
     override fun onDestroy() {
+        com.kk.shurufa.keyboard.FrameRate.window = null
         voice.destroy()
         clipboard.unregister()
         prefs.sp.unregisterOnSharedPreferenceChangeListener(settingsListener)
@@ -543,6 +545,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     /** The keyboard went away without the field finishing (another app came up, the screen went off). */
     override fun onWindowHidden() {
         super.onWindowHidden()
+        com.kk.shurufa.keyboard.FrameRate.idle()
         stopBackgroundWork()
         wordPredictors.values.forEach { it.save() }
         Background.run { TypingStats.get(this).save() }

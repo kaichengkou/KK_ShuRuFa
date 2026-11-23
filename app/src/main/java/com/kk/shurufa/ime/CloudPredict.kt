@@ -44,7 +44,7 @@ class CloudPredict(private val prefs: Prefs, private val onReady: () -> Unit) {
         cache[key]?.let { forText = key; answer = it; return }
         val target = Llm.resolve(prefs, prefs.quickTarget.ifEmpty { prefs.aiProvider }) ?: return
         // within the keyboard's own budget, and not while the service asked to wait
-        if (!com.kk.shurufa.online.AiBudget.mayAsk()) return
+        if (!com.kk.shurufa.online.AiBudget.mayAsk() || !prefs.quickAiNetworkOk()) return
         val t = ++token
         main.postDelayed({
             asking = key

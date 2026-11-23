@@ -10,6 +10,7 @@ import android.content.SharedPreferences
  * never looks like a change of settings.
  */
 class Prefs(context: Context) {
+    private val app = context.applicationContext
     val sp: SharedPreferences = context.applicationContext.getSharedPreferences("kk_prefs", Context.MODE_PRIVATE)
     /** The keyboard's own memory: never shown as settings, never rebuilds anything. */
     val state: SharedPreferences = context.applicationContext.getSharedPreferences("kk_state", Context.MODE_PRIVATE)
@@ -134,7 +135,15 @@ class Prefs(context: Context) {
     val kaySaySize get() = sp.getInt(KAY_SAY_SIZE, 100) / 100f
     /** 云联想: characters before the caret sent, the pause before asking (ms), how many continuations. */
     val cloudContext get() = sp.getInt(CLOUD_CONTEXT, 80)
-    val cloudPauseMs get() = sp.getInt(CLOUD_PAUSE, 350)
+    val cloudPauseMs get() = sp.getInt(CLOUD_PAUSE, 600)
+    /** 云联想 and AI 候选 only on networks that are not metered (Wi-Fi), where a request costs little. */
+    val aiUnmeteredOnly get() = b(AI_UNMETERED, false)
+    /** Whether the quick AI features (云联想, AI 候选) may ask now. */
+    fun quickAiNetworkOk(): Boolean {
+        if (!aiUnmeteredOnly) return true
+        val cm = app.getSystemService(Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager ?: return true
+        return runCatching { !cm.isActiveNetworkMetered }.getOrDefault(true)
+    }
     val cloudCount get() = sp.getInt(CLOUD_COUNT, 3)
     /** AI 候选: syllables before it asks, the pause (ms), characters of context sent. */
     val aiCandSyllables get() = sp.getInt(AI_CAND_SYLLABLES, 3)
@@ -340,6 +349,7 @@ class Prefs(context: Context) {
         const val CLOUD_CONTEXT = "cloud_context"
         const val CLOUD_PAUSE = "cloud_pause"
         const val CLOUD_COUNT = "cloud_count"
+        const val AI_UNMETERED = "ai_unmetered"
         const val AI_CAND_SYLLABLES = "ai_cand_syllables"
         const val AI_CAND_PAUSE = "ai_cand_pause"
         const val AI_CAND_CONTEXT = "ai_cand_context"

@@ -427,7 +427,7 @@ class AiPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
         if (follow) resScroll = resMax
         resScroll = resScroll.coerceIn(0f, resMax)
         c.save(); c.clipRect(resView); c.translate(resView.left, resView.top - resScroll); lay.draw(c); c.restore()
-        if (wait > 0 && running == null) postInvalidateDelayed(wait)
+        if (wait > 0 && running == null) invalidateIn(wait)
         return wait == 0L || running != null || !resScroller.isFinished
     }
 

@@ -169,7 +169,7 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
         ellipsizer.set(tp)
         val x = fx + face / 2 + dp(8f)
         drawText(c, android.text.TextUtils.ellipsize(greetText, ellipsizer, right - x, android.text.TextUtils.TruncateAt.END), x, cy, tp)
-        if (wait > 0) postInvalidateDelayed(wait)
+        if (wait > 0) invalidateIn(wait)
         return wait == 0L
     }
     private var pressedGreet: String? = null

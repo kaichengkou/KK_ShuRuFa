@@ -444,7 +444,8 @@ object Llm {
                     if (cancelled()) break
                     if (!line.startsWith("data:")) continue
                     val d = line.removePrefix("data:").trim()
-                    if (d == "[DONE]") break
+                    // read on to the end: a stream read through gives its connection back for the next request
+                    if (d == "[DONE]") continue
                     if (d.isNotEmpty()) onData(d)
                 }
             }

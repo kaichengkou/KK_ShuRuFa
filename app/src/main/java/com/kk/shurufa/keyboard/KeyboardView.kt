@@ -10,6 +10,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.view.MotionEvent
+import android.view.View
 import com.kk.shurufa.Prefs
 import kotlin.math.abs
 import kotlin.math.hypot
@@ -276,7 +277,7 @@ class KeyboardView(context: Context, prefs: Prefs) : KbView(context, prefs) {
                 KeyStyle.FUNC -> t.inkSoft
                 else -> t.ink
             }
-            if (isSpace) drawSpace(c, kr, k.label, tp) else drawKeyContent(c, k, kr, la, ink)
+            if (isSpace) drawSpace(c, kr, k.label, tp, busy = g != null || pv > 0f) else drawKeyContent(c, k, kr, la, ink)
         }
         if (g != null) {
             c.restore()
@@ -401,7 +402,8 @@ class KeyboardView(context: Context, prefs: Prefs) : KbView(context, prefs) {
         c.drawText(s, x + p.measureText(s) / 2 - bounds.exactCenterX(), y - bounds.exactCenterY(), p)
     }
 
-    private fun drawSpace(c: Canvas, rect: RectF, fixedLabel: String?, tp: Float) {
+    private fun drawSpace(c: Canvas, rect: RectF, fixedLabel: String?, tp: Float, busy: Boolean = false) {
+        var shark = false
         textPaint.textSize = sp(13.5f * prefs.labelScale)
         textPaint.typeface = Ui.regular
         c.save()
@@ -434,30 +436,23 @@ class KeyboardView(context: Context, prefs: Prefs) : KbView(context, prefs) {
             } else {
                 textPaint.alpha = (255 * fade * (1 - min(1f, abs(off) / rect.width()) * 0.5f)).toInt()
                 if (fixedLabel == null && listener?.kayOnSpace() == true) {
-                    // 小K, just before the language: seen while typing, quiet (it does not float here)
-                    val face = dp(17f) * prefs.labelScale
-                    val gap = dp(5f)
-                    val now = Motion.now()
-                    // now and then it says something of its own, in small light type under the name
+                    shark = true
                     prefs.kayTune().let { if (it != SharkLife.tune) SharkLife.tune = it }
-                    val words = SharkLife.saying(now)
-                    val show = if (words != null) SharkLife.sayingShown(now) else 0f
-                    val start = cx + off - (face + gap + textPaint.measureText(label)) / 2
-                    val a = textPaint.alpha / 255f
-                    val wait = Shark.drawLive(c, start + face / 2, cy, face * 0.9f, alpha = (255 * a).toInt(), still = true)
+                    val now = Motion.now()
+                    val geo = sharkGeometry(rect, label, off)
                     // a nibble nudges the name
-                    val push = SharkLife.push(now) * Shark.cellFor(face * 0.9f)
-                    drawText(c, label, cx + off + (face + gap) / 2 + push, cy, textPaint)
-                    if (words != null) {
-                        hintPaint.color = theme.hint
-                        hintPaint.typeface = Ui.regular
-                        hintPaint.textSize = sp(Ui.HINT * prefs.hintScale * prefs.kaySaySize)
-                        hintPaint.alpha = (textPaint.alpha * 0.7f * show).toInt()
-                        fitText(words, rect.width() - dp(12f), hintPaint)
-                        drawText(c, words, cx + off, rect.bottom - dp(4f) - hintPaint.textSize * 0.6f, hintPaint)
-                    }
-                    val next = if (words != null && show < 1f) 0L else wait
-                    if (next == 0L) postInvalidateOnAnimation() else postInvalidateDelayed(next)
+                    val push = SharkLife.push(now) * Shark.cellFor(geo.size)
+                    drawText(c, label, geo.labelX + push, cy, textPaint)
+                    // calm, it lives on its own small layer over the key, so its frames repaint the
+                    // space key alone; while the keyboard itself moves, it is drawn here, with it
+                    val inline = busy || off != 0f || parent !is android.widget.FrameLayout
+                    sharkAlpha = textPaint.alpha
+                    sharkLabel = label
+                    spaceRect.set(rect)
+                    if (inline) {
+                        invalidateIn(drawShark(c, rect, label, off, textPaint.alpha, now))
+                        sharkLayer(show = false)
+                    } else sharkLayer(show = true)
                 } else drawText(c, label, cx + off, cy, textPaint)
                 if (abs(off) > dp(8f)) {
                     // which way the language list turns
@@ -468,6 +463,90 @@ class KeyboardView(context: Context, prefs: Prefs) : KbView(context, prefs) {
             }
         }
         c.restore()
+        if (!shark) sharkLayer(show = false)
+    }
+
+    // ---- 小K on the space key ----
+
+    private class SharkGeo(val size: Float, val sharkX: Float, val labelX: Float)
+
+    private fun sharkGeometry(rect: RectF, label: String, off: Float): SharkGeo {
+        val face = dp(17f) * prefs.labelScale
+        val gap = dp(5f)
+        val cx = rect.centerX() + off
+        val start = cx - (face + gap + textPaint.measureText(label)) / 2
+        return SharkGeo(face * 0.9f, start + face / 2, cx + (face + gap) / 2)
+    }
+
+    /** The shark and what it says under the name; the ms until its next change (0: keep going). */
+    private fun drawShark(c: Canvas, rect: RectF, label: String, off: Float, alpha: Int, now: Long): Long {
+        textPaint.textSize = sp(13.5f * prefs.labelScale)
+        textPaint.typeface = Ui.regular
+        val geo = sharkGeometry(rect, label, off)
+        val wait = Shark.drawLive(c, geo.sharkX, rect.centerY(), geo.size, alpha = alpha, still = true)
+        val words = SharkLife.saying(now) ?: return wait
+        val show = SharkLife.sayingShown(now)
+        hintPaint.color = theme.hint
+        hintPaint.typeface = Ui.regular
+        hintPaint.textSize = sp(Ui.HINT * prefs.hintScale * prefs.kaySaySize)
+        hintPaint.alpha = (alpha * 0.7f * show).toInt()
+        fitText(words, rect.width() - dp(12f), hintPaint)
+        drawText(c, words, rect.centerX() + off, rect.bottom - dp(4f) - hintPaint.textSize * 0.6f, hintPaint)
+        // fading in or out: a few steps, not every frame
+        return if (show < 1f) (if (wait == 0L) 0L else minOf(wait, SharkLife.FADE_STEP_MS)) else wait
+    }
+
+    private val spaceRect = RectF()
+    private var sharkAlpha = 255
+    private var sharkLabel = ""
+    private var lastPush = 0
+
+    /**
+     * The shark's own layer: a view the size of the space key over it, in the keyboard's parent.
+     * Its frames invalidate it alone; the keyboard repaints only when a nibble nudges the name.
+     */
+    private inner class SharkLayer : View(context) {
+        init { importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO; isClickable = false; isFocusable = false }
+        @SuppressLint("ClickableViewAccessibility")
+        override fun onTouchEvent(event: MotionEvent) = false
+        private val tick = Runnable { invalidate() }
+        override fun onDraw(c: Canvas) {
+            val now = Motion.now()
+            c.save(); c.translate(-spaceRect.left, -spaceRect.top)
+            val wait = drawShark(c, spaceRect, sharkLabel, 0f, sharkAlpha, now)
+            c.restore()
+            removeCallbacks(tick)
+            if (wait == 0L) postInvalidateOnAnimation() else postDelayed(tick, wait)
+            val push = SharkLife.push(now)
+            if (push != lastPush) { lastPush = push; this@KeyboardView.invalidate() }
+        }
+    }
+    private var layer: SharkLayer? = null
+
+    private fun sharkLayer(show: Boolean) {
+        val host = parent as? android.widget.FrameLayout
+        if (!show || host == null || spaceRect.isEmpty) { layer?.let { if (it.visibility != GONE) it.visibility = GONE }; return }
+        val l = layer ?: SharkLayer().also { layer = it }
+        val w = spaceRect.width().toInt() + 1; val h = spaceRect.height().toInt() + 1
+        if (l.parent !== host) {
+            // the hierarchy is not changed while drawing
+            handler.post {
+                if (l.parent !== parent && parent is android.widget.FrameLayout) {
+                    (l.parent as? android.view.ViewGroup)?.removeView(l)
+                    (parent as android.widget.FrameLayout).addView(l, android.widget.FrameLayout.LayoutParams(w, h))
+                    invalidate()
+                }
+            }
+            return
+        }
+        val lp = l.layoutParams
+        if (lp.width != w || lp.height != h) { lp.width = w; lp.height = h; handler.post { l.layoutParams = lp } }
+        val tx = left + translationX + spaceRect.left; val ty = top + translationY + spaceRect.top
+        if (l.translationX != tx) l.translationX = tx
+        if (l.translationY != ty) l.translationY = ty
+        if (l.alpha != alpha) l.alpha = alpha
+        if (l.visibility != VISIBLE) l.visibility = VISIBLE
+        l.invalidate()
     }
 
     // ---- touch --------------------------------------------------------------------------
@@ -775,6 +854,8 @@ class KeyboardView(context: Context, prefs: Prefs) : KbView(context, prefs) {
 
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
+        // gone with the keyboard (removed from the parent along with it, or hidden till it is back)
+        layer?.visibility = GONE
         touch?.save()
         ghost?.recycle(); ghost = null
         if (mode != Mode.NONE) finish(commit = false)

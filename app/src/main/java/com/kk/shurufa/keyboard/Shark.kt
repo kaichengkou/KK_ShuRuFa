@@ -355,10 +355,12 @@ object SharkLife {
     fun saying(now: Long): String? = sayText?.takeIf { now < sayUntil && now >= sayUntil - sayMs }
     /** How far the saying is shown: it comes in and goes out over a quarter second. */
     fun sayingShown(now: Long): Float {
-        val inF = ((now - (sayUntil - sayMs)) / 250f).coerceIn(0f, 1f)
-        val outF = ((sayUntil - now) / 250f).coerceIn(0f, 1f)
-        return minOf(inF, outF)
+        val inF = ((now - (sayUntil - sayMs)) / 300f).coerceIn(0f, 1f)
+        val outF = ((sayUntil - now) / 300f).coerceIn(0f, 1f)
+        // in four steps: a fade this small needs no more frames than that
+        return kotlin.math.ceil(minOf(inF, outF) * 4f) / 4f
     }
+    const val FADE_STEP_MS = 75L
 
     /** How many of its pixels the name beside it is nudged now (a nibble). */
     fun push(now: Long): Int {
@@ -369,15 +371,7 @@ object SharkLife {
     }
 
     /** Its small odd sayings, dealt like cards: none comes again until all have been said. */
-    private val WORDS = listOf("咕噜咕噜", "吐个泡泡", "这个字有点咸", "鳍有点酸", "今天水温刚好", "我在巡逻", "数到第三颗泡泡了",
-        "嗷呜", "bloop", "буль-буль", "nom nom", "（假装是条鲸鱼）", "刚才游过一个逗号", "嘘，在想事情", "这里风景不错",
-        "刚刚有只句号路过", "空格键底下凉凉的", "我把泡泡排好队了", "今天的字很新鲜", "偷偷练了一下倒着游", "鳍上落了个顿号",
-        "在等一个好词", "这个拼音长得像海带", "捡到一颗圆滚滚的句号", "水里信号满格", "学会了自由泳", "叼走一个“的”字玩一下",
-        "练习眨眼中", "在数你按了几下空格", "刚和一个 emoji 打了招呼", "今日份泡泡已吐完", "肚子里装了十个字母", "尾巴有点痒",
-        "偷偷长大了一点点", "这里的光标好亮", "梦见一片海带田", "我是这块键盘的保安", "刚才是谁按了我一下", "练习帅气地转身",
-        "想尝尝“鱼”这个字", "把逗号当成了小虾米", "海底今天放晴", "在给泡泡起名字", "今天也很圆", "新学了一个俄语词：рыба",
-        "Hello from the deep", "把问号拉直了一下", "在听键盘的声音", "刚刚那几个字打得很稳", "收集了三个句号", "鳍在打拍子",
-        "偷看了一眼候选栏", "躲在空格底下乘凉", "数了数，今天有好多字", "把一个错别字藏起来了", "这里比海底暖和")
+    private val WORDS get() = SharkWords.IDLE
     private val deck = ArrayList<String>()
     private fun nextWords(): String {
         if (deck.isEmpty()) { deck.addAll(WORDS); deck.shuffle(rnd) }
@@ -395,7 +389,7 @@ object SharkLife {
                 play(now, listOf(P(look = 1) to 200, P(look = 1, dx = 1) to 120, P(F.CHOMP, dx = 2) to 110, P(F.BITE, dx = 2) to 110,
                     P(F.CHOMP, dx = 2) to 110, P(F.BITE, dx = 2) to 110, P(F.CHOMP, dx = 2) to 110, P(F.BITE, dx = 2) to 140,
                     P(F.HAPPY, dx = 1, blush = true) to 360, P() to 150), own = true)
-                if (rnd.nextInt(3) == 0) say(now + 900, "这个字有点咸", sayMs())
+                if (rnd.nextInt(3) == 0) say(now + 900, SharkWords.NIBBLE.random(rnd.asKotlin()), sayMs())
             }
             in 50..64 -> play(now, (0 until 4).map { P(F.LOOKUP, extra = Shark.Extra.BUBBLES, phase = it) to 300 } + (P() to 150), own = true)
             in 65..79 -> play(now, listOf(P(flip = true) to 650, P(F.BLINK, flip = true) to 110, P(flip = true, look = 1) to 450, P() to 150), own = true)
@@ -416,28 +410,28 @@ object SharkLife {
         val words: String
         when (which) {
             0 -> {  // 唱歌: sways, mouth opening and closing, notes rising
-                words = listOf("♪ 啦啦啦～", "♪ 咕噜咕噜歌", "♪ 一只小鲨鱼～").random(rnd.asKotlin())
+                words = SharkWords.SING.random(rnd.asKotlin())
                 for (i in 0 until 14) frames += P(F.SING, phase = i, look = if (i % 4 < 2) -1 else 1, prop = Shark.Prop.NOTES) to 260
             }
             1 -> {  // 敲电脑: a laptop out, eyes down, fins tapping
-                words = listOf("在写周报（假的）", "敲敲敲", "查一下“鲨鱼”怎么写").random(rnd.asKotlin())
+                words = SharkWords.LAPTOP.random(rnd.asKotlin())
                 frames += P(F.CALM, prop = Shark.Prop.LAPTOP, phase = 0) to 400
                 for (i in 0 until 22) frames += P(if (i % 9 == 8) F.BLINK else F.DOWN, prop = Shark.Prop.LAPTOP, phase = i) to 150
                 frames += P(F.HAPPY, prop = Shark.Prop.LAPTOP) to 500
             }
             2 -> {  // 晒太阳: shades on, leaning back
-                words = listOf("晒一会儿太阳", "（戴上墨镜）", "海面的光刚好").random(rnd.asKotlin())
+                words = SharkWords.SUN.random(rnd.asKotlin())
                 frames += P(F.COOL, prop = Shark.Prop.SHADES) to 300
                 for (i in 0 until 6) frames += P(F.COOL, dy = 1, prop = Shark.Prop.SHADES, flick = i % 3 == 1) to 600
                 frames += P(F.HAPPY) to 300
             }
             3 -> {  // 小鱼干: bite by bite
-                words = listOf("嘎嘣脆", "来一根小鱼干", "（偷偷吃零食）").random(rnd.asKotlin())
+                words = SharkWords.FISH.random(rnd.asKotlin())
                 for (i in 0 until 5) { frames += P(F.CHOMP, prop = Shark.Prop.FISH, phase = i) to 240; frames += P(F.BITE, prop = Shark.Prop.FISH, phase = i) to 240 }
                 frames += P(F.HAPPY, blush = true) to 700
             }
             else -> {  // 做操: fins up left and right, a little lifting
-                words = listOf("一二三四", "做操时间到", "鳍要多活动").random(rnd.asKotlin())
+                words = SharkWords.EXERCISE.random(rnd.asKotlin())
                 for (i in 0 until 8) frames += P(F.HAPPY, wave = i % 2 == 0, waveLeft = i % 2 == 1, squash = i % 4 == 3) to 330
                 for (i in 0 until 4) frames += P(F.PAT, prop = Shark.Prop.DUMBBELL, phase = i, dy = if (i % 2 == 0) -1 else 0) to 380
                 frames += P(F.HAPPY) to 300
@@ -507,8 +501,9 @@ object SharkLife {
         val idle = if (lastKey == 0L) 0L else now - lastKey
         // asleep: the z rises once a second; after five minutes it sinks a pixel
         if (idle > 90_000) {
-            val deep = idle > 5 * 60_000
-            return Shark.Pose(Shark.Face.SLEEP, dy = if (deep) 1 else 0, extra = Shark.Extra.Z, phase = ((now / 1000) % 3).toInt()) to (1000 - now % 1000)
+            // after five minutes it sinks a pixel and lies still: nothing to redraw until a key wakes it
+            if (idle > 5 * 60_000) return Shark.Pose(Shark.Face.SLEEP, dy = 1, extra = Shark.Extra.Z, phase = 2) to 60_000L
+            return Shark.Pose(Shark.Face.SLEEP, extra = Shark.Extra.Z, phase = ((now / 1000) % 3).toInt()) to minOf(1000 - now % 1000, 5 * 60_000 - idle)
         }
         // now and then, something of its own, typing or not: it does what it likes
         if (nextSay == 0L) nextSay = now + spread(tune.sayEvery) / 2

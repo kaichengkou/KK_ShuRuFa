@@ -5,6 +5,7 @@
     <!-- downloads: emoji data, voice and translation models, dictionary updates; and the AI
          and translation features you call yourself. Nothing you type is sent on its own. -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
     <application

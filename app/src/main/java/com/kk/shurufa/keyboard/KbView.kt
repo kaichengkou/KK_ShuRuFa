@@ -26,6 +26,13 @@ abstract class KbView(context: Context, protected val prefs: Prefs) : View(conte
     /** [ms] under the user's animation settings (0 when off). */
     protected fun dur(ms: Long) = Motion.dur(prefs, ms)
 
+    /** A frame of something moving: drawn on the next vsync, at the screen's highest rate ([FrameRate]). */
+    override fun postInvalidateOnAnimation() { FrameRate.moving(this); super.postInvalidateOnAnimation() }
+
+    private val redraw = Runnable { invalidate() }
+    /** One redraw [ms] from now, replacing any planned before (timed redraws never pile up). */
+    fun invalidateIn(ms: Long) { removeCallbacks(redraw); if (ms <= 0L) super.postInvalidateOnAnimation() else postDelayed(redraw, ms) }
+
     // ---- text ----
     private val fm = Paint.FontMetrics()
 

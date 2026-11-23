@@ -143,22 +143,40 @@ class KeyboardRenderTest {
         kb.touch = null
     }
 
-    /** 小K on the space key, singing, its words in small grey type under the name. */
+    /**
+     * 小K on the space key, singing, its words in small grey type under the name. It lives on its
+     * own small layer over the key: its frames repaint that layer, not the keyboard.
+     */
     @Test fun sharkOnSpace() {
         kay = true
-        kb.setRows(LayoutRepo(ctx).keyboard("zh").rows)
-        layoutRoot()
+        val host = FrameLayout(ctx)
+        val k2 = KeyboardView(ctx, prefs).also { it.listener = listener; it.setRows(LayoutRepo(ctx).keyboard("zh").rows) }
+        host.addView(k2, FrameLayout.LayoutParams(-1, -2))
+        val w = ctx.resources.displayMetrics.widthPixels
+        fun lay() {
+            host.measure(View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(2000, View.MeasureSpec.AT_MOST))
+            host.layout(0, 0, host.measuredWidth, host.measuredHeight)
+        }
+        lay()
         val now = com.kk.shurufa.keyboard.Motion.now()
         com.kk.shurufa.keyboard.SharkLife.key(now - 4000)
         com.kk.shurufa.keyboard.SharkLife.longAct(now, 0)
+        val b = Bitmap.createBitmap(host.width, host.height, Bitmap.Config.ARGB_8888)
+        host.draw(Canvas(b))
         idle(800)
-        val r = kb.keyRect { it.fn == "space" }!!
-        val b = Bitmap.createBitmap(root.width, root.height, Bitmap.Config.ARGB_8888)
-        root.draw(Canvas(b))
-        val top = (kb.top + r.top).toInt() - 20
+        lay()
+        assertEquals("the shark's layer joins the keyboard", 2, host.childCount)
+        val layer = host.getChildAt(1)
+        host.draw(Canvas(b))
+        // a frame of the shark: the layer is dirty, the keyboard is not
+        layer.invalidate()
+        assertTrue(layer.isDirty)
+        assertTrue("a shark frame must not repaint the keyboard", !k2.isDirty)
+        host.draw(Canvas(b))
+        val r = k2.keyRect { it.fn == "space" }!!
+        val top = (r.top - 20).toInt().coerceAtLeast(0)
         val crop = Bitmap.createBitmap(b, 0, top, b.width, minOf((r.height() + 40).toInt(), b.height - top))
         File(File("build/screens").apply { mkdirs() }, "shark_space.png").outputStream().use { crop.compress(Bitmap.CompressFormat.PNG, 100, it) }
-        shot("shark_space_full")
         kay = false
     }
 

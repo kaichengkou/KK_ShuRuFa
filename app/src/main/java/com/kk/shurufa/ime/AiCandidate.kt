@@ -35,7 +35,7 @@ class AiCandidate(private val prefs: Prefs, private val onReady: () -> Unit) {
         if (input == forInput || input == asking) return
         val target = Llm.resolve(prefs, prefs.quickTarget.ifEmpty { prefs.aiProvider }) ?: return
         // within the keyboard's own budget, and not while the service asked to wait
-        if (!com.kk.shurufa.online.AiBudget.mayAsk()) return
+        if (!com.kk.shurufa.online.AiBudget.mayAsk() || !prefs.quickAiNetworkOk()) return
         // read from the field only when it is going to be asked (each read is a call into the app)
         val context = before().takeLast(prefs.aiCandContext)
         val t = ++token
