@@ -177,6 +177,22 @@ class KeyboardRenderTest {
         val top = (r.top - 20).toInt().coerceAtLeast(0)
         val crop = Bitmap.createBitmap(b, 0, top, b.width, minOf((r.height() + 40).toInt(), b.height - top))
         File(File("build/screens").apply { mkdirs() }, "shark_space.png").outputStream().use { crop.compress(Bitmap.CompressFormat.PNG, 100, it) }
+
+        // swiping the space key to change the language: 小K and a name are there in every frame
+        prefs.put(Prefs.ANIMATIONS, true)
+        fun sharkSeen(): Boolean {
+            host.draw(Canvas(b))
+            for (y in r.top.toInt() until r.bottom.toInt()) for (x in r.left.toInt() until r.right.toInt()) { val px = b.getPixel(x, y); if ((px and 0xFF) - ((px shr 16) and 0xFF) > 30) return true }  // its blue (faded or not)
+            return false
+        }
+        val t0 = SystemClock.uptimeMillis()
+        fun ev(a: Int, x: Float) { k2.dispatchTouchEvent(MotionEvent.obtain(t0, SystemClock.uptimeMillis(), a, x, r.centerY(), 0)) }
+        ev(MotionEvent.ACTION_DOWN, r.centerX()); idle(16); assertTrue("pressed", sharkSeen())
+        for (i in 1..8) { ev(MotionEvent.ACTION_MOVE, r.centerX() + i * 25f); idle(16); assertTrue("swiping, step $i", sharkSeen()) }
+        ev(MotionEvent.ACTION_UP, r.centerX() + 200f)
+        for (i in 0 until 30) { idle(16); lay(); assertTrue("changing language, frame $i", sharkSeen()) }
+        prefs.put(Prefs.ANIMATIONS, false)
+        spaceLabel = "中文"
         kay = false
     }
 
