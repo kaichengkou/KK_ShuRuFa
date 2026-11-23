@@ -144,8 +144,12 @@ class KayTest {
                 val (pose, _) = L.frame(t + k, 14, still = true)
                 S.draw(fc, 130f, 118f, 13 * 7f, pose, wear = null)
                 val words = L.saying(t + k)
-                val lp = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { textSize = 46f; color = if (words != null) 0xFF0E6A73.toInt() else 0xFF737A86.toInt() }
-                fc.drawText(words ?: "中文", 200f + L.push(t + k) * 7f, 134f, lp)
+                val lp = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { textSize = 46f; color = 0xFF737A86.toInt() }
+                fc.drawText("中文", 200f + L.push(t + k) * 7f, 134f, lp)
+                if (words != null) {
+                    val sp = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { textSize = 30f; color = 0xFF0E6A73.toInt(); alpha = (255 * L.sayingShown(t + k)).toInt(); textAlign = android.graphics.Paint.Align.CENTER }
+                    fc.drawText(words, 260f, 178f, sp)
+                }
                 tp.textSize = 24f; fc.drawText(label, 260f, 232f, tp)
                 File(dir, "%04d.png".format(n++)).outputStream().use { fb.compress(Bitmap.CompressFormat.PNG, 100, it) }
                 k += 40
@@ -162,6 +166,9 @@ class KayTest {
         L.thinking = false
         film("很久没来：惊醒", 1100) { now -> L.woke(now) }
         film("打盹", 2400) { now -> L.key(now - 120_000) }
+        for ((i, name) in listOf("唱歌", "敲电脑", "晒太阳", "啃小鱼干", "做操").withIndex())
+            film("长动作：$name", 5200) { now -> L.key(now - 4000); L.longAct(now, i) }
+        film("长动作不被打字打断", 2000) { now -> L.key(now - 4000); L.longAct(now, 1); L.delete(now + 1); L.sent(now + 2) }
         film("停下来不打字时：它自己找点事做", 30_000) { now -> L.key(now) }
     }
 

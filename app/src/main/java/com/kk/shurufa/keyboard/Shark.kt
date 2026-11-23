@@ -19,9 +19,11 @@ object Shark {
     enum class Face(val kaomoji: String) {
         CALM("(・ω・)"), BLINK("(－ω－)"), HAPPY("(^ω^)"), PAT("(>ω<)"), SURPRISED("(ﾟдﾟ)!"), SAD("(╥ω╥)"),
         STAR("(☆ω☆)"), SMUG("(￣▽￣)"), SLEEP("(˘ω˘)zZ"), COVER("(/ω＼)"), YAWN("(´ρ`)"), LOOKUP("(・ω・)?"),
-        CHOMP("(>▽<)嗷"), BITE("(>ω<)")
+        CHOMP("(>▽<)嗷"), BITE("(>ω<)"), DOWN("(・ω・)…"), SING("(ˊoˋ)♪"), COOL("(⌐■_■)")
     }
     enum class Extra { NONE, BANG, HEART, Z, BUBBLES }
+    /** What it holds or has on for a longer act. */
+    enum class Prop { NONE, LAPTOP, NOTES, SHADES, FISH, DUMBBELL }
 
     /** One frame: a face and how the body is held. */
     data class Pose(
@@ -29,6 +31,7 @@ object Shark {
         val blush: Boolean = false, val extra: Extra = Extra.NONE, val phase: Int = 0, val flick: Boolean = false,
         /** Where the eyes look (−1 left, 1 right), how far it has moved (whole pixels), facing the other way. */
         val look: Int = 0, val dx: Int = 0, val flip: Boolean = false,
+        val prop: Prop = Prop.NONE, val waveLeft: Boolean = false,
     )
 
     private const val BODY = 0xFF7096BA.toInt()
@@ -119,7 +122,9 @@ object Shark {
             val ex = ex0 + pose.look
             val ey = 5
             when (pose.face) {
-                Face.CALM -> { at(ex, ey, EYE); at(ex, ey - 1, EYE) }
+                Face.CALM, Face.COOL -> { at(ex, ey, EYE); at(ex, ey - 1, EYE) }
+                Face.DOWN -> { at(ex, ey + 1, EYE); at(ex, ey, EYE) }
+                Face.SING -> { at(ex - 1, ey, EYE); at(ex, ey - 1, EYE); at(ex + 1, ey, EYE) }
                 Face.LOOKUP -> { at(ex, ey - 1, EYE); at(ex, ey - 2, EYE) }
                 Face.BLINK, Face.SLEEP -> { at(ex - 1, ey, EYE); at(ex, ey + (if (pose.face == Face.SLEEP) 1 else 0), EYE); at(ex + 1, ey, EYE) }
                 Face.HAPPY -> { at(ex - 1, ey, EYE); at(ex, ey - 1, EYE); at(ex + 1, ey, EYE) }
@@ -143,6 +148,8 @@ object Shark {
             Face.SURPRISED -> { at(6, 8, EYE); at(7, 8, EYE); at(6, 9, EYE); at(7, 9, EYE) }
             Face.CHOMP -> { for (x in 5..8) { at(x, 8, EYE); at(x, 10, EYE) }; at(5, 9, EYE); at(8, 9, EYE); at(6, 9, BLUSH); at(7, 9, BLUSH) }
             Face.BITE -> { at(5, 8, EYE); at(6, 9, EYE); at(7, 8, EYE); at(8, 9, EYE) }
+            Face.SING -> if (pose.phase % 2 == 0) { at(6, 8, EYE); at(7, 8, EYE); at(6, 9, BLUSH); at(7, 9, BLUSH); at(6, 10, EYE); at(7, 10, EYE) } else { at(6, 9, EYE); at(7, 9, EYE) }
+            Face.DOWN -> { at(6, 9, EYE); at(7, 9, EYE) }
             Face.YAWN -> { for (x in 5..8) at(x, 8, EYE); at(5, 9, EYE); at(6, 9, BLUSH); at(7, 9, BLUSH); at(8, 9, EYE); for (x in 6..7) at(x, 10, EYE) }
             Face.SAD -> { at(5, 9, EYE); at(6, 8, EYE); at(7, 8, EYE); at(8, 9, EYE) }
             Face.COVER -> { at(5, 9, EYE); at(6, 8, EYE); at(7, 9, EYE); at(8, 8, EYE) }
@@ -151,8 +158,10 @@ object Shark {
             Face.HAPPY, Face.PAT, Face.STAR -> { at(5, 8, EYE); at(6, 9, EYE); at(7, 9, EYE); at(8, 8, EYE); at(6, 8, BLUSH); at(7, 8, BLUSH) }
             else -> { at(5, 8, EYE); at(6, 9, EYE); at(7, 9, EYE); at(8, 8, EYE) }
         }
-        // a fin raised to wave, on the right
+        // a fin raised to wave, on the right (and the left, for 做操)
         if (pose.wave) { px(14 + OX, 3 + OY + dy, BODY); px(15 + OX, 2 + OY + dy, BODY); px(15 + OX, 3 + OY + dy, DARK) }
+        if (pose.waveLeft) { px(-1 + OX, 3 + OY + dy, BODY); px(-2 + OX, 2 + OY + dy, BODY); px(-2 + OX, 3 + OY + dy, DARK) }
+        drawProp(pose, dy, ::at)
         // what goes above
         when (pose.extra) {
             Extra.BANG -> { px(16, 0 + dy, RED); px(16, 1 + dy, RED); px(16, 3 + dy, RED) }
@@ -181,6 +190,52 @@ object Shark {
         val (pose, wait) = SharkLife.frame(Motion.now(), java.time.LocalTime.now().hour, still)
         draw(c, cx, cy, size, pose, alpha)
         return if (wait <= 20) 0L else wait
+    }
+
+    private const val GREY = 0xFF9AA3AF.toInt()
+    private const val GREY_D = 0xFF6B7380.toInt()
+    private const val SCREEN = 0xFFBFE3F5.toInt()
+    private const val ORANGE = 0xFFF4A340.toInt()
+    private const val NOTE = 0xFF6C7BD8.toInt()
+
+    /** The props of the longer acts, drawn in front of it. */
+    private fun drawProp(pose: Pose, dy: Int, at: (Int, Int, Int) -> Unit) {
+        val ph = pose.phase
+        when (pose.prop) {
+            Prop.LAPTOP -> {
+                // a little laptop, its lid towards us, a light on the lid; the fins tap the keys in turn
+                for (x in 3..10) for (y in 8..10) at(x, y, GREY)
+                at(6, 9, if (ph % 4 < 2) SCREEN else 0xFFFFFFFF.toInt()); at(7, 9, if (ph % 4 < 2) SCREEN else 0xFFFFFFFF.toInt())
+                for (x in 2..11) at(x, 11, GREY_D)
+                at(if (ph % 2 == 0) 1 else 2, 10, BODY); at(if (ph % 2 == 0) 12 else 11, 10, if (ph % 2 == 0) BODY else DARK)
+            }
+            Prop.NOTES -> {
+                // notes float up to the right, one after another
+                for ((i, base) in intArrayOf(0, 2).withIndex()) {
+                    val y = 3 - ((ph + base) % 4) + if (i == 1) 1 else 0
+                    val x = 14 + i * 2
+                    px(x + OX, y + OY + dy, NOTE); px(x + OX, y + 1 + OY + dy, NOTE); px(x - 1 + OX, y + 2 + OY + dy, NOTE); px(x + OX, y + 2 + OY + dy, NOTE); px(x + 1 + OX, y + OY + dy, NOTE)
+                }
+            }
+            Prop.SHADES -> {
+                for (x in 2..6) at(x, 4, EYE); for (x in 7..11) at(x, 4, EYE)
+                for (x in 3..5) at(x, 5, EYE); for (x in 8..10) at(x, 5, EYE)
+                at(3, 4, SHINE); at(8, 4, SHINE)
+            }
+            Prop.FISH -> {
+                // a little dried fish, going in bite by bite
+                val left = 1 + ph
+                for (x in left..(left + 2)) if (x < 6) at(x, 8, ORANGE)
+                if (left - 1 < 6) { at(left - 1, 7, ORANGE); at(left - 1, 9, ORANGE) }
+            }
+            Prop.DUMBBELL -> {
+                val up = ph % 2 == 0
+                val y = if (up) 2 else 4
+                for (x in -2..15) if (x !in 0..13 || y < 2) px(x + OX, y + OY + dy, GREY_D)
+                for (dyy in -1..1) { px(-3 + OX, y + dyy + OY + dy, GREY); px(16 + OX, y + dyy + OY + dy, GREY) }
+            }
+            Prop.NONE -> {}
+        }
     }
 
     private val HEART = listOf(14 to 0, 16 to 0, 13 to 1, 14 to 1, 15 to 1, 16 to 1, 17 to 1, 14 to 2, 15 to 2, 16 to 2, 15 to 3)
@@ -261,7 +316,12 @@ object SharkLife {
     private var flickAt = 0L
     private var yawnAt = 0L
 
-    private fun play(now: Long, frames: List<Pair<Shark.Pose, Int>>) { anim = frames; animAt = now }
+    /** A longer act (唱歌, 敲电脑 …) plays to its end: typing does not cut it short; only a pat does. */
+    private var long = false
+    private fun play(now: Long, frames: List<Pair<Shark.Pose, Int>>, longAct: Boolean = false, force: Boolean = false) {
+        if (long && playing(now) && !force) return
+        anim = frames; animAt = now; long = longAct
+    }
 
     // ---- what it does by itself, when typing pauses ----
 
@@ -273,7 +333,13 @@ object SharkLife {
     private var pushFrames: Set<Int> = emptySet()
 
     /** The words it says on the space key now, if it is saying something. */
-    fun saying(now: Long): String? = sayText?.takeIf { now < sayUntil }
+    fun saying(now: Long): String? = sayText?.takeIf { now < sayUntil && now >= sayUntil - sayMs }
+    /** How far the saying is shown: it comes in and goes out over a quarter second. */
+    fun sayingShown(now: Long): Float {
+        val inF = ((now - (sayUntil - sayMs)) / 250f).coerceIn(0f, 1f)
+        val outF = ((sayUntil - now) / 250f).coerceIn(0f, 1f)
+        return minOf(inF, outF)
+    }
 
     /** How many of its pixels the name beside it is nudged now (a nibble). */
     fun push(now: Long): Int {
@@ -283,8 +349,21 @@ object SharkLife {
         return 0
     }
 
+    /** Its small odd sayings, dealt like cards: none comes again until all have been said. */
     private val WORDS = listOf("咕噜咕噜", "吐个泡泡", "这个字有点咸", "鳍有点酸", "今天水温刚好", "我在巡逻", "数到第三颗泡泡了",
-        "嗷呜", "bloop", "буль-буль", "nom nom", "（假装是条鲸鱼）", "刚才游过一个逗号", "嘘，在想事情", "这里风景不错")
+        "嗷呜", "bloop", "буль-буль", "nom nom", "（假装是条鲸鱼）", "刚才游过一个逗号", "嘘，在想事情", "这里风景不错",
+        "刚刚有只句号路过", "空格键底下凉凉的", "我把泡泡排好队了", "今天的字很新鲜", "偷偷练了一下倒着游", "鳍上落了个顿号",
+        "在等一个好词", "这个拼音长得像海带", "捡到一颗圆滚滚的句号", "水里信号满格", "学会了自由泳", "叼走一个“的”字玩一下",
+        "练习眨眼中", "在数你按了几下空格", "刚和一个 emoji 打了招呼", "今日份泡泡已吐完", "肚子里装了十个字母", "尾巴有点痒",
+        "偷偷长大了一点点", "这里的光标好亮", "梦见一片海带田", "我是这块键盘的保安", "刚才是谁按了我一下", "练习帅气地转身",
+        "想尝尝“鱼”这个字", "把逗号当成了小虾米", "海底今天放晴", "在给泡泡起名字", "今天也很圆", "新学了一个俄语词：рыба",
+        "Hello from the deep", "把问号拉直了一下", "在听键盘的声音", "刚刚那几个字打得很稳", "收集了三个句号", "鳍在打拍子",
+        "偷看了一眼候选栏", "躲在空格底下乘凉", "数了数，今天有好多字", "把一个错别字藏起来了", "这里比海底暖和")
+    private val deck = ArrayList<String>()
+    private fun nextWords(): String {
+        if (deck.isEmpty()) { deck.addAll(WORDS); deck.shuffle(rnd) }
+        return deck.removeAt(deck.size - 1)
+    }
 
     private fun idleAct(now: Long) {
         pushFrames = emptySet()
@@ -296,19 +375,63 @@ object SharkLife {
                 play(now, listOf(P(look = 1) to 200, P(look = 1, dx = 1) to 120, P(F.CHOMP, dx = 2) to 110, P(F.BITE, dx = 2) to 110,
                     P(F.CHOMP, dx = 2) to 110, P(F.BITE, dx = 2) to 110, P(F.CHOMP, dx = 2) to 110, P(F.BITE, dx = 2) to 140,
                     P(F.HAPPY, dx = 1, blush = true) to 360, P() to 150))
-                if (rnd.nextInt(3) == 0 && now - lastSay > 60_000) say(now + 1300, "这个字有点咸", 1600)
+                if (rnd.nextInt(3) == 0 && now - lastSay > 45_000) say(now + 900, "这个字有点咸", SAY_MS)
             }
             in 50..64 -> play(now, (0 until 4).map { P(F.LOOKUP, extra = Shark.Extra.BUBBLES, phase = it) to 300 } + (P() to 150))
             in 65..79 -> play(now, listOf(P(flip = true) to 650, P(F.BLINK, flip = true) to 110, P(flip = true, look = 1) to 450, P() to 150))
-            in 80..89 -> play(now, listOf(P(squash = true) to 160, P(F.BLINK, dy = -1) to 260, P(F.HAPPY) to 260, P() to 120))
+            in 80..86 -> play(now, listOf(P(squash = true) to 160, P(F.BLINK, dy = -1) to 260, P(F.HAPPY) to 260, P() to 120))
+            in 87..93 -> longAct(now)
             else -> {
-                if (now - lastSay > 90_000) say(now, WORDS[rnd.nextInt(WORDS.size)], 1800)
+                if (now - lastSay > 45_000) say(now, nextWords(), SAY_MS)
                 play(now, listOf(P(F.HAPPY) to 300, P() to 1500))
             }
         }
     }
 
-    private fun say(at: Long, text: String, ms: Long) { sayText = text; sayUntil = at + ms; lastSay = at }
+    private var sayMs = 1L
+    private fun say(at: Long, text: String, ms: Long) { sayText = text; sayUntil = at + ms; sayMs = ms; lastSay = at }
+    /** How long a saying stays under the name. */
+    private const val SAY_MS = 6000L
+
+    /** The longer acts: a few seconds each, with a word under the name. */
+    fun longAct(now: Long, which: Int = rnd.nextInt(5)) {
+        pushFrames = emptySet()
+        val frames = ArrayList<Pair<Shark.Pose, Int>>()
+        val words: String
+        when (which) {
+            0 -> {  // 唱歌: sways, mouth opening and closing, notes rising
+                words = listOf("♪ 啦啦啦～", "♪ 咕噜咕噜歌", "♪ 一只小鲨鱼～").random(rnd.asKotlin())
+                for (i in 0 until 14) frames += P(F.SING, phase = i, look = if (i % 4 < 2) -1 else 1, prop = Shark.Prop.NOTES) to 260
+            }
+            1 -> {  // 敲电脑: a laptop out, eyes down, fins tapping
+                words = listOf("在写周报（假的）", "敲敲敲", "查一下“鲨鱼”怎么写").random(rnd.asKotlin())
+                frames += P(F.CALM, prop = Shark.Prop.LAPTOP, phase = 0) to 400
+                for (i in 0 until 22) frames += P(if (i % 9 == 8) F.BLINK else F.DOWN, prop = Shark.Prop.LAPTOP, phase = i) to 150
+                frames += P(F.HAPPY, prop = Shark.Prop.LAPTOP) to 500
+            }
+            2 -> {  // 晒太阳: shades on, leaning back
+                words = listOf("晒一会儿太阳", "（戴上墨镜）", "海面的光刚好").random(rnd.asKotlin())
+                frames += P(F.COOL, prop = Shark.Prop.SHADES) to 300
+                for (i in 0 until 6) frames += P(F.COOL, dy = 1, prop = Shark.Prop.SHADES, flick = i % 3 == 1) to 600
+                frames += P(F.HAPPY) to 300
+            }
+            3 -> {  // 小鱼干: bite by bite
+                words = listOf("嘎嘣脆", "来一根小鱼干", "（偷偷吃零食）").random(rnd.asKotlin())
+                for (i in 0 until 5) { frames += P(F.CHOMP, prop = Shark.Prop.FISH, phase = i) to 240; frames += P(F.BITE, prop = Shark.Prop.FISH, phase = i) to 240 }
+                frames += P(F.HAPPY, blush = true) to 700
+            }
+            else -> {  // 做操: fins up left and right, a little lifting
+                words = listOf("一二三四", "做操时间到", "鳍要多活动").random(rnd.asKotlin())
+                for (i in 0 until 8) frames += P(F.HAPPY, wave = i % 2 == 0, waveLeft = i % 2 == 1, squash = i % 4 == 3) to 330
+                for (i in 0 until 4) frames += P(F.PAT, prop = Shark.Prop.DUMBBELL, phase = i, dy = if (i % 2 == 0) -1 else 0) to 380
+                frames += P(F.HAPPY) to 300
+            }
+        }
+        play(now, frames + (P() to 200), longAct = true)
+        say(now + 200, words, maxOf(SAY_MS, frames.sumOf { it.second }.toLong()))
+    }
+
+    private fun java.util.Random.asKotlin() = kotlin.random.Random(nextLong())
     private fun playing(now: Long) = anim.isNotEmpty() && now - animAt < anim.sumOf { it.second }
 
     fun key(now: Long) { keys[keyAt++ % keys.size] = now; lastKey = now }
@@ -325,7 +448,8 @@ object SharkLife {
 
     fun pat(now: Long) {
         lastKey = now
-        play(now, listOf(Shark.Pose(Shark.Face.PAT, squash = true, blush = true) to 120, Shark.Pose(Shark.Face.PAT, dy = -2, blush = true, extra = Shark.Extra.HEART) to 200,
+        pushFrames = emptySet()
+        play(now, force = true, frames = listOf(Shark.Pose(Shark.Face.PAT, squash = true, blush = true) to 120, Shark.Pose(Shark.Face.PAT, dy = -2, blush = true, extra = Shark.Extra.HEART) to 200,
             Shark.Pose(Shark.Face.PAT, blush = true, extra = Shark.Extra.HEART) to 520, Shark.Pose(Shark.Face.HAPPY, blush = true) to 700))
     }
 
@@ -397,6 +521,7 @@ object SharkLife {
             if (lastKey > 0) 90_000 - idle else null,
             if (idle < 85_000) nextAct - now else null,
             sayUntil - now,
+            sayUntil - sayMs - now,
         ).filter { it > 0 }
         return pose to (events.minOrNull() ?: 1000L).coerceIn(16L, 60_000L)
     }

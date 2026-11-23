@@ -438,18 +438,28 @@ class KeyboardView(context: Context, prefs: Prefs) : KbView(context, prefs) {
                     val face = dp(17f) * prefs.labelScale
                     val gap = dp(5f)
                     val now = Motion.now()
-                    // now and then it says something of its own in place of the name
+                    // now and then it says something of its own, in small type along the bottom of the key
                     val words = SharkLife.saying(now)
-                    val shown = words ?: label
-                    val start = cx + off - (face + gap + textPaint.measureText(shown)) / 2
+                    val show = if (words != null) SharkLife.sayingShown(now) else 0f
+                    val lift = dp(4f) * show * prefs.labelScale
+                    val y = cy - lift
+                    val start = cx + off - (face + gap + textPaint.measureText(label)) / 2
                     val a = textPaint.alpha / 255f
-                    val wait = Shark.drawLive(c, start + face / 2, cy, face * 0.9f, alpha = (255 * a).toInt(), still = true)
-                    if (wait == 0L) postInvalidateOnAnimation() else postInvalidateDelayed(wait)
+                    val wait = Shark.drawLive(c, start + face / 2, y, face * 0.9f, alpha = (255 * a).toInt(), still = true)
                     // a nibble nudges the name
                     val push = SharkLife.push(now) * Shark.cellFor(face * 0.9f)
-                    if (words != null) textPaint.color = theme.accent
-                    drawText(c, shown, cx + off + (face + gap) / 2 + push, cy, textPaint)
-                    textPaint.color = theme.hint
+                    drawText(c, label, cx + off + (face + gap) / 2 + push, y, textPaint)
+                    if (words != null) {
+                        val size = textPaint.textSize; val alpha = textPaint.alpha
+                        textPaint.textSize = sp(9.5f * prefs.labelScale)
+                        textPaint.color = theme.accent
+                        textPaint.alpha = (alpha * show).toInt()
+                        drawText(c, words, cx + off, rect.bottom - dp(7f) - textPaint.textSize / 2, textPaint)
+                        textPaint.textSize = size; textPaint.alpha = alpha
+                        textPaint.color = theme.hint
+                    }
+                    val next = if (words != null && show < 1f) 0L else wait
+                    if (next == 0L) postInvalidateOnAnimation() else postInvalidateDelayed(next)
                 } else drawText(c, label, cx + off, cy, textPaint)
                 if (abs(off) > dp(8f)) {
                     // which way the language list turns
