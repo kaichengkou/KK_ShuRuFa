@@ -438,25 +438,23 @@ class KeyboardView(context: Context, prefs: Prefs) : KbView(context, prefs) {
                     val face = dp(17f) * prefs.labelScale
                     val gap = dp(5f)
                     val now = Motion.now()
-                    // now and then it says something of its own, in small type along the bottom of the key
+                    // now and then it says something of its own, in small light type under the name
+                    prefs.kayTune().let { if (it != SharkLife.tune) SharkLife.tune = it }
                     val words = SharkLife.saying(now)
                     val show = if (words != null) SharkLife.sayingShown(now) else 0f
-                    val lift = dp(4f) * show * prefs.labelScale
-                    val y = cy - lift
                     val start = cx + off - (face + gap + textPaint.measureText(label)) / 2
                     val a = textPaint.alpha / 255f
-                    val wait = Shark.drawLive(c, start + face / 2, y, face * 0.9f, alpha = (255 * a).toInt(), still = true)
+                    val wait = Shark.drawLive(c, start + face / 2, cy, face * 0.9f, alpha = (255 * a).toInt(), still = true)
                     // a nibble nudges the name
                     val push = SharkLife.push(now) * Shark.cellFor(face * 0.9f)
-                    drawText(c, label, cx + off + (face + gap) / 2 + push, y, textPaint)
+                    drawText(c, label, cx + off + (face + gap) / 2 + push, cy, textPaint)
                     if (words != null) {
-                        val size = textPaint.textSize; val alpha = textPaint.alpha
-                        textPaint.textSize = sp(9.5f * prefs.labelScale)
-                        textPaint.color = theme.accent
-                        textPaint.alpha = (alpha * show).toInt()
-                        drawText(c, words, cx + off, rect.bottom - dp(7f) - textPaint.textSize / 2, textPaint)
-                        textPaint.textSize = size; textPaint.alpha = alpha
-                        textPaint.color = theme.hint
+                        hintPaint.color = theme.hint
+                        hintPaint.typeface = Ui.regular
+                        hintPaint.textSize = sp(Ui.HINT * prefs.hintScale * prefs.kaySaySize)
+                        hintPaint.alpha = (textPaint.alpha * 0.7f * show).toInt()
+                        fitText(words, rect.width() - dp(12f), hintPaint)
+                        drawText(c, words, cx + off, rect.bottom - dp(4f) - hintPaint.textSize * 0.6f, hintPaint)
                     }
                     val next = if (words != null && show < 1f) 0L else wait
                     if (next == 0L) postInvalidateOnAnimation() else postInvalidateDelayed(next)

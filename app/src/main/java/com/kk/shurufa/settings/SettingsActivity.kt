@@ -1642,9 +1642,17 @@ private fun KayGroups(prefs: Prefs) {
                 modifier = Modifier.width(150.dp), shape = RoundedCornerShape(14.dp), placeholder = { Text("小K") })
         }
         Note("住在键盘里的小鲨鱼，今天是它出生的第 ${kay.age()} 天。工具栏上那个会眨眼的就是它：点一下打开它，长按摸摸头。")
-        Toggle(prefs, Prefs.KAY_SPACE, "空格键上也有它", "在语言名字旁边，打字时也看得见。它在那里不漂浮，只眨眼、甩甩背鳍、删多了捂眼睛、没人打字时打盹", true)
+        Toggle(prefs, Prefs.KAY_SPACE, "空格键上也有它", "在语言名字旁边，打字时也看得见。它想干嘛就干嘛：东张西望、啃一口语言名、唱歌、敲电脑……说的话在名字底下一行浅灰小字。不碰按键，不影响打字", true)
         Toggle(prefs, Prefs.KAY_GREET, "每天打个招呼", "每天第一次在空白输入框里打开键盘时，在工具栏说一句话。点「已阅」、按任何键或点别处就消失", true)
         Toggle(prefs, Prefs.KAY_AI_GREET, "这句话让 AI 来写", "每天傍晚请 AI 写好第二天的那一句（一天一次，只发日期、节日、节气和字数，不发你写的内容）。没有 AI 服务时用它自己的话", true)
+    }
+    Group("空格键上的它") {
+        IntSlider(prefs, Prefs.KAY_ACT_EVERY, "多久动一下", 8, 3..60, " 秒", "大约每隔这么久，它自己找点事做；打不打字都一样")
+        IntSlider(prefs, Prefs.KAY_LONG_SHARE, "长动作的比例", 35, 0..100, "%", "唱歌、敲电脑、晒太阳、啃小鱼干、做操。长动作做完才停，只有长按工具栏上的它（摸头）能叫停")
+        IntSlider(prefs, Prefs.KAY_SPEED, "动作速度", 70, 30..150, "%", "越小越慢；删字、发消息时的反应不受影响")
+        IntSlider(prefs, Prefs.KAY_SAY_EVERY, "多久说一句话", 40, 10..300, " 秒")
+        IntSlider(prefs, Prefs.KAY_SAY_SEC, "一句话停留", 12, 3..60, " 秒", "长动作的话会一直留到动作做完")
+        IntSlider(prefs, Prefs.KAY_SAY_SIZE, "小字大小", 100, 70..150, "%")
     }
     Group("聊天") {
         IntSlider(prefs, Prefs.KAY_CHAT_CAP, "每天最多聊", 30, 5..100, " 句", "聊天会把你说的话发给 AI 服务；到了上限它就去睡了。聊过的话不保存，键盘关掉就忘了")

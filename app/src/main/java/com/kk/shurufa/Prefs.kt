@@ -127,6 +127,11 @@ class Prefs(context: Context) {
     val kayChatCap get() = sp.getInt(KAY_CHAT_CAP, 30)
     /** Whether 小K sits on the space key too. */
     val kayOnSpace get() = b(KAY_SPACE, true)
+    /** The shark's pace: how often it acts, the share of long acts, its speed, how often it speaks and for how long, the size of its words. */
+    fun kayTune() = com.kk.shurufa.keyboard.SharkLife.Tune(
+        sp.getInt(KAY_ACT_EVERY, 8), sp.getInt(KAY_LONG_SHARE, 35), sp.getInt(KAY_SPEED, 70),
+        sp.getInt(KAY_SAY_EVERY, 40), sp.getInt(KAY_SAY_SEC, 12))
+    val kaySaySize get() = sp.getInt(KAY_SAY_SIZE, 100) / 100f
     /** 云联想: characters before the caret sent, the pause before asking (ms), how many continuations. */
     val cloudContext get() = sp.getInt(CLOUD_CONTEXT, 80)
     val cloudPauseMs get() = sp.getInt(CLOUD_PAUSE, 350)
@@ -238,7 +243,7 @@ class Prefs(context: Context) {
         fun rebuildsKeyboard(key: String) = key in LOOK || key.startsWith("key_ovr_")
 
         private val LOOK by lazy {
-            setOf(THEME, STYLE, ACCENT, KAY_SPACE, THEME_WARMTH, THEME_SHADE, ACCENT_HUE, FONT_STAMP, KEY_HEIGHT, KEY_GAP, ROW_GAP, KEY_RADIUS, LABEL_SCALE, HINT_SCALE, SHOW_HINTS, SHOW_ALL_HINTS, HINT_MODE, CAND_FONT,
+            setOf(THEME, STYLE, ACCENT, KAY_SPACE, KAY_SAY_SIZE, THEME_WARMTH, THEME_SHADE, ACCENT_HUE, FONT_STAMP, KEY_HEIGHT, KEY_GAP, ROW_GAP, KEY_RADIUS, LABEL_SCALE, HINT_SCALE, SHOW_HINTS, SHOW_ALL_HINTS, HINT_MODE, CAND_FONT,
                 KEY_BORDERS, NUMBER_ROW, CAND_SCALE, BOTTOM_PADDING, CURSOR_LABELS, LANGUAGES, TOP_ROW_SCRIPTS, LAYOUT_RELOAD)
         }
 
@@ -319,6 +324,12 @@ class Prefs(context: Context) {
         const val KAY_AI_GREET = "kay_ai_greet"
         const val KAY_CHAT_CAP = "kay_chat_cap"
         const val KAY_SPACE = "kay_space"
+        const val KAY_ACT_EVERY = "kay_act_every"
+        const val KAY_LONG_SHARE = "kay_long_share"
+        const val KAY_SPEED = "kay_speed"
+        const val KAY_SAY_EVERY = "kay_say_every"
+        const val KAY_SAY_SEC = "kay_say_sec"
+        const val KAY_SAY_SIZE = "kay_say_size"
         // 小K's state (kept with the state, not the settings)
         const val KAY_BORN = "kay_born"
         const val KAY_GREETED = "kay_greeted"

@@ -60,7 +60,9 @@ class KeyboardRenderTest {
         override fun onPress(key: Key) {}
         override fun shiftState() = shift
         override fun spaceLabel() = spaceLabel
+        override fun kayOnSpace() = kay
     }
+    private var kay = false
 
     @Before fun setUp() {
         prefs = Prefs(ctx)
@@ -139,6 +141,25 @@ class KeyboardRenderTest {
         prefs.state.edit().remove(com.kk.shurufa.keyboard.TouchModel.KEY).apply()
         assertEquals("q", tap(edgeX, y))
         kb.touch = null
+    }
+
+    /** 小K on the space key, singing, its words in small grey type under the name. */
+    @Test fun sharkOnSpace() {
+        kay = true
+        kb.setRows(LayoutRepo(ctx).keyboard("zh").rows)
+        layoutRoot()
+        val now = com.kk.shurufa.keyboard.Motion.now()
+        com.kk.shurufa.keyboard.SharkLife.key(now - 4000)
+        com.kk.shurufa.keyboard.SharkLife.longAct(now, 0)
+        idle(800)
+        val r = kb.keyRect { it.fn == "space" }!!
+        val b = Bitmap.createBitmap(root.width, root.height, Bitmap.Config.ARGB_8888)
+        root.draw(Canvas(b))
+        val top = (kb.top + r.top).toInt() - 20
+        val crop = Bitmap.createBitmap(b, 0, top, b.width, minOf((r.height() + 40).toInt(), b.height - top))
+        File(File("build/screens").apply { mkdirs() }, "shark_space.png").outputStream().use { crop.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        shot("shark_space_full")
+        kay = false
     }
 
     @Test fun renderAndGestures() {

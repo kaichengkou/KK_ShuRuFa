@@ -316,16 +316,35 @@ object SharkLife {
     private var flickAt = 0L
     private var yawnAt = 0L
 
+    /** Its pace, from the settings (小K page). */
+    data class Tune(
+        /** Seconds between the things it does of its own, about. */
+        val actEvery: Int = 8,
+        /** Of those, the share (%) that are longer acts. */
+        val longShare: Int = 35,
+        /** How fast it moves when it plays by itself (%; less is slower). */
+        val speed: Int = 70,
+        /** Seconds between sayings, about. */
+        val sayEvery: Int = 40,
+        /** Seconds a saying stays. */
+        val saySec: Int = 12,
+    )
+    @Volatile var tune = Tune()
+
     /** A longer act (唱歌, 敲电脑 …) plays to its end: typing does not cut it short; only a pat does. */
     private var long = false
-    private fun play(now: Long, frames: List<Pair<Shark.Pose, Int>>, longAct: Boolean = false, force: Boolean = false) {
+    private fun play(now: Long, frames: List<Pair<Shark.Pose, Int>>, longAct: Boolean = false, force: Boolean = false, own: Boolean = false) {
         if (long && playing(now) && !force) return
-        anim = frames; animAt = now; long = longAct
+        // what it does of its own goes at its own pace; reactions stay quick
+        val k = if (own) 100f / tune.speed.coerceIn(20, 300) else 1f
+        anim = if (k == 1f) frames else frames.map { (p, ms) -> p to (ms * k).toInt() }
+        animAt = now; long = longAct
     }
 
     // ---- what it does by itself, when typing pauses ----
 
     private var nextAct = 0L
+    private var nextSay = 0L
     private var lastSay = 0L
     private var sayText: String? = null
     private var sayUntil = 0L
@@ -367,31 +386,28 @@ object SharkLife {
 
     private fun idleAct(now: Long) {
         pushFrames = emptySet()
+        if (rnd.nextInt(100) < tune.longShare) return longAct(now)
         when (val r = rnd.nextInt(100)) {
-            in 0..29 -> play(now, listOf(P(look = -1) to 420, P() to 140, P(look = 1) to 420, P() to 140, P(F.BLINK) to 110, P() to 150))
+            in 0..29 -> play(now, listOf(P(look = -1) to 420, P() to 140, P(look = 1) to 420, P() to 140, P(F.BLINK) to 110, P() to 150), own = true)
             in 30..49 -> {
                 // swims over to the name and has a nibble; the name shakes a little
                 pushFrames = setOf(3, 5, 7)
                 play(now, listOf(P(look = 1) to 200, P(look = 1, dx = 1) to 120, P(F.CHOMP, dx = 2) to 110, P(F.BITE, dx = 2) to 110,
                     P(F.CHOMP, dx = 2) to 110, P(F.BITE, dx = 2) to 110, P(F.CHOMP, dx = 2) to 110, P(F.BITE, dx = 2) to 140,
-                    P(F.HAPPY, dx = 1, blush = true) to 360, P() to 150))
-                if (rnd.nextInt(3) == 0 && now - lastSay > 45_000) say(now + 900, "这个字有点咸", SAY_MS)
+                    P(F.HAPPY, dx = 1, blush = true) to 360, P() to 150), own = true)
+                if (rnd.nextInt(3) == 0) say(now + 900, "这个字有点咸", sayMs())
             }
-            in 50..64 -> play(now, (0 until 4).map { P(F.LOOKUP, extra = Shark.Extra.BUBBLES, phase = it) to 300 } + (P() to 150))
-            in 65..79 -> play(now, listOf(P(flip = true) to 650, P(F.BLINK, flip = true) to 110, P(flip = true, look = 1) to 450, P() to 150))
-            in 80..86 -> play(now, listOf(P(squash = true) to 160, P(F.BLINK, dy = -1) to 260, P(F.HAPPY) to 260, P() to 120))
-            in 87..93 -> longAct(now)
-            else -> {
-                if (now - lastSay > 45_000) say(now, nextWords(), SAY_MS)
-                play(now, listOf(P(F.HAPPY) to 300, P() to 1500))
-            }
+            in 50..64 -> play(now, (0 until 4).map { P(F.LOOKUP, extra = Shark.Extra.BUBBLES, phase = it) to 300 } + (P() to 150), own = true)
+            in 65..79 -> play(now, listOf(P(flip = true) to 650, P(F.BLINK, flip = true) to 110, P(flip = true, look = 1) to 450, P() to 150), own = true)
+            in 80..89 -> play(now, listOf(P(squash = true) to 160, P(F.BLINK, dy = -1) to 260, P(F.HAPPY) to 260, P() to 120), own = true)
+            else -> play(now, listOf(P(F.HAPPY) to 300, P(F.BLINK) to 120, P(F.HAPPY, blush = true) to 600, P() to 300), own = true)
         }
     }
 
     private var sayMs = 1L
     private fun say(at: Long, text: String, ms: Long) { sayText = text; sayUntil = at + ms; sayMs = ms; lastSay = at }
     /** How long a saying stays under the name. */
-    private const val SAY_MS = 6000L
+    private fun sayMs() = tune.saySec.coerceAtLeast(1) * 1000L
 
     /** The longer acts: a few seconds each, with a word under the name. */
     fun longAct(now: Long, which: Int = rnd.nextInt(5)) {
@@ -427,9 +443,13 @@ object SharkLife {
                 frames += P(F.HAPPY) to 300
             }
         }
-        play(now, frames + (P() to 200), longAct = true)
-        say(now + 200, words, maxOf(SAY_MS, frames.sumOf { it.second }.toLong()))
+        play(now, frames + (P() to 200), longAct = true, own = true)
+        say(now + 200, words, maxOf(sayMs(), anim.sumOf { it.second }.toLong()))
+        nextSay = maxOf(nextSay, sayUntil + spread(tune.sayEvery) / 2)
     }
+
+    /** [sec] seconds, give or take a third, in ms. */
+    private fun spread(sec: Int): Long { val ms = sec.coerceAtLeast(1) * 1000L; return ms * 2 / 3 + (rnd.nextDouble() * ms * 2 / 3).toLong() }
 
     private fun java.util.Random.asKotlin() = kotlin.random.Random(nextLong())
     private fun playing(now: Long) = anim.isNotEmpty() && now - animAt < anim.sumOf { it.second }
@@ -490,13 +510,18 @@ object SharkLife {
             val deep = idle > 5 * 60_000
             return Shark.Pose(Shark.Face.SLEEP, dy = if (deep) 1 else 0, extra = Shark.Extra.Z, phase = ((now / 1000) % 3).toInt()) to (1000 - now % 1000)
         }
-        // a pause in typing: now and then, something of its own
-        if (idle in 3000..85_000 && now >= nextAct && nextAct > 0) {
-            nextAct = now + 7000 + rnd.nextInt(9000)
+        // now and then, something of its own, typing or not: it does what it likes
+        if (nextSay == 0L) nextSay = now + spread(tune.sayEvery) / 2
+        if (now >= nextSay && lastKey > 0) {
+            nextSay = now + spread(tune.sayEvery)
+            if (!(sayText != null && now < sayUntil)) say(now, nextWords(), sayMs())
+        }
+        if (nextAct == 0L) nextAct = now + spread(tune.actEvery) / 2
+        if (now >= nextAct && lastKey > 0) {
             idleAct(now)
+            nextAct = now + spread(tune.actEvery) + if (playing(now)) anim.sumOf { it.second } else 0
             if (playing(now)) return frame(now, hour, still)
         }
-        if (nextAct == 0L || idle < 3000) nextAct = maxOf(nextAct, now + 4000 + rnd.nextInt(6000))
         // blinking, flicking the fin, yawning at night: planned at irregular times
         if (blinkAt + 140 < now) blinkAt = now + 2800 + rnd.nextInt(4200)
         if (flickAt + 320 < now) flickAt = now + 7000 + rnd.nextInt(9000)
@@ -519,7 +544,8 @@ object SharkLife {
             if (still) null else 1700 - now % 1700,
             if (fast) 1000L else null,
             if (lastKey > 0) 90_000 - idle else null,
-            if (idle < 85_000) nextAct - now else null,
+            if (lastKey > 0) nextAct - now else null,
+            if (lastKey > 0) nextSay - now else null,
             sayUntil - now,
             sayUntil - sayMs - now,
         ).filter { it > 0 }
