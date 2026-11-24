@@ -195,6 +195,26 @@ class GridPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
         bg.shader = null; bg.alpha = 255
     }
 
+    /** A thin bar at the right edge saying where in the list the view is (drawn only, never touched). */
+    var showProgress = false
+    private val progressPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+
+    private fun drawProgress(c: Canvas, a: Float) {
+        val m = maxScroll
+        if (m <= 0f) return
+        val w = dp(2.5f)
+        val top = headerH() + dp(6f); val bottom = height - dp(6f)
+        val trackH = bottom - top
+        if (trackH <= 0f) return
+        val x = width - dp(3f) - w
+        val thumbH = (trackH * height / contentH).coerceAtLeast(dp(14f))
+        val y = top + (trackH - thumbH) * (scrollPos / m).coerceIn(0f, 1f)
+        progressPaint.color = Colors.fade(theme.hint, 0.2f * a)
+        c.drawRoundRect(x, top, x + w, bottom, w / 2, w / 2, progressPaint)
+        progressPaint.color = Colors.fade(theme.hint, 0.8f * a)
+        c.drawRoundRect(x, y, x + w, y + thumbH, w / 2, w / 2, progressPaint)
+    }
+
     private fun headerH() = if (header.isNotEmpty()) dp(22f) else 0f
 
     private val maxScroll get() = max(0f, contentH - height)
@@ -223,6 +243,7 @@ class GridPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
         }
         c.restore()
         drawFades(c)
+        if (showProgress) drawProgress(c, a)
         if (header.isNotEmpty()) {
             bg.color = t.background
             c.drawRect(0f, 0f, width.toFloat(), headerH(), bg)

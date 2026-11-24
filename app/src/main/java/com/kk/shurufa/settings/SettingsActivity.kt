@@ -1642,6 +1642,7 @@ private fun KayGroups(prefs: Prefs) {
                 modifier = Modifier.width(150.dp), shape = RoundedCornerShape(14.dp), placeholder = { Text("小K") })
         }
         Note("住在键盘里的小鲨鱼，今天是它出生的第 ${kay.age()} 天。工具栏上那个会眨眼的就是它：点一下打开它，长按摸摸头。")
+        Choice(prefs, Prefs.KAY_ICON, "工具栏上的图标", listOf("shark" to "小鲨鱼", "shark_fin" to "鱼鳍", "ai" to "小星星"))
         Toggle(prefs, Prefs.KAY_SPACE, "空格键上也有它", "在语言名字旁边，打字时也看得见。它想干嘛就干嘛：东张西望、啃一口语言名、唱歌、敲电脑……说的话在名字底下一行浅灰小字。不碰按键，不影响打字", true)
         Toggle(prefs, Prefs.KAY_GREET, "每天打个招呼", "每天第一次在空白输入框里打开键盘时，在工具栏说一句话。点「已阅」、按任何键或点别处就消失", true)
         Toggle(prefs, Prefs.KAY_AI_GREET, "这句话让 AI 来写", "每天傍晚请 AI 写好第二天的那一句（一天一次，只发日期、节日、节气和字数，不发你写的内容）。没有 AI 服务时用它自己的话", true)
@@ -1655,6 +1656,7 @@ private fun KayGroups(prefs: Prefs) {
         IntSlider(prefs, Prefs.KAY_SAY_SIZE, "小字大小", 100, 70..150, "%")
     }
     Group("聊天") {
+        Toggle(prefs, Prefs.KAY_SHOW_IP, "显示 IP 属地", "在小K面板顶部，用小字显示你现在的网络出口在哪个国家或地区；绿点表示 Gemini 在那里能用，黄点表示不能。打开面板时查一次（最多每 5 分钟一次，只问 Cloudflare，不带任何输入内容），点一下重新查", true)
         IntSlider(prefs, Prefs.KAY_CHAT_CAP, "每天最多聊", 30, 5..100, " 句", "聊天会把你说的话发给 AI 服务；到了上限它就去睡了。聊过的话不保存，键盘关掉就忘了")
     }
 }
@@ -1733,6 +1735,7 @@ private fun OnlinePage(prefs: Prefs, openServices: () -> Unit) {
         PickRow("翻译引擎", engines.firstOrNull { it.first == curE }?.second ?: com.kk.shurufa.online.Llm.targetLabel(prefs, curE)) { pickTr = true }
         if (pickTr) PickerDialog("翻译引擎", engines, curE, onPick = { prefs.put(Prefs.TRANSLATE_ENGINE, it); tick++ }, onClose = { pickTr = false })
         Choice(prefs, Prefs.TRANSLATE_TARGET, "默认翻译成", com.kk.shurufa.online.TranslateService.LANGS.take(3))
+        IntSlider(prefs, Prefs.TRANSLATE_PAUSE, "AI 翻译：停顿多久再译", 1200, 300..3000, " 毫秒", "边打边译时，停下这么久才发一次请求；打完一句（。！？）立刻译，按上屏也立刻译。离线翻译不受影响，一直是即时的")
         Toggle(prefs, Prefs.TRANSLATE_WIFI, "离线模型只在 Wi-Fi 下载", "每种语言约 30 MB，下载一次后离线翻译", false)
         Note("点工具栏的翻译按钮，键盘上方会展开翻译栏：可以选语言、⇄ 对调、切换引擎；选中文字时直接翻译并可替换。AI 翻译更地道，离线翻译不联网也能用。")
     }

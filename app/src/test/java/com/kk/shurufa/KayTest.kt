@@ -177,7 +177,7 @@ class KayTest {
         val p = com.kk.shurufa.keyboard.AiPanel(ctx, prefs).apply {
             theme = KbTheme.resolve(ctx, prefs)
             actions = com.kk.shurufa.online.AiWriter.ACTIONS.map { com.kk.shurufa.keyboard.AiPanel.Act(it.id, it.title, it.group) }
-            chatTab = "聊天"; kayName = "小K"; provider = "Gemini 3.5 Flash Lite"
+            chatTab = "聊天"; kayName = "小K"; provider = "Gemini 3.5 Flash Lite"; place = "🇯🇵 日本"; placeOk = true
             selectGroup("聊天")
             val sb = SpannableStringBuilder()
             fun line(who: String, text: String) { if (sb.isNotEmpty()) sb.append("\n"); sb.append(who).append("  ").append(text) }

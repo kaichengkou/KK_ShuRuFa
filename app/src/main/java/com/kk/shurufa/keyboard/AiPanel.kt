@@ -66,6 +66,9 @@ class AiPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
     var source = ""
     var sourceLabel = ""
     var provider = ""
+    /** IP 属地, small in the header ("🇯🇵 日本"), and whether Gemini serves there (null: unknown). */
+    var place: String? = null
+    var placeOk: Boolean? = null
     /** Services and models to pick from (header chip): (target, label). */
     var targets: List<PickList.Item>
         get() = pick.items
@@ -134,7 +137,9 @@ class AiPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
             r.set(width - pad - pw, y, width - pad, y + ch)
             drawChip(c, r, provider, if (picking) ChipStyle.ACTIVE else ChipStyle.SOFT, pressed = pressed == "provider", chevron = true, textSp = Ui.SMALL)
             hits.add("provider", r, slop = dp(6f))
+            val chipL = r.left
             again = drawTabs(c, y, ch, r.left - dp(10f)) || again
+            if (!inChat) drawPlace(c, tabBox.right + dp(8f), chipL - dp(8f), y + ch / 2)
             y += ch + dp(10f)
         }
         if (needsSetup) { drawSetup(c, y); return }
@@ -157,6 +162,29 @@ class AiPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
         }
         again = drawResult(c, y) || again
         if (again) postInvalidateOnAnimation()
+    }
+
+    private val placePaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+
+    /**
+     * IP 属地, quiet in the space between the tabs and the model: a dot (green where Gemini
+     * serves, amber where it does not) and the country; only the dot and flag if room is short.
+     */
+    private fun drawPlace(c: Canvas, left: Float, maxRight: Float, cy: Float, fromLeft: Boolean = false) {
+        val text = place ?: return
+        val t = theme
+        val tp = placePaint
+        tp.textSize = sp(Ui.SMALL - 1f); tp.typeface = Ui.regular; tp.textAlign = android.graphics.Paint.Align.RIGHT
+        val dot = dp(5f); val gap = dp(5f)
+        val shown = listOf(text, text.substringBefore(' ')).firstOrNull { tp.measureText(it) + dot + gap <= maxRight - left } ?: return
+        val right = if (fromLeft) left + dot + gap + tp.measureText(shown) else maxRight
+        tp.color = t.hint
+        val fm = tp.fontMetrics
+        c.drawText(shown, right, cy - (fm.ascent + fm.descent) / 2, tp)
+        val dx = right - tp.measureText(shown) - gap - dot / 2
+        tp.color = when (placeOk) { true -> 0xFF4CAF7A.toInt(); false -> 0xFFE0A33A.toInt(); null -> t.hint }
+        c.drawCircle(dx, cy, dot / 2, tp)
+        hits.add("place", dx - dot, cy - dp(14f), right, cy + dp(14f))
     }
 
     /** The 改写 · 翻译 switch; true while its highlight moves. */
@@ -395,6 +423,7 @@ class AiPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
         val wait = Shark.drawLive(c, cardL + inner + face / 2, lineCy, face)
         tp.textAlign = Paint.Align.LEFT; tp.textSize = sp(Ui.SMALL + 1f); tp.typeface = Ui.medium; tp.color = if (running != null) t.accent else t.inkSoft
         drawText(c, if (running != null) "$kayName 在想" + dots() else kayName, cardL + inner + face + dp(8f), lineCy, tp)
+        val nameRight = cardL + inner + face + dp(8f) + tp.measureText(if (running != null) "$kayName 在想..." else kayName)
         tp.typeface = Ui.regular
         var bx = cardR - dp(8f)
         if (running != null) bx = drawStop(c, bx, lineT, lineH) - dp(6f)
@@ -409,8 +438,11 @@ class AiPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
                 r.set(bx - iw, lineT, bx, lineT + lineH)
                 drawChip(c, r, "清空", ChipStyle.SOFT, pressed = pressed == "clear", textSp = Ui.SMALL + 1f)
                 hits.add("clear", r, slop = dp(5f))
+                bx = r.left - dp(6f)
             }
         }
+        // IP 属地, small, after the name
+        drawPlace(c, nameRight + dp(12f), bx - dp(6f), lineCy, fromLeft = true)
         resView.set(cardL + inner, lineT + lineH + dp(6f), cardR - inner, cardB - dp(10f))
         if (chat.isEmpty()) {
             tp.textAlign = Paint.Align.CENTER; tp.textSize = sp(Ui.SMALL + 1f); tp.color = t.hint
@@ -539,6 +571,7 @@ class AiPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
                 when {
                     p == null -> picking = false
                     p == "provider" -> { picking = !picking; if (picking) pick.reveal() }
+                    p == "place" -> onButton?.invoke("place")
                     picking -> picking = false
                     p.startsWith("tab:") -> { group = p.removePrefix("tab:"); resLayout = null; onButton?.invoke("group:$group") }
                     // ✕: the answer goes, the actions come back

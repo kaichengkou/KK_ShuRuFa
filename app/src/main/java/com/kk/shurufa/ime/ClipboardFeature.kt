@@ -129,7 +129,7 @@ class ClipboardFeature(private val host: Host) {
         }
         favs = GridPanel(ctx, prefs).apply {
             theme = host.kbTheme; overlay = host.overlay
-            cellStyle = GridPanel.CellStyle.CARD; rowHeightDp = 66f
+            cellStyle = GridPanel.CellStyle.CARD; rowHeightDp = 66f; showProgress = true
             emptyText = "长按「最近」里的一条，把它收藏到这里"
             onFeedback = fb
             onItem = { i -> favItems.getOrNull(i)?.let { paste(pasteText(it)) } }

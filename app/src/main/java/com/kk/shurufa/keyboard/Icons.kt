@@ -38,18 +38,29 @@ object Icons {
         moveTo(18f, 13.5f); lineTo(18.9f, 15.6f); lineTo(21f, 16.5f); lineTo(18.9f, 17.4f); lineTo(18f, 19.5f)
         lineTo(17.1f, 17.4f); lineTo(15f, 16.5f); lineTo(17.1f, 15.6f); close()
     }
-    /** 小K: a shark swimming right, in the same line as the other icons. */
+    /** 小K: a shark swimming right, in the same line as the other icons: one outline, swept fin, a mouth. */
     private val shark = p {
-        moveTo(21f, 12.6f); quadTo(19.2f, 9f, 14.2f, 8.7f)
-        lineTo(12.6f, 4.6f); lineTo(10.6f, 8.9f)
-        quadTo(6.8f, 9.6f, 4.8f, 11.6f)
-        lineTo(2.4f, 8.6f); lineTo(3.4f, 12.7f); lineTo(2.4f, 16.6f); lineTo(4.9f, 13.9f)
-        quadTo(9.2f, 16.6f, 14.2f, 16.3f); quadTo(19.2f, 15.9f, 21f, 12.6f); close()
-        moveTo(11.2f, 16.1f); lineTo(10.2f, 18.9f); lineTo(13.4f, 16.3f)
-        moveTo(18.1f, 14.1f); quadTo(19.1f, 14.6f, 20f, 14.1f)
+        moveTo(21.6f, 12.2f); cubicTo(20f, 10.2f, 17.6f, 9.2f, 15f, 9f)
+        cubicTo(14f, 7.2f, 12.9f, 5.6f, 11.4f, 4.6f); cubicTo(11.7f, 6.3f, 11.6f, 7.8f, 11.1f, 9.3f)
+        cubicTo(8.8f, 9.9f, 6.8f, 10.9f, 5.2f, 12f); cubicTo(4.3f, 10.2f, 3.3f, 8.6f, 2.3f, 7.6f)
+        cubicTo(2.6f, 9.8f, 2.9f, 11.5f, 3f, 12.9f); cubicTo(2.8f, 14.2f, 2.6f, 15.4f, 2.4f, 16.5f)
+        cubicTo(3.4f, 15.8f, 4.3f, 15f, 5.1f, 14.1f); cubicTo(7.8f, 15.7f, 10.9f, 16.3f, 14.2f, 16.1f)
+        cubicTo(17.4f, 15.9f, 20f, 14.6f, 21.6f, 12.2f); close()
+        // the fin below
+        moveTo(10.6f, 16f); cubicTo(10.3f, 17.2f, 9.7f, 18.2f, 8.9f, 19f); cubicTo(10.5f, 18.8f, 11.8f, 17.8f, 12.8f, 16.3f)
+        // the mouth
+        moveTo(18.6f, 13.9f); cubicTo(19.3f, 14.1f, 19.9f, 14f, 20.4f, 13.6f)
         // the eye: a ring this small under a 1.7 stroke is a dot
-        addCircle(17.2f, 11.6f, 0.35f, Path.Direction.CW)
+        addCircle(17.7f, 11.4f, 0.35f, Path.Direction.CW)
     }
+    /** 小K, the other way: a fin above the waves. */
+    private val sharkFinOnly = p {
+        moveTo(4f, 16f); cubicTo(7.5f, 16f, 10f, 11f, 12f, 4.8f); cubicTo(14.6f, 11.2f, 16.5f, 14.6f, 19.5f, 16f); close()
+    }
+    private val waves = p {
+        moveTo(3f, 19.5f); quadTo(5.25f, 18f, 7.5f, 19.5f); quadTo(9.75f, 21f, 12f, 19.5f); quadTo(14.25f, 18f, 16.5f, 19.5f); quadTo(18.75f, 21f, 21f, 19.5f)
+    }
+    private val sharkFin = Path().apply { addPath(sharkFinOnly); addPath(waves) }
     private val smile = p {
         addCircle(12f, 12f, 8.5f, Path.Direction.CW)
         moveTo(8.2f, 13.6f); cubicTo(9.6f, 16.4f, 14.4f, 16.4f, 15.8f, 13.6f)
@@ -176,7 +187,7 @@ object Icons {
         "home" to lineStart, "end" to lineEnd, "abc" to keyboardIcon,
         "quick" to quick, "close" to close, "up" to up, "down" to down, "pin" to pin,
         "backspace" to backspace, "enter" to enter, "shift" to shift, "language" to globe,
-        "left" to left, "right" to right, "next_slot" to next, "mic" to mic, "ai" to spark, "shark" to shark,
+        "left" to left, "right" to right, "next_slot" to next, "mic" to mic, "ai" to spark, "shark" to shark, "shark_fin" to sharkFin,
         "emoji" to smile, "translate" to translate, "cursor" to cursor, "clipboard" to clip,
         "settings" to gear, "collapse" to chevDown, "expand" to chevUp, "lock" to lock, "unlock" to unlock,
     )
@@ -257,6 +268,16 @@ object Icons {
             // 小K: a little swim forward and back, the tail swishing
             "shark" -> {
                 around(dx = 1.8f * shake(t, 1), deg = 6f * shake(t, 3))
+                return true
+            }
+            // the fin: it dips under the waves and comes back up
+            "shark_fin" -> {
+                c.drawPath(waves, paint)
+                val k = c.save()
+                c.clipRect(0f, 0f, 24f, 18.6f)
+                c.translate(1.2f * shake(t, 1), 6f * bump(t))
+                c.drawPath(sharkFinOnly, paint)
+                c.restoreToCount(k)
                 return true
             }
             // AI: the spark twists and twinkles

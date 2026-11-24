@@ -143,7 +143,28 @@ class ClipStrip(context: Context, prefs: Prefs) : KbView(context, prefs) {
         // edge fades say there is more
         if (scrollPos > 1f) fade(c, 0f, dp(14f), true)
         if (scrollPos < maxScroll - 1f) fade(c, width - dp(14f), width.toFloat(), false)
+        drawProgress(c, a)
     }
+
+    /**
+     * Where in the row the view is: a short track in the title line, on the right, its thumb as
+     * wide as the share in view. Only drawn; touches there are the strip's as anywhere else.
+     */
+    private fun drawProgress(c: Canvas, a: Float) {
+        val m = maxScroll
+        if (m <= 0f) return
+        val trackW = dp(40f); val h = dp(2.5f)
+        val right = width - pad - dp(2f); val left = right - trackW
+        val cy = dp(15f) - sp(Ui.SMALL) * 0.33f
+        val total = m + width
+        val thumbW = (trackW * width / total).coerceAtLeast(dp(8f))
+        val x = left + (trackW - thumbW) * (scrollPos / m).coerceIn(0f, 1f)
+        progressPaint.color = Colors.fade(theme.hint, 0.25f * a)
+        c.drawRoundRect(left, cy - h / 2, right, cy + h / 2, h / 2, h / 2, progressPaint)
+        progressPaint.color = Colors.fade(theme.hint, 0.85f * a)
+        c.drawRoundRect(x, cy - h / 2, x + thumbW, cy + h / 2, h / 2, h / 2, progressPaint)
+    }
+    private val progressPaint = Paint(Paint.ANTI_ALIAS_FLAG)
 
     private var fadeL: LinearGradient? = null
     private var fadeR: LinearGradient? = null

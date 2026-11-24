@@ -511,7 +511,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         keyboard.postDelayed({ if (SystemClock.uptimeMillis() >= spaceNoteUntil) { spaceNote = null; keyboard.invalidate() } }, ms + 20)
     }
 
-    override fun kayOnSpace() = prefs.kayOnSpace && !prefs.incognito && !editor.secret
+    override fun kayOnSpace() = prefs.kayOnSpace && !prefs.incognito && !editor.secret && !keyboardPhone
 
     override fun onKayPat() {
         com.kk.shurufa.keyboard.SharkLife.pat(SystemClock.uptimeMillis())
@@ -693,8 +693,8 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         val fixed = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, if (h < 0) ViewGroup.LayoutParams.WRAP_CONTENT else h, Gravity.BOTTOM)
         val entering = from != p
         when (p) {
-            Panel.LETTERS -> { keyboard.setRows(lettersRows()); content.addView(keyboard, fixed) }
-            Panel.PHONE -> { keyboard.setRows(layout("phone").rows); content.addView(keyboard, fixed) }
+            Panel.LETTERS -> { keyboardPhone = false; keyboard.setRows(lettersRows()); content.addView(keyboard, fixed) }
+            Panel.PHONE -> { keyboardPhone = true; keyboard.setRows(layout("phone").rows); content.addView(keyboard, fixed) }
             Panel.MATH -> {
                 if (math == null) { showPanel(Panel.LETTERS); return }
                 refreshMath(slide = 0)
@@ -1270,9 +1270,13 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
 
     // ---- keys ---------------------------------------------------------------------------
 
+    /** Whether the letters' view shows the phone pad (its space is plain 空格). */
+    private var keyboardPhone = false
     override fun shiftState() = shift
     override fun spaceLabel(): String {
-        if (panel != Panel.LETTERS) return "空格"
+        // the phone pad's space is just 空格; the letters keep their language's name even while they
+        // fade out under another panel (that panel is already the current one by then)
+        if (keyboardPhone) return "空格"
         val name = layout(curLang).label
         val note = spaceNote?.takeIf { SystemClock.uptimeMillis() < spaceNoteUntil }
         return when {

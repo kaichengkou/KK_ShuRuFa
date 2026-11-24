@@ -128,6 +128,10 @@ class Prefs(context: Context) {
     val kayChatCap get() = sp.getInt(KAY_CHAT_CAP, 30)
     /** Whether 小K sits on the space key too. */
     val kayOnSpace get() = b(KAY_SPACE, true)
+    /** 小K's button on the toolbar: "shark", "shark_fin" or "ai" (the spark of before). */
+    /** IP 属地 in the 小K panel's header. */
+    val kayShowIp get() = b(KAY_SHOW_IP, true)
+    val kayIcon get() = s(KAY_ICON, "shark").takeIf { it in setOf("shark", "shark_fin", "ai") } ?: "shark"
     /** The shark's pace: how often it acts, the share of long acts, its speed, how often it speaks and for how long, the size of its words. */
     fun kayTune() = com.kk.shurufa.keyboard.SharkLife.Tune(
         sp.getInt(KAY_ACT_EVERY, 8), sp.getInt(KAY_LONG_SHARE, 35), sp.getInt(KAY_SPEED, 70),
@@ -207,6 +211,8 @@ class Prefs(context: Context) {
     val translateWifiOnly get() = b(TRANSLATE_WIFI, false)
     /** "auto", "mlkit" or an AI target ("id|model", see online.Llm). */
     val translateEngine get() = s(TRANSLATE_ENGINE, "auto")
+    /** AI 翻译: the pause in typing before the text is sent (ms); the end of a sentence sends it at once. */
+    val translatePauseMs get() = sp.getInt(TRANSLATE_PAUSE, 1200)
     /** 工具栏: the buttons in order (快捷面板 is always added last). */
     val toolbar: List<String> get() = s(TOOLBAR_ITEMS, "ai,emoji,mic,translate,cursor,clipboard").split(',').filter { it.isNotBlank() }.take(6)
 
@@ -252,7 +258,7 @@ class Prefs(context: Context) {
         fun rebuildsKeyboard(key: String) = key in LOOK || key.startsWith("key_ovr_")
 
         private val LOOK by lazy {
-            setOf(THEME, STYLE, ACCENT, KAY_SPACE, KAY_SAY_SIZE, THEME_WARMTH, THEME_SHADE, ACCENT_HUE, FONT_STAMP, KEY_HEIGHT, KEY_GAP, ROW_GAP, KEY_RADIUS, LABEL_SCALE, HINT_SCALE, SHOW_HINTS, SHOW_ALL_HINTS, HINT_MODE, CAND_FONT,
+            setOf(THEME, STYLE, ACCENT, KAY_SPACE, KAY_SAY_SIZE, KAY_ICON, THEME_WARMTH, THEME_SHADE, ACCENT_HUE, FONT_STAMP, KEY_HEIGHT, KEY_GAP, ROW_GAP, KEY_RADIUS, LABEL_SCALE, HINT_SCALE, SHOW_HINTS, SHOW_ALL_HINTS, HINT_MODE, CAND_FONT,
                 KEY_BORDERS, NUMBER_ROW, CAND_SCALE, BOTTOM_PADDING, CURSOR_LABELS, LANGUAGES, TOP_ROW_SCRIPTS, LAYOUT_RELOAD)
         }
 
@@ -333,6 +339,8 @@ class Prefs(context: Context) {
         const val KAY_AI_GREET = "kay_ai_greet"
         const val KAY_CHAT_CAP = "kay_chat_cap"
         const val KAY_SPACE = "kay_space"
+        const val KAY_ICON = "kay_icon"
+        const val KAY_SHOW_IP = "kay_show_ip"
         const val KAY_ACT_EVERY = "kay_act_every"
         const val KAY_LONG_SHARE = "kay_long_share"
         const val KAY_SPEED = "kay_speed"
@@ -397,6 +405,7 @@ class Prefs(context: Context) {
         const val TRANSLATE_TARGET = "translate_target"
         const val TRANSLATE_WIFI = "translate_wifi"
         const val TRANSLATE_ENGINE = "translate_engine"
+        const val TRANSLATE_PAUSE = "translate_pause"
         const val TOOLBAR_ITEMS = "toolbar_items"
 
         // ---- keys of [state] ----

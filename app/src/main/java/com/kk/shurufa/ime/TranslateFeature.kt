@@ -84,6 +84,7 @@ class TranslateFeature(private val host: Host, private val service: TranslateSer
     }
 
     fun onClosed() {
+        commitWhenReady = false
         service.cancel()
         handler.removeCallbacks(run)
         if (::strip.isInitialized) strip.visibility = View.GONE
@@ -109,22 +110,48 @@ class TranslateFeature(private val host: Host, private val service: TranslateSer
         val fresh = resultFor == q
         if (!fresh) { st.result = ""; st.busy = q.isNotBlank() }
         if (q.isBlank()) st.status = ""
-        if (!fresh && q.isNotBlank()) { handler.removeCallbacks(run); handler.postDelayed(run, if (fromSelection) 0 else 400) }
+        if (!fresh && q.isNotBlank()) {
+            handler.removeCallbacks(run)
+            val cached = cache[key(q)]
+            if (cached != null) { resultFor = q; result = cached; st.result = cached; st.busy = false; st.status = "" }
+            else handler.postDelayed(run, delayFor(q))
+        }
         st.refresh()
     }
+
+    /**
+     * How long to wait before asking. Offline translation costs nothing: at once, nearly. An AI
+     * request is one of the day's calls: only once typing pauses, or a sentence is finished.
+     */
+    private fun delayFor(q: String): Long = when {
+        fromSelection -> 0L
+        service.engine == "mlkit" -> 400L
+        q.trimEnd().lastOrNull()?.let { it in "。！？!?…\n" } == true -> 150L
+        else -> prefs.translatePauseMs.toLong()
+    }
+
+    /** Translations already had, so going back to a text (a deleted character) asks nothing. */
+    private val cache = object : LinkedHashMap<String, String>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>?) = size > 40
+    }
+    private fun key(q: String) = "${service.engine}|$from|$to|$q"
+    /** 上屏 pressed before the translation came: it is sent when it comes. */
+    private var commitWhenReady = false
 
     private fun translate() {
         val q = host.query.toString()
         if (host.sink != Sink.TRANSLATE || q.isBlank()) return
+        val k = key(q)
         service.translate(q, from, to, onPartial = { t ->
             if (host.query.toString() == q) { strip.result = t; strip.refresh() }
         }) { r ->
             if (host.sink != Sink.TRANSLATE || host.query.toString() != q) return@translate
             resultFor = q
-            r.onSuccess { result = it; strip.result = it; strip.status = "" }
-             .onFailure { result = ""; strip.result = ""; strip.status = it.message ?: "翻译失败" }
+            r.onSuccess { result = it; strip.result = it; strip.status = ""; cache[k] = it }
+             .onFailure { result = ""; strip.result = ""; strip.status = it.message ?: "翻译失败"; commitWhenReady = false }
             strip.busy = false
             strip.refresh()
+            if (commitWhenReady && result.isNotEmpty()) { commitWhenReady = false; commit() }
         }
     }
 
@@ -145,7 +172,11 @@ class TranslateFeature(private val host: Host, private val service: TranslateSer
     /** ↵ or 上屏: sends the translation when it is for the text as it is now. */
     fun commit() {
         val t = result
-        if (t.isEmpty() || resultFor != host.query.toString()) return
+        if (t.isEmpty() || resultFor != host.query.toString()) {
+            // still waiting for the pause: ask now, and send it when it comes
+            if (host.query.isNotBlank() && host.sink == Sink.TRANSLATE) { commitWhenReady = true; handler.removeCallbacks(run); translate() }
+            return
+        }
         val field = fromField
         host.closeSink()
         // what was taken from the field gives way to its translation

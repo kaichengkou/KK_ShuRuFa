@@ -334,7 +334,7 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
             if (id == "ai") {
                 // 小K's door: an icon like the others; 小K itself lives on the space key
                 ip.color = ink
-                Icons.draw(c, "shark", cx, cy, dp(Ui.TOOL_ICON + 1f), ip, t = t)
+                Icons.draw(c, prefs.kayIcon, cx, cy, dp(Ui.TOOL_ICON + 1f), ip, t = t)
             } else if (glyph != null) {
                 tp.textAlign = Paint.Align.CENTER; tp.typeface = Ui.medium; tp.textSize = sp(Ui.TITLE + 1f)
                 tp.color = ink

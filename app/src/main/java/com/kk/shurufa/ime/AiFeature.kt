@@ -37,6 +37,7 @@ class AiFeature(private val host: Host, private val kay: Kay) {
             onButton = { b ->
                 when (b) {
                     "setup" -> host.openSettings("ai")
+                    "place" -> showPlace(force = true)
                     "replace" -> apply(replace = true)
                     "insert" -> apply(replace = false)
                     "clear" -> { run++; panel.running = null; com.kk.shurufa.keyboard.SharkLife.thinking = false; pendingSaid = ""; pendingAnswer = ""; kay.forgetTalk(); panel.status = ""; syncChat() }
@@ -53,6 +54,14 @@ class AiFeature(private val host: Host, private val kay: Kay) {
             }
         }
         return panel
+    }
+
+    /** IP 属地 in the header: looked up when the panel opens (at most every few minutes), or on a tap. */
+    private fun showPlace(force: Boolean) {
+        if (!prefs.kayShowIp) { panel.place = null; return }
+        fun put() { panel.place = com.kk.shurufa.online.IpPlace.label(); panel.placeOk = com.kk.shurufa.online.IpPlace.geminiOk(); panel.invalidate() }
+        put()
+        com.kk.shurufa.online.IpPlace.refresh(force) { put() }
     }
 
     /** The service and model AI 改写 uses ("id|model"), or null when none is set up. */
@@ -85,6 +94,7 @@ class AiFeature(private val host: Host, private val kay: Kay) {
         panel.setResult("", null)
         result = ""; action = null
         syncHeader()
+        showPlace(force = false)
         // talking goes on where it was; otherwise with text in the field it is about the text
         if (!chatting) panel.selectGroup(if (src.isBlank() || kay.talk.isNotEmpty()) CHAT else "改写")
         syncChat()
