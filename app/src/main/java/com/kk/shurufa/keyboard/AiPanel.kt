@@ -139,7 +139,14 @@ class AiPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
             hits.add("provider", r, slop = dp(6f))
             val chipL = r.left
             again = drawTabs(c, y, ch, r.left - dp(10f)) || again
-            if (!inChat) drawPlace(c, tabBox.right + dp(8f), chipL - dp(8f), y + ch / 2)
+            if (groups.size < 2) {
+                // the conversation on its own: the way back to 小K's page
+                val bw = chipWidth("返回", icon = "left", textSp = Ui.SMALL)
+                r.set(pad, y, pad + bw, y + ch)
+                drawChip(c, r, "返回", ChipStyle.SOFT, pressed = pressed == "home", icon = "left", textSp = Ui.SMALL)
+                hits.add("home", r, slop = dp(6f))
+                r.set(chipL, y, width - pad, y + ch)
+            } else if (!inChat) drawPlace(c, tabBox.right + dp(8f), chipL - dp(8f), y + ch / 2)
             y += ch + dp(10f)
         }
         if (needsSetup) { drawSetup(c, y); return }
@@ -529,7 +536,7 @@ class AiPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
     }
 
     /** The result with the characters that are new against [base] tinted. */
-    private fun marked(s: String, base: String?): CharSequence {
+    fun marked(s: String, base: String?): CharSequence {
         if (base == null || base.length > 800 || s.length > 800) return s
         val sp = SpannableString(s)
         val keep = lcsMask(base, s)
@@ -630,6 +637,7 @@ class AiPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
                     p == null -> picking = false
                     p == "provider" -> { picking = !picking; if (picking) pick.reveal() }
                     p == "place" -> onButton?.invoke("place")
+                    p == "home" -> onButton?.invoke("home")
                     picking -> picking = false
                     p.startsWith("tab:") -> { group = p.removePrefix("tab:"); resLayout = null; onButton?.invoke("group:$group") }
                     // ✕: the answer goes, the actions come back

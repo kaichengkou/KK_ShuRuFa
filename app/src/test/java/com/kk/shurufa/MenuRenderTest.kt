@@ -158,7 +158,7 @@ class MenuRenderTest {
         assertEquals(true, (ap.javaClass.getDeclaredField("resScroll").apply { isAccessible = true }.get(ap) as Float) > 0f)
         f2.invalidate(); save("ai_long_scrolled", f2)
         val ts = com.kk.shurufa.keyboard.TranslateStrip(ctx, prefs).apply {
-            languages = com.kk.shurufa.online.TranslateService.LANGS; fromName = "自动"; toName = "English"; engineName = "Gemini"
+            modeLabel = "翻译 · 自动 → English"; engineName = "Gemini"
             engines = listOf(PickList.Item("mlkit", "离线翻译", "ML Kit")) + models; engine = "gemini|gemini-3.5-flash"
         }
         val f3 = frame(140, ts)

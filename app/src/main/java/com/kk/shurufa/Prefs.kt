@@ -133,6 +133,8 @@ class Prefs(context: Context) {
     /** 小K's button on the toolbar: "shark", "shark_fin" or "ai" (the spark of before). */
     /** IP 属地 in the 小K panel's header. */
     val kayShowIp get() = b(KAY_SHOW_IP, true)
+    /** 改写: the way last used. */
+    val kayRewrite get() = s(KAY_REWRITE, "polish")
     val kayIcon get() = s(KAY_ICON, "shark").takeIf { it in setOf("shark", "shark_fin", "ai") } ?: "shark"
     /** The shark's pace: how often it acts, the share of long acts, its speed, how often it speaks and for how long, the size of its words. */
     fun kayTune() = com.kk.shurufa.keyboard.SharkLife.Tune(
@@ -343,6 +345,7 @@ class Prefs(context: Context) {
         const val KAY_CHAT_CAP = "kay_chat_cap"
         const val KAY_SPACE = "kay_space"
         const val KAY_ICON = "kay_icon"
+        const val KAY_REWRITE = "kay_rewrite"
         const val KAY_LINE_LOG = "kay_line_log"
         const val KAY_SHOW_IP = "kay_show_ip"
         const val KAY_ACT_EVERY = "kay_act_every"

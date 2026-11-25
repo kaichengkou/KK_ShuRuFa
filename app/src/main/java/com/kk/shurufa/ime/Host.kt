@@ -48,6 +48,8 @@ interface Host {
     fun finishComposing()
     /** Starts typing into a query ([initial] is its first text); [panel] goes to the letters. */
     fun openSink(sink: Sink, initial: String = "")
+    /** 小K's strip above the keyboard, as "rewrite", "translate" or "chat". */
+    fun openStrip(mode: String)
     /** Closes the query; with [to] set, that panel opens. */
     fun closeSink(to: Panel? = null)
     fun openSettings(page: String? = null)

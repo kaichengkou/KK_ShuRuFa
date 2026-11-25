@@ -226,6 +226,66 @@ class KayTest {
         override fun getEditable(): Editable = text
     }
 
+    /**
+     * 小K's way in: the 小K key opens its page (小K large, the line of the day, 改写 · 翻译 · 聊天);
+     * a choice brings the keyboard back with the strip above it, in that way; the strip's list
+     * switches ways. Frames to build/screens/kay_flow_*.png.
+     */
+    @Test fun kayFlow() {
+        val prefs = Prefs(ctx).apply { put(Prefs.ANIMATIONS, false); put(Prefs.LANGUAGES, "zh,en") }
+        prefs.state.edit().clear().putString(Prefs.KAY_GREETED, java.time.LocalDate.now().toString()).commit()
+        prefs.sp.edit().putString("llm_gemini_key", "test").putString(Prefs.AI_PROVIDER, "gemini").commit()
+        val ime = Robolectric.buildService(KkImeService::class.java).create().get()
+        val view = ime.onCreateInputView()
+        val field = Field(view)
+        field.text.append("今天天气真好我门去公园吧，顺便买点水果")
+        android.inputmethodservice.InputMethodService::class.java.getDeclaredField("mStartedInputConnection").apply { isAccessible = true }.set(ime, field)
+        ime.onStartInputView(EditorInfo().apply { inputType = InputType.TYPE_CLASS_TEXT; packageName = "test.app" }, false)
+        fun idle() { shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(400)) }
+        idle()
+        val w = ctx.resources.displayMetrics.widthPixels
+        fun shot(name: String) {
+            view.measure(View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(ctx.resources.displayMetrics.heightPixels, View.MeasureSpec.AT_MOST))
+            view.layout(0, 0, view.measuredWidth, view.measuredHeight)
+            val col = (view as ViewGroup).getChildAt(0)
+            val b = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888); view.draw(Canvas(b))
+            save(Bitmap.createBitmap(b, 0, col.top.coerceAtLeast(0), b.width, (col.bottom - col.top.coerceAtLeast(0)).coerceAtLeast(1)), name)
+        }
+        fun panel() = KkImeService::class.java.getDeclaredField("panel").apply { isAccessible = true }.get(ime).toString()
+        fun feature() = KkImeService::class.java.getDeclaredField("translate").apply { isAccessible = true }.get(ime) as com.kk.shurufa.ime.TranslateFeature
+        // the 小K key: its page
+        ime.onTool("ai"); idle()
+        assertEquals("AI", panel())
+        shot("kay_flow_1_home")
+        // 改写: the keyboard comes back, the strip above it holds the field's text
+        ime.openStrip("rewrite"); idle()
+        assertEquals("LETTERS", panel())
+        assertEquals("rewrite", feature().mode)
+        assertEquals("今天天气真好我门去公园吧，顺便买点水果", ime.query.toString())
+        shot("kay_flow_2_rewrite")
+        // its list, open
+        val strip = feature().strip
+        strip.javaClass.getDeclaredField("picking").apply { isAccessible = true }.set(strip, "menu")
+        strip.requestLayout(); idle()
+        shot("kay_flow_3_menu")
+        strip.closeLists(); idle()
+        // a way picked from the list: 翻译, the text stays
+        strip.onPick?.invoke("menu", "mode:translate"); idle()
+        assertEquals("translate", feature().mode)
+        shot("kay_flow_4_translate")
+        // 聊天: what is typed is said to 小K
+        strip.onPick?.invoke("menu", "mode:chat"); idle()
+        assertEquals("chat", feature().mode)
+        assertEquals("", ime.query.toString())
+        shot("kay_flow_5_chat")
+        // ✕: the strip goes, the letters stay
+        strip.onClose?.invoke(); idle()
+        assertEquals(null, ime.sink)
+        ime.onDestroy()
+        prefs.sp.edit().remove(Prefs.LANGUAGES).remove("llm_gemini_key").remove(Prefs.AI_PROVIDER).apply()
+        prefs.state.edit().clear().commit()
+    }
+
     @Test fun greetingOnTheBar() {
         val prefs = Prefs(ctx).apply { put(Prefs.ANIMATIONS, false); put(Prefs.LANGUAGES, "en,zh") }
         prefs.state.edit().clear().commit()

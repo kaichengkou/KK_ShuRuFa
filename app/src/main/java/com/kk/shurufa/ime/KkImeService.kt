@@ -209,6 +209,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         clipboard = ClipboardFeature(this).also { it.register() }
         translate = TranslateFeature(this, translateService)
         ai = AiFeature(this, kay)
+        translate.ai = ai
         voice = VoiceFeature(this, translateService)
         prefs.sp.registerOnSharedPreferenceChangeListener(settingsListener)
         prefs.state.registerOnSharedPreferenceChangeListener(stateListener)
@@ -723,7 +724,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         }
         if (entering && p != Panel.LETTERS && p != Panel.PHONE && p != Panel.QUICK) animateIn(content.getChildAt(0))
         bar.expanded = p == Panel.CANDIDATES
-        bar.activeTool = when (sink) { Sink.EMOJI -> "emoji"; Sink.TRANSLATE -> "translate"; Sink.AI -> "ai"; null -> toolFor(p) }
+        bar.activeTool = when (sink) { Sink.EMOJI -> "emoji"; Sink.TRANSLATE -> if (translate.mode == "translate") "translate" else "ai"; Sink.AI -> "ai"; null -> toolFor(p) }
         syncBar()
         animateHeight(oldTotal, if (noBar) 0 else barH)
     }
@@ -808,8 +809,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
             s == Sink.TRANSLATE && !composing && letters -> { bar.showToolbar(); translate.sync() }
             s == Sink.AI && !composing && letters -> {
                 val q = query.toString()
-                if (ai.chatting) bar.showQuery("和${kay.name}说", q, "想说什么都行，回车发送", if (q.isBlank()) null else "发送")
-                else bar.showQuery("AI 指令", q, "说说想怎么改，比如“改成适合发朋友圈的语气”", if (q.isBlank()) null else "执行")
+                bar.showQuery("AI 指令", q, "说说想怎么改，比如“改成适合发朋友圈的语气”", if (q.isBlank()) null else "执行")
             }
             greeting != null && s == null && letters && !composing && predictions.isEmpty() -> bar.showGreeting(greeting!!, com.kk.shurufa.online.Llm.resolve(prefs, prefs.quickTarget.ifEmpty { prefs.aiProvider }) != null)
             s == Sink.EMOJI && !composing && letters -> {
@@ -1437,7 +1437,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
             "enter" -> when {
                 composing -> rimeKey(RimeBridge.XK_Return)
                 sink == Sink.AI -> runInstruction()
-                sink == Sink.TRANSLATE -> translate.commit()
+                sink == Sink.TRANSLATE -> translate.enter()
                 sink == Sink.EMOJI -> searchResults.firstOrNull()?.let { emoji.type(it) }
                 else -> {
                     // 发送: 小K jumps for the message that went out
@@ -1645,7 +1645,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
             "math" -> { finishComposing(); showPanel(if (panel == Panel.MATH) Panel.LETTERS else Panel.MATH) }
             "undo" -> undo()
             "settings" -> openSettings()
-            "translate" -> if (sink == Sink.TRANSLATE) closeSink() else openSink(Sink.TRANSLATE)
+            "translate" -> if (sink == Sink.TRANSLATE && translate.mode == "translate") closeSink() else { translate.nextMode = "translate"; openSink(Sink.TRANSLATE) }
             else -> if (target != null) { if (sink != null) dropSink(); showPanel(target) }
         }
     }
@@ -1997,9 +1997,14 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         haptics.play(HapticEvent.FUNCTION)
         showPanel(Panel.LETTERS)
         this.sink = sink
-        bar.activeTool = when (sink) { Sink.EMOJI -> "emoji"; Sink.TRANSLATE -> "translate"; Sink.AI -> "ai" }
         if (sink == Sink.TRANSLATE) translate.onOpened(selection)
+        bar.activeTool = when (sink) { Sink.EMOJI -> "emoji"; Sink.TRANSLATE -> if (translate.mode == "translate") "translate" else "ai"; Sink.AI -> "ai" }
         syncBar()
+    }
+
+    override fun openStrip(mode: String) {
+        translate.nextMode = mode
+        openSink(Sink.TRANSLATE)
     }
 
     /** Closes the query; where it came from opens again (the emoji panel after 查找, the AI panel after 输入指令). */
@@ -2023,7 +2028,8 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     private fun runInstruction() {
         val instruction = query.toString().trim()
         dropSink()
-        ai.runInstruction(instruction)
+        // instructions are typed in 小K's strip now
+        if (instruction.isNotBlank()) { translate.nextMode = "rewrite"; openSink(Sink.TRANSLATE) } else showPanel(Panel.AI)
     }
 
     override fun openSettings(page: String?) {

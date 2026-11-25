@@ -1,76 +1,128 @@
 package com.kk.shurufa.ime
 
-import android.content.ClipData
-import android.content.ClipboardManager
-import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import android.view.View
+import android.widget.FrameLayout
 import com.kk.shurufa.Prefs
 import com.kk.shurufa.keyboard.AiPanel
+import com.kk.shurufa.keyboard.KayHome
+import com.kk.shurufa.keyboard.Motion
+import com.kk.shurufa.keyboard.SharkLife
 import com.kk.shurufa.online.AiWriter
 import com.kk.shurufa.online.Llm
 
 /**
- * 小K's panel. 聊天: talking with 小K (回话 types through the AI sink; the answer streams in).
- * 改写 · 翻译: the selection (or else the whole field) goes
- * to the chosen model with one of the actions or an instruction typed on the keyboard (输入指令);
- * the answer streams into the panel and can replace the text, go in after it, or be copied.
+ * 小K's side of the keyboard. Its page (the 小K key): 小K large, its line of the day, and 改写 ·
+ * 翻译 · 聊天 to choose from; a choice opens 小K's strip above the keyboard ([TranslateFeature]),
+ * which asks this for a rewrite or for 小K's answer. The whole conversation is on a page of its
+ * own (看全部), reached from the strip or from 小K's page.
  */
 class AiFeature(private val host: Host, private val kay: Kay) {
     private val prefs get() = host.prefs
     private val handler = Handler(Looper.getMainLooper())
+    private lateinit var root: FrameLayout
+    private lateinit var home: KayHome
     private lateinit var panel: AiPanel
-    private var result = ""
-    private var fromSelection = false
-    private var action: AiWriter.Action? = null
     /** Each run has a number; answers of older runs are dropped. */
     @Volatile private var run = 0
 
+    val kayName get() = kay.name
+
     fun build(): View {
-        panel = AiPanel(host.context, prefs).apply {
+        root = FrameLayout(host.context)
+        home = KayHome(host.context, prefs).apply {
             theme = host.kbTheme
-            actions = AiWriter.ACTIONS.map { AiPanel.Act(it.id, it.title, it.group) }
-            chatTab = CHAT
             onFeedback = { host.haptics.play(HapticEvent.FUNCTION) }
-            onAction = { id -> AiWriter.ACTIONS.firstOrNull { it.id == id }?.let { start(it) } }
-            onButton = { b ->
-                when (b) {
+            onPat = { SharkLife.pat(Motion.now()); host.haptics.play(HapticEvent.OPTION); invalidate() }
+            onChoose = { id ->
+                when (id) {
                     "setup" -> host.openSettings("ai")
-                    "place" -> showPlace(force = true)
-                    // 一言: today's line comes back into the conversation (once, at the bottom)
-                    "line" -> {
-                        val l = kay.todayLine()
-                        if (kay.talk.lastOrNull()?.let { !it.mine && it.text == l } != true) kay.talk += Kay.Turn(false, l)
-                        panel.status = ""; syncChat()
-                    }
-                    "replace" -> apply(replace = true)
-                    "insert" -> apply(replace = false)
-                    "clear" -> { run++; panel.running = null; com.kk.shurufa.keyboard.SharkLife.thinking = false; pendingSaid = ""; pendingAnswer = ""; kay.forgetTalk(); panel.status = ""; syncChat() }
-                    "reply" -> { chatting = true; host.openSink(Sink.AI) }
-                    "retry" -> action?.let { start(it) }
-                    "stop" -> stop()
-                    "copy" -> {
-                        (host.context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("AI", result))
-                        host.notice("已复制")
-                    }
-                    "custom" -> { chatting = false; host.openSink(Sink.AI) }
-                    else -> if (b.startsWith("target:")) { prefs.put(Prefs.AI_PROVIDER, b.removePrefix("target:")); syncHeader() }
+                    "all" -> showConversation()
+                    else -> host.openStrip(id)
                 }
             }
         }
-        return panel
+        panel = AiPanel(host.context, prefs).apply {
+            theme = host.kbTheme
+            visibility = View.GONE
+            actions = emptyList()
+            chatTab = CHAT
+            onFeedback = { host.haptics.play(HapticEvent.FUNCTION) }
+            onButton = { b ->
+                when (b) {
+                    "setup" -> host.openSettings("ai")
+                    "home" -> showHome(animate = true)
+                    "place" -> showPlace(force = true)
+                    "line" -> { recallLine(); syncChat() }
+                    "clear" -> { forget(); syncChat() }
+                    "reply" -> host.openStrip("chat")
+                    "stop" -> { cancel(); syncChat() }
+                    else -> if (b.startsWith("target:")) { prefs.put(Prefs.AI_PROVIDER, b.removePrefix("target:")); syncHeader() }
+                }
+            }
+            selectGroup(CHAT)
+        }
+        root.addView(home, FrameLayout.LayoutParams(-1, -1))
+        root.addView(panel, FrameLayout.LayoutParams(-1, -1))
+        return root
     }
 
-    /** IP 属地 in the header: looked up when the panel opens (at most every few minutes), or on a tap. */
+    /** 小K's page opened (the 小K key). */
+    fun onOpened() {
+        host.finishComposing()
+        showHome(animate = false)
+        home.entered()
+        // 小K says hello when it has not for a while
+        val now = Motion.now()
+        if (now - lastWave > 10 * 60_000L) { SharkLife.greet(now); lastWave = now }
+    }
+    private var lastWave = 0L
+
+    private fun showHome(animate: Boolean) {
+        home.kayName = kay.name
+        home.line = kay.todayLine()
+        home.aiReady = target() != null
+        home.talks = kay.talk.size
+        home.provider = target()?.let { Llm.targetName(prefs, it) }.orEmpty()
+        showPlace(force = false)
+        crossfade(panel, home, animate)
+        if (animate) home.entered()
+    }
+
+    /** The whole conversation, on 小K's page. */
+    fun showConversation() {
+        if (host.panel != Panel.AI) host.show(Panel.AI)
+        panel.kayName = kay.name
+        syncHeader(); syncChat()
+        crossfade(home, panel, animate = true)
+    }
+
+    /** [from] fades out as [to] fades in, rising a little. */
+    private fun crossfade(from: View, to: View, animate: Boolean) {
+        if (to.visibility == View.VISIBLE && from.visibility != View.VISIBLE) return
+        from.animate().cancel(); to.animate().cancel()
+        if (!animate || !Motion.on(prefs)) { from.visibility = View.GONE; to.visibility = View.VISIBLE; to.alpha = 1f; to.translationY = 0f; return }
+        val d = Motion.dur(prefs, Motion.PANEL)
+        to.visibility = View.VISIBLE; to.alpha = 0f; to.translationY = host.context.resources.displayMetrics.density * 12
+        to.animate().alpha(1f).translationY(0f).setDuration(d).setInterpolator(Motion.ENTER).withLayer().start()
+        from.animate().alpha(0f).setDuration(d / 2).setInterpolator(Motion.EXIT).withLayer()
+            .withEndAction { from.visibility = View.GONE; from.alpha = 1f }.start()
+    }
+
+    /** IP 属地: looked up when the page opens (at most every few minutes), or on a tap. */
     private fun showPlace(force: Boolean) {
-        if (!prefs.kayShowIp) { panel.place = null; return }
-        fun put() { panel.place = com.kk.shurufa.online.IpPlace.label(); panel.placeOk = com.kk.shurufa.online.IpPlace.geminiOk(); panel.invalidate() }
+        if (!prefs.kayShowIp) { panel.place = null; home.place = null; return }
+        fun put() {
+            val l = com.kk.shurufa.online.IpPlace.label(); val ok = com.kk.shurufa.online.IpPlace.geminiOk()
+            panel.place = l; panel.placeOk = ok; home.place = l; home.placeOk = ok
+            panel.invalidate(); home.invalidate()
+        }
         put()
         com.kk.shurufa.online.IpPlace.refresh(force) { put() }
     }
 
-    /** The service and model AI 改写 uses ("id|model"), or null when none is set up. */
+    /** The service and model 小K uses ("id|model"), or null when none is set up. */
     private fun target(): String? = Llm.resolve(prefs, prefs.aiProvider)
 
     private fun syncHeader() {
@@ -82,49 +134,91 @@ class AiFeature(private val host: Host, private val kay: Kay) {
         panel.invalidate()
     }
 
-    /** The text the AI works on: the selection, or else everything in the field. */
-    private fun source(): String {
-        val ed = host.editor
-        ed.selectedText()?.takeIf { it.isNotBlank() }?.let { fromSelection = true; return it }
-        fromSelection = false
-        return ed.allText() ?: (ed.textBefore(4000) + ed.textAfter(4000))
-    }
+    /** 改写's changes, marked against what it was. */
+    fun marked(s: CharSequence, base: String?): CharSequence = if (::panel.isInitialized) panel.marked(s.toString(), base) else s
 
-    fun onOpened() {
-        host.finishComposing()
-        panel.kayName = kay.name
-        val src = source()
-        panel.source = src
-        panel.sourceLabel = if (fromSelection) "选中" else "全文"
-        panel.running = null; panel.status = ""
-        panel.setResult("", null)
-        result = ""; action = null
-        syncHeader()
-        showPlace(force = false)
-        // talking goes on where it was; otherwise with text in the field it is about the text
-        if (!chatting) panel.selectGroup(if (src.isBlank() || kay.talk.isNotEmpty()) CHAT else "改写")
-        syncChat()
+    // ---- 改写 ----
+
+    /** Rewrites [src] the way [a] says; [onText] as it streams, [onDone] at the end (on the main thread). */
+    fun rewrite(a: AiWriter.Action, src: String, onText: (String) -> Unit, onDone: (Result<String>) -> Unit) {
+        val t = target() ?: return onDone(Result.failure(IllegalStateException("先在设置里添加 AI 服务")))
+        val id = ++run
+        SharkLife.thinking = true
+        Thread {
+            com.kk.shurufa.online.AiBudget.asked(prefs)
+            val r = runCatching {
+                Llm.completeTarget(prefs, t, AiWriter.SYSTEM, AiWriter.prompt(a, src),
+                    onText = { s -> handler.post { if (id == run) onText(s) } }, cancelled = { id != run })
+            }
+            handler.post {
+                if (id != run) return@post
+                SharkLife.thinking = false
+                onDone(r)
+                host.haptics.play(HapticEvent.GESTURE)
+            }
+        }.apply { isDaemon = true; name = "kk-ai" }.start()
     }
 
     // ---- 聊天 ----
 
-    /** The AI sink is 回话 (talking), not 输入指令. */
-    var chatting = false
+    @Volatile var chatBusy = false; private set
     private var pendingSaid = ""
     private var pendingAnswer = ""
 
-    /** 接着聊 from the line of the day: it starts the conversation, and the keyboard is ready to answer. */
+    /** 小K's latest answer in the conversation. */
+    fun lastAnswer(): String = kay.talk.lastOrNull { !it.mine }?.text.orEmpty()
+
+    /** 一言: today's line comes back into the conversation (once, at the bottom). */
+    fun recallLine() {
+        val l = kay.todayLine()
+        if (kay.talk.lastOrNull()?.let { !it.mine && it.text == l } != true) kay.talk += Kay.Turn(false, l)
+    }
+
+    fun forget() { cancel(); kay.forgetTalk(); panel.status = "" }
+
+    /** 接着聊 from the line of the day: it starts the conversation, and the strip is ready to answer. */
     fun openChat(first: String?) {
         if (first != null && kay.talk.isEmpty()) kay.talk += Kay.Turn(false, first)
-        chatting = true
-        host.show(Panel.AI)
-        panel.selectGroup(CHAT)
+        host.openStrip("chat")
+    }
+
+    /** Says [said] to 小K; [onText] as the answer streams, [onDone] at the end (on the main thread). */
+    fun chat(said: String, onText: (String) -> Unit, onDone: (Result<String>) -> Unit) {
+        val t = target() ?: return onDone(Result.failure(IllegalStateException("先在设置里添加 AI 服务")))
+        if (!kay.mayTalk()) {
+            kay.talk += Kay.Turn(true, said); kay.talk += Kay.Turn(false, "今天聊得够多啦，明天见 (｡･ω･｡)ﾉ")
+            syncChat(); return onDone(Result.success(lastAnswer()))
+        }
+        val id = ++run
+        pendingSaid = said; pendingAnswer = ""
+        chatBusy = true; panel.running = CHAT; panel.status = ""
+        SharkLife.thinking = true
         syncChat()
-        if (target() != null) host.openSink(Sink.AI)
+        kay.talked()
+        Thread {
+            com.kk.shurufa.online.AiBudget.asked(prefs)
+            val r = runCatching {
+                Llm.completeTarget(prefs, t, kay.chatSystem(), kay.chatUser(said),
+                    onText = { s -> handler.post { if (id == run) { pendingAnswer = s.trim(); syncChat(); onText(pendingAnswer) } } },
+                    cancelled = { id != run })
+            }
+            handler.post {
+                if (id != run) return@post
+                chatBusy = false; panel.running = null
+                SharkLife.thinking = false
+                pendingSaid = ""; pendingAnswer = ""
+                val out = r.map { kay.heard(said, it) }
+                out.onFailure { kay.talk += Kay.Turn(true, said); panel.status = it.message ?: "没连上" }
+                syncChat()
+                onDone(out)
+                host.haptics.play(HapticEvent.GESTURE)
+            }
+        }.apply { isDaemon = true; name = "kk-kay" }.start()
     }
 
     /** What was said, styled: 主人's words in a softer ink, 小K's name in the accent. */
     private fun syncChat() {
+        if (!::panel.isInitialized) return
         val sb = android.text.SpannableStringBuilder()
         fun line(who: String, text: String, mine: Boolean) {
             if (sb.isNotEmpty()) sb.append("\n")
@@ -145,105 +239,14 @@ class AiFeature(private val host: Host, private val kay: Kay) {
         panel.chatHasAnswer = kay.talk.any { !it.mine }
     }
 
-    private fun say(said: String) {
-        host.show(Panel.AI)
-        panel.selectGroup(CHAT)
-        val t = target()
-        if (t == null) { panel.status = "先在设置里填好 AI 服务的 Key"; return }
-        if (!kay.mayTalk()) {
-            kay.talk += Kay.Turn(true, said); kay.talk += Kay.Turn(false, "今天聊得够多啦，明天见 (｡･ω･｡)ﾉ")
-            syncChat(); return
-        }
-        val id = ++run
-        pendingSaid = said; pendingAnswer = ""
-        panel.running = CHAT; panel.status = ""
-        com.kk.shurufa.keyboard.SharkLife.thinking = true
-        syncChat()
-        kay.talked()
-        Thread {
-            com.kk.shurufa.online.AiBudget.asked(prefs)
-            val r = runCatching {
-                Llm.completeTarget(prefs, t, kay.chatSystem(), kay.chatUser(said),
-                    onText = { s -> handler.post { if (id == run) { pendingAnswer = s.trim(); syncChat() } } },
-                    cancelled = { id != run })
-            }
-            handler.post {
-                if (id != run) return@post
-                panel.running = null
-                com.kk.shurufa.keyboard.SharkLife.thinking = false
-                pendingSaid = ""; pendingAnswer = ""
-                r.onSuccess { kay.heard(said, it) }
-                 .onFailure { kay.talk += Kay.Turn(true, said); panel.status = it.message ?: "没连上" }
-                syncChat()
-                host.haptics.play(HapticEvent.GESTURE)
-            }
-        }.apply { isDaemon = true; name = "kk-kay" }.start()
-    }
-
-
-    /** 输入指令 or 回话 finished: back on the panel, the instruction runs or 小K hears it. */
-    fun runInstruction(instruction: String) {
-        if (chatting) { if (instruction.isNotBlank()) say(instruction) else host.show(Panel.AI); return }
-        host.show(Panel.AI)
-        if (instruction.isNotBlank()) start(AiWriter.custom(instruction))
-    }
-
-    private fun start(a: AiWriter.Action) {
-        val src = source()
-        if (src.isBlank()) { panel.status = "输入框里还没有文字"; panel.setResult("", null); return }
-        val id = ++run
-        action = a
-        panel.running = a.id; panel.doneTitle = a.title; panel.status = ""
-        com.kk.shurufa.keyboard.SharkLife.thinking = true
-        panel.setResult("", null)
-        val t = target() ?: run { panel.running = null; panel.status = "先在设置里添加 AI 服务"; return }
-        Thread {
-            val r = runCatching {
-                Llm.completeTarget(prefs, t, AiWriter.SYSTEM, AiWriter.prompt(a, src),
-                    onText = { s -> handler.post { if (id == run) panel.setResult(s, null) } }, cancelled = { id != run })
-            }
-            handler.post {
-                if (id != run) return@post
-                panel.running = null
-                com.kk.shurufa.keyboard.SharkLife.thinking = false
-                r.onSuccess { result = it; panel.setResult(it, if (a.diff) src else null) }
-                 .onFailure { result = ""; panel.setResult("", null); panel.status = it.message ?: "出错了" }
-                host.haptics.play(HapticEvent.GESTURE)
-            }
-        }.apply { isDaemon = true; name = "kk-ai" }.start()
-    }
-
-    /** 替换 (the selection, or the whole field — undoable) or 插入 (after the text). */
-    private fun apply(replace: Boolean) {
-        val t = result
-        if (t.isEmpty()) return
-        run++
-        when {
-            replace && !fromSelection -> host.editor.replace(t, wholeField = true)
-            replace -> host.editor.type(t, pairable = false, source = TypingStats.Source.AI)
-            else -> host.editor.insertAfterSelection(t)
-        }
-        host.show(Panel.LETTERS)
-    }
-
-    /** Leaving the panel stops a run that is still streaming. */
+    /** Leaving stops a run that is still streaming; what was said stays in the conversation. */
     fun cancel() {
         run++
-        com.kk.shurufa.keyboard.SharkLife.thinking = false
+        SharkLife.thinking = false
         if (pendingSaid.isNotEmpty()) { kay.talk += Kay.Turn(true, pendingSaid); pendingSaid = ""; pendingAnswer = "" }
+        chatBusy = false
         if (::panel.isInitialized) panel.running = null
     }
 
     private companion object { const val CHAT = "聊天" }
-
-    /** 停止: the run is let go; what came so far stays, to use or retry. */
-    private fun stop() {
-        run++
-        com.kk.shurufa.keyboard.SharkLife.thinking = false
-        panel.running = null
-        host.haptics.play(HapticEvent.OPTION)
-        if (panel.hasResult()) { result = panel.resultText(); panel.status = "" }
-        else { result = ""; panel.status = "已停止 · 点一个操作重新开始" }
-        panel.invalidate()
-    }
 }
