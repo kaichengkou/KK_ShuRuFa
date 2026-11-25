@@ -38,6 +38,12 @@ class AiFeature(private val host: Host, private val kay: Kay) {
                 when (b) {
                     "setup" -> host.openSettings("ai")
                     "place" -> showPlace(force = true)
+                    // 一言: today's line comes back into the conversation (once, at the bottom)
+                    "line" -> {
+                        val l = kay.todayLine()
+                        if (kay.talk.lastOrNull()?.let { !it.mine && it.text == l } != true) kay.talk += Kay.Turn(false, l)
+                        panel.status = ""; syncChat()
+                    }
                     "replace" -> apply(replace = true)
                     "insert" -> apply(replace = false)
                     "clear" -> { run++; panel.running = null; com.kk.shurufa.keyboard.SharkLife.thinking = false; pendingSaid = ""; pendingAnswer = ""; kay.forgetTalk(); panel.status = ""; syncChat() }

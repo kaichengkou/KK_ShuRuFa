@@ -191,6 +191,36 @@ class KayTest {
         save(b, "kay_chat")
     }
 
+    /** The 小K panel in each of its states (for build/screens/kay_panel_*.png). */
+    @Test fun panelStates() {
+        val prefs = Prefs(ctx)
+        val w = ctx.resources.displayMetrics.widthPixels
+        val h = (250 * d).toInt()
+        fun shot(name: String, setup: com.kk.shurufa.keyboard.AiPanel.() -> Unit) {
+            val p = com.kk.shurufa.keyboard.AiPanel(ctx, prefs).apply {
+                theme = KbTheme.resolve(ctx, prefs)
+                actions = com.kk.shurufa.online.AiWriter.ACTIONS.map { com.kk.shurufa.keyboard.AiPanel.Act(it.id, it.title, it.group) }
+                chatTab = "聊天"; kayName = "小K"; provider = "Gemini 3.5 Flash Lite"; place = "🇯🇵 日本"; placeOk = true
+                sourceLabel = "全文"; source = "今天天气真好我门去公园吧，顺便买点水果"
+                setup()
+            }
+            p.measure(View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(h, View.MeasureSpec.EXACTLY))
+            p.layout(0, 0, w, h)
+            val b = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888); p.draw(Canvas(b))
+            save(b, "kay_panel_$name")
+        }
+        shot("chat_empty") { selectGroup("聊天") }
+        shot("chat") {
+            selectGroup("聊天")
+            chat = "小K  小雪。宜热汤 (｡･ω･｡)\n我  今天好冷，还要去实验室\n小K  那就把手揣兜里走过去，回来给你热汤的位置留着 ( ˘ω˘ )"; chatHasAnswer = true
+        }
+        shot("chat_thinking") { selectGroup("聊天"); chat = "我  晚饭吃什么"; running = "chat" }
+        shot("rewrite") { selectGroup("改写") }
+        shot("rewrite_result") { selectGroup("改写"); doneTitle = "纠错"; setResult("今天天气真好，我们去公园吧，顺便买点水果。", "今天天气真好我门去公园吧，顺便买点水果") }
+        shot("translate") { selectGroup("翻译") }
+        shot("setup") { needsSetup = true }
+    }
+
     private class Field(view: View) : BaseInputConnection(view, true) {
         val text: Editable = SpannableStringBuilder().also { Selection.setSelection(it, 0) }
         override fun getEditable(): Editable = text

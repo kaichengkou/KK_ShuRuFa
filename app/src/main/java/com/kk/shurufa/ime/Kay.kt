@@ -48,7 +48,20 @@ class Kay(private val context: Context, private val prefs: Prefs) {
     fun greetingDue(now: LocalTime = LocalTime.now(), today: LocalDate = LocalDate.now()): Boolean =
         prefs.kayGreet && now.hour >= 5 && prefs.state.getString(Prefs.KAY_GREETED, "") != today.toString()
 
-    fun markGreeted(today: LocalDate = LocalDate.now()) = prefs.state.edit().putString(Prefs.KAY_GREETED, today.toString()).apply()
+    fun markGreeted(today: LocalDate = LocalDate.now(), line: String? = null) {
+        val e = prefs.state.edit().putString(Prefs.KAY_GREETED, today.toString())
+        if (line != null) e.putString(Prefs.KAY_LINE_LOG, (listOf("$today\t$line") + log().filter { it.first != today }.map { "${it.first}\t${it.second}" }).take(LOG_DAYS).joinToString("\n"))
+        e.apply()
+    }
+
+    /** 一言 said lately, newest first: the day and the line. */
+    fun log(): List<Pair<LocalDate, String>> = (prefs.state.getString(Prefs.KAY_LINE_LOG, "") ?: "").lineSequence().mapNotNull { l ->
+        val d = runCatching { LocalDate.parse(l.substringBefore('\t')) }.getOrNull() ?: return@mapNotNull null
+        d to l.substringAfter('\t').ifBlank { return@mapNotNull null }
+    }.toList()
+
+    /** Today's 一言: the one said this morning, or (not said yet) the one it would say. */
+    fun todayLine(today: LocalDate = LocalDate.now()): String = log().firstOrNull { it.first == today }?.second ?: line(today)
 
     /** Today's line: the one the AI wrote for today, or else one of 小K's own. */
     fun line(today: LocalDate = LocalDate.now(), now: LocalTime = LocalTime.now()): String {
@@ -82,6 +95,8 @@ class Kay(private val context: Context, private val prefs: Prefs) {
             st.edit().putString(Prefs.KAY_LINE_FOR, tomorrow.toString()).putString(Prefs.KAY_LINE, line).apply()
         }
     }
+
+    private companion object { const val LOG_DAYS = 30 }
 
     // ---- talking ----
 

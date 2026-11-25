@@ -340,6 +340,7 @@ class Prefs(context: Context) {
         const val KAY_CHAT_CAP = "kay_chat_cap"
         const val KAY_SPACE = "kay_space"
         const val KAY_ICON = "kay_icon"
+        const val KAY_LINE_LOG = "kay_line_log"
         const val KAY_SHOW_IP = "kay_show_ip"
         const val KAY_ACT_EVERY = "kay_act_every"
         const val KAY_LONG_SHARE = "kay_long_share"

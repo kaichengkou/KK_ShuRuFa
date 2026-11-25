@@ -1655,6 +1655,18 @@ private fun KayGroups(prefs: Prefs) {
         IntSlider(prefs, Prefs.KAY_SAY_SEC, "一句话停留", 12, 3..60, " 秒", "长动作的话会一直留到动作做完")
         IntSlider(prefs, Prefs.KAY_SAY_SIZE, "小字大小", 100, 70..150, "%")
     }
+    Group("最近的一言") {
+        val log = remember { kay.log() }
+        if (log.isEmpty()) Note("每天第一次打开键盘时它说的那句，会记在这里（最近 30 天）。")
+        else {
+            val fmt = java.time.format.DateTimeFormatter.ofPattern("M月d日")
+            for ((day, line) in log.take(14)) Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), verticalAlignment = Alignment.Top) {
+                Text(day.format(fmt) + " " + com.kk.shurufa.ime.KayLines.weekday(day.dayOfWeek), Modifier.width(92.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(line, style = MaterialTheme.typography.bodyMedium)
+            }
+            Note("聊天里点「一言」也能找回今天的那句。")
+        }
+    }
     Group("聊天") {
         Toggle(prefs, Prefs.KAY_SHOW_IP, "显示 IP 属地", "在小K面板顶部，用小字显示你现在的网络出口在哪个国家或地区；绿点表示 Gemini 在那里能用，黄点表示不能。打开面板时查一次（最多每 5 分钟一次，只问 Cloudflare，不带任何输入内容），点一下重新查", true)
         IntSlider(prefs, Prefs.KAY_CHAT_CAP, "每天最多聊", 30, 5..100, " 句", "聊天会把你说的话发给 AI 服务；到了上限它就去睡了。聊过的话不保存，键盘关掉就忘了")

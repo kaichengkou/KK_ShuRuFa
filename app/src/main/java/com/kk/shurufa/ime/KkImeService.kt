@@ -480,7 +480,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         greeting = null
         if (!restarting && panel == Panel.LETTERS && wordsHere && !prefs.incognito && clipboard.pendingChip() == null && kay.greetingDue() &&
             editor.textBefore(1).isEmpty() && editor.textAfter(1).isEmpty()) {
-            greeting = kay.line(); kay.markGreeted(); greetingAt = SystemClock.uptimeMillis()
+            greeting = kay.line(); kay.markGreeted(line = greeting); greetingAt = SystemClock.uptimeMillis()
             com.kk.shurufa.keyboard.SharkLife.greet(greetingAt)
         }
         if (!prefs.incognito) kay.prefetch()

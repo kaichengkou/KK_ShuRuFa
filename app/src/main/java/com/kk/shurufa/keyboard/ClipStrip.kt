@@ -34,6 +34,12 @@ class ClipStrip(context: Context, prefs: Prefs) : KbView(context, prefs) {
     data class Card(val text: String, val tag: String, val starred: Boolean, val isImage: Boolean = false, val image: android.graphics.Bitmap? = null)
 
     var title = "最近"
+    /** 清空 in the title line: the first tap asks (再点一次清空), a second within a few seconds clears. */
+    var onClear: (() -> Unit)? = null
+    private var clearAsked = 0L
+    private val clearRect = RectF()
+    private var clearDown = false
+    private val clearAskMs = 2500L
     var emptyText = ""
     var overlay: PopupOverlay? = null
     var onTap: ((Int) -> Unit)? = null
@@ -143,7 +149,22 @@ class ClipStrip(context: Context, prefs: Prefs) : KbView(context, prefs) {
         // edge fades say there is more
         if (scrollPos > 1f) fade(c, 0f, dp(14f), true)
         if (scrollPos < maxScroll - 1f) fade(c, width - dp(14f), width.toFloat(), false)
+        drawClear(c, a)
         drawProgress(c, a)
+    }
+
+    private fun drawClear(c: Canvas, a: Float) {
+        if (onClear == null) { clearRect.setEmpty(); return }
+        val asking = android.os.SystemClock.uptimeMillis() - clearAsked < clearAskMs
+        val label = if (asking) "再点一次清空" else "清空"
+        tp.textAlign = Paint.Align.RIGHT; tp.textSize = sp(Ui.SMALL); tp.typeface = if (asking) Ui.medium else Ui.regular
+        tp.color = Colors.fade(if (asking) theme.accent else theme.hint, a * (if (clearDown) 0.5f else 1f))
+        val right = width - pad - dp(2f)
+        c.drawText(label, right, dp(15f), tp)
+        val w = tp.measureText(label)
+        clearRect.set(right - w - dp(10f), 0f, right + dp(6f), titleH + dp(2f))
+        tp.textAlign = Paint.Align.LEFT; tp.typeface = Ui.regular
+        if (asking) postInvalidateDelayed(clearAskMs - (android.os.SystemClock.uptimeMillis() - clearAsked) + 20)
     }
 
     /**
@@ -154,7 +175,7 @@ class ClipStrip(context: Context, prefs: Prefs) : KbView(context, prefs) {
         val m = maxScroll
         if (m <= 0f) return
         val trackW = dp(40f); val h = dp(2.5f)
-        val right = width - pad - dp(2f); val left = right - trackW
+        val right = (if (clearRect.isEmpty) width - pad - dp(2f) else clearRect.left - dp(4f)); val left = right - trackW
         val cy = dp(15f) - sp(Ui.SMALL) * 0.33f
         val total = m + width
         val thumbW = (trackW * width / total).coerceAtLeast(dp(8f))
@@ -287,10 +308,26 @@ class ClipStrip(context: Context, prefs: Prefs) : KbView(context, prefs) {
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(e: MotionEvent): Boolean {
+        if (clearDown) {
+            if (e.actionMasked == MotionEvent.ACTION_UP || e.actionMasked == MotionEvent.ACTION_CANCEL) {
+                clearDown = false
+                if (e.actionMasked == MotionEvent.ACTION_UP && clearRect.contains(e.x, e.y)) {
+                    val now = android.os.SystemClock.uptimeMillis()
+                    if (now - clearAsked < clearAskMs) { clearAsked = 0L; onClear?.invoke() } else { clearAsked = now; onFeedback?.invoke("tick") }
+                }
+                invalidate()
+            }
+            return true
+        }
         if (vt == null) vt = VelocityTracker.obtain()
         vt?.addMovement(e)
         when (e.actionMasked) {
-            MotionEvent.ACTION_DOWN -> {
+            MotionEvent.ACTION_DOWN -> if (cards.isNotEmpty() && clearRect.contains(e.x, e.y)) {
+                // the 清空 words: a button of their own, nothing scrolls or pastes
+                clearDown = true; invalidate()
+                parent?.requestDisallowInterceptTouchEvent(true)
+                return true
+            } else {
                 scroller.forceFinished(true)
                 downX = e.x; downY = e.y; lastX = e.x; dragging = false; menuFor = -1; vDrag = false
                 downAt = android.os.SystemClock.uptimeMillis()

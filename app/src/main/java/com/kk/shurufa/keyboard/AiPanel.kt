@@ -187,6 +187,8 @@ class AiPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
         hits.add("place", dx - dot, cy - dp(14f), right, cy + dp(14f))
     }
 
+    private var tabsShown = false
+
     /** The 改写 · 翻译 switch; true while its highlight moves. */
     private fun drawTabs(c: Canvas, y: Float, h: Float, maxRight: Float): Boolean {
         val t = theme
@@ -196,6 +198,7 @@ class AiPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
         val box = tabBox.apply { set(pad, y, minOf(pad + segW * names.size, maxRight), y + h) }
         val w = box.width() / names.size
         val cur = names.indexOf(group).coerceAtLeast(0)
+        if (!tabsShown) { tabPos.snap(cur.toFloat()); tabsShown = true }
         if (tabPos.target != cur.toFloat()) tabPos.animateTo(cur.toFloat())
         if (!Motion.on(prefs)) tabPos.snap(cur.toFloat())
         val moving = tabPos.running
@@ -235,8 +238,8 @@ class AiPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
         return top + ch - y
     }
 
-    /** The height the actions take: the tallest kind, so switching kinds moves nothing below. */
-    private fun actionsHeight(ch: Float): Float = groups.maxOfOrNull { g -> flow(g, 0f, ch) { _, _, _, _, _ -> } } ?: ch
+    /** The height the actions of the kind picked take (no empty rows under a short kind). */
+    private fun actionsHeight(ch: Float): Float = flow(group, 0f, ch) { _, _, _, _, _ -> }
 
     /** The actions of the kind picked, wrapped onto lines. True while animating. */
     private fun drawActions(c: Canvas, y: Float, ch: Float): Boolean {
@@ -248,7 +251,7 @@ class AiPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
         flow(group, y, ch) { id, title, l, top, w ->
             r.set(l, top, l + w, top + ch)
             when {
-                id == "custom" -> drawChip(c, r, title, ChipStyle.PRIMARY, pressed = pressed == id, icon = "ai")
+                id == "custom" -> drawChip(c, r, title, ChipStyle.ACTIVE, pressed = pressed == id, icon = "ai")
                 running == id -> {
                     // the action at work breathes
                     bg.color = Colors.blend(t.accentSoft, t.accent, 0.12f + 0.18f * ps)
@@ -346,8 +349,28 @@ class AiPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
             return true
         }
         if (result.isEmpty()) {
-            tp.textAlign = Paint.Align.CENTER; tp.textSize = sp(Ui.SMALL + 1f); tp.color = t.hint
-            drawText(c, status.ifEmpty { idleNote() }, card.centerX(), card.centerY(), tp)
+            if (status.isNotEmpty() || source.isBlank()) {
+                tp.textAlign = Paint.Align.CENTER; tp.textSize = sp(Ui.SMALL + 1f); tp.color = t.hint
+                drawText(c, status.ifEmpty { idleNote() }, card.centerX(), card.centerY(), tp)
+                return false
+            }
+            // what the action will work on: its label and size, then the text itself, quiet
+            val lineT = cardT + dp(10f); val lineCy = lineT + dp(11f)
+            tp.textAlign = Paint.Align.LEFT; tp.textSize = sp(Ui.SMALL); tp.typeface = Ui.medium; tp.color = t.accent
+            val label = if (sourceLabel == "选中") "选中的文字" else "输入框里的文字"
+            drawText(c, label, cardL + inner, lineCy, tp)
+            val lw = tp.measureText(label)
+            tp.typeface = Ui.regular; tp.color = t.hint
+            drawText(c, "· ${source.length} 字", cardL + inner + lw + dp(6f), lineCy, tp)
+            val box = RectF(cardL + inner, lineCy + dp(14f), cardR - inner, cardB - dp(30f))
+            body.textSize = sp(Ui.BODY); body.color = t.inkSoft
+            val src = if (source.length > 600) source.take(600) else source
+            val lay = StaticLayout.Builder.obtain(src, 0, src.length, body, box.width().toInt().coerceAtLeast(1))
+                .setLineSpacing(0f, 1.1f).setMaxLines(maxOf(1, (box.height() / (body.textSize * 1.3f)).toInt()))
+                .setEllipsize(TextUtils.TruncateAt.END).build()
+            c.save(); c.clipRect(box); c.translate(box.left, box.top); lay.draw(c); c.restore()
+            tp.textSize = sp(Ui.SMALL - 1f); tp.color = t.hint
+            drawText(c, if (sourceLabel == "选中") "点上面的一项，只处理选中的这段" else "点上面的一项开始；先选中一段，就只处理那一段", cardL + inner, cardB - dp(16f), tp)
             return false
         }
         // title line: ✕ and what was done on the left, the buttons for the answer on the right
@@ -436,22 +459,33 @@ class AiPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
             if (chat.isNotEmpty()) {
                 val iw = chipWidth("清空", textSp = Ui.SMALL + 1f)
                 r.set(bx - iw, lineT, bx, lineT + lineH)
-                drawChip(c, r, "清空", ChipStyle.SOFT, pressed = pressed == "clear", textSp = Ui.SMALL + 1f)
+                drawChip(c, r, "清空", ChipStyle.GHOST, pressed = pressed == "clear", textSp = Ui.SMALL + 1f)
                 hits.add("clear", r, slop = dp(5f))
-                bx = r.left - dp(6f)
+                bx = r.left - dp(4f)
             }
+            // today's 一言, back in the conversation
+            val lw = chipWidth("一言", textSp = Ui.SMALL + 1f)
+            r.set(bx - lw, lineT, bx, lineT + lineH)
+            drawChip(c, r, "一言", ChipStyle.SOFT, pressed = pressed == "line", textSp = Ui.SMALL + 1f)
+            hits.add("line", r, slop = dp(5f))
+            bx = r.left - dp(6f)
         }
         // IP 属地, small, after the name
         drawPlace(c, nameRight + dp(12f), bx - dp(6f), lineCy, fromLeft = true)
         resView.set(cardL + inner, lineT + lineH + dp(6f), cardR - inner, cardB - dp(10f))
         if (chat.isEmpty()) {
             tp.textAlign = Paint.Align.CENTER; tp.textSize = sp(Ui.SMALL + 1f); tp.color = t.hint
-            drawText(c, status.ifEmpty { "点「回话」，想说什么都行" }, resView.centerX(), resView.centerY(), tp)
+            drawText(c, status.ifEmpty { "点「回话」，想说什么都行" }, resView.centerX(), resView.centerY() - dp(10f), tp)
+            if (status.isEmpty()) {
+                tp.textSize = sp(Ui.SMALL - 1f)
+                drawText(c, "「一言」是它今天说的那句", resView.centerX(), resView.centerY() + dp(12f), tp)
+            }
             return wait == 0L || running != null
         }
         val lay = resLayout ?: run {
             body.textSize = sp(Ui.BODY + 1f); body.color = t.ink
-            StaticLayout.Builder.obtain(chat, 0, chat.length, body, resView.width().toInt().coerceAtLeast(1))
+            val text = hanging(chat, body)
+            StaticLayout.Builder.obtain(text, 0, text.length, body, resView.width().toInt().coerceAtLeast(1))
                 .setAlignment(Layout.Alignment.ALIGN_NORMAL).setLineSpacing(dp(2f), 1.1f).build().also { resLayout = it }
         }
         resMax = (lay.height - resView.height()).coerceAtLeast(0f)
@@ -461,6 +495,30 @@ class AiPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
         c.save(); c.clipRect(resView); c.translate(resView.left, resView.top - resScroll); lay.draw(c); c.restore()
         if (wait > 0 && running == null) invalidateIn(wait)
         return wait == 0L || running != null || !resScroller.isFinished
+    }
+
+    /**
+     * Each turn of the conversation ("小K  …", "我  …") wraps under its own words, not under
+     * the name, and the turns stand a little apart.
+     */
+    private fun hanging(text: CharSequence, paint: android.text.TextPaint): CharSequence {
+        val sb = android.text.SpannableStringBuilder(text)
+        val small = android.text.TextPaint(paint).apply { textSize = paint.textSize * 0.82f }
+        var start = 0
+        while (start < sb.length) {
+            var end = sb.indexOf('\n', start); if (end < 0) end = sb.length
+            val cut = sb.indexOf("  ", start).takeIf { it in start until end }
+            if (cut != null) {
+                val w = small.measureText(sb, start, cut + 2).toInt()
+                sb.setSpan(android.text.style.LeadingMarginSpan.Standard(0, w), start, minOf(end + 1, sb.length), Spanned.SPAN_INCLUSIVE_EXCLUSIVE)
+            }
+            if (end >= sb.length) break
+            // a short empty line between turns
+            sb.insert(end + 1, "\n")
+            sb.setSpan(android.text.style.AbsoluteSizeSpan(dp(5f).toInt()), end + 1, end + 2, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            start = end + 2
+        }
+        return sb
     }
 
     /** What an action will work on, said where the answer will appear. */

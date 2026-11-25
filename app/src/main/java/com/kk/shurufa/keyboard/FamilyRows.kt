@@ -12,13 +12,15 @@ object FamilyRows {
     else Key(main = Output.of(","), style = KeyStyle.SOFT, flicks = mapOf(Dir.UP to Output.of("!"))) to
         Key(main = Output.of("."), style = KeyStyle.SOFT, flicks = mapOf(Dir.UP to Output.of("?")))
 
-    /** 数字 ⇄ 符号: wider than its neighbours and tinted, so it is easy to find and hit. */
-    private fun symbolsKey() = Key(fn = "more_symbols", label = "符号", width = 1.5f, style = KeyStyle.TINT)
+    /** 数字 ⇄ 符号, beside ABC. */
+    private fun symbolsKey() = Key(fn = "more_symbols", label = "符号", width = 1.5f)
+    /** Back to the letters: the way out is the one tinted, so it is the one found at a glance. */
+    private fun abcKey() = Key(fn = "abc", label = "ABC", width = 1.5f, style = KeyStyle.TINT)
 
     fun number(zh: Boolean): List<Key> {
         val (comma, period) = punct(zh)
         return listOf(
-            Key(fn = "abc", label = "ABC", width = 1.5f), symbolsKey(),
+            abcKey(), symbolsKey(),
             comma, Key(fn = "space", width = 4f), period, Key(fn = "enter", width = 1.5f),
         )
     }
@@ -28,13 +30,13 @@ object FamilyRows {
      * it (the academic panel sets that), so ⇥ and ⌫ get full-size keys.
      */
     fun academic(): List<Key> = listOf(
-        Key(fn = "abc", label = "ABC", width = 1.5f), symbolsKey(),
+        abcKey(), symbolsKey(),
         Key(fn = "space", label = "‹  空格  ›", width = 3f),
         Key(fn = "next_slot", width = 1.5f), Key(fn = "backspace", width = 1.5f), Key(fn = "enter", width = 1.5f),
     )
 
     fun symbols(): List<Key> = listOf(
-        Key(fn = "abc", label = "ABC", width = 1.5f), Key(fn = "num", label = "123", width = 1.5f, style = KeyStyle.TINT),
+        abcKey(), Key(fn = "num", label = "123", width = 1.5f),
         Key(fn = "lock"), Key(fn = "space", width = 4f), Key(fn = "backspace"), Key(fn = "enter", width = 1.5f),
     )
 }

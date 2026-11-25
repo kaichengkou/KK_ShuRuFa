@@ -6,4 +6,4 @@ rows:
   - [1, 2, 3, "-", {fn: backspace}]
   - [4, 5, 6, " ", {key: "(", long: [")"]}]
   - [7, 8, 9, "+", {key: "*", long: ["#"]}]
-  - [{fn: abc, label: "ABC"}, ",", 0, ".", {fn: enter}]
+  - [{fn: abc, label: "ABC", style: tint}, ",", 0, ".", {fn: enter}]

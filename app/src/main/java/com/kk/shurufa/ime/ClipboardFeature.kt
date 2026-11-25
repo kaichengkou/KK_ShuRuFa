@@ -123,9 +123,10 @@ class ClipboardFeature(private val host: Host) {
             onFeedback = fb
             onTap = { i -> recent.getOrNull(i)?.let { paste(pasteText(it)) } }
             longOptions = { i -> recent.getOrNull(i)?.let { e ->
-                listOf(Output("取消", "§cancel"), Output(if (e.pinned) "取消收藏" else "收藏", "§pin"), Output("删除", "§del"), Output("清空最近", "§clear"))
+                listOf(Output("取消", "§cancel"), Output(if (e.pinned) "取消收藏" else "收藏", "§pin"), Output("删除", "§del"))
             }.orEmpty() }
             onLongOption = { i, o -> recent.getOrNull(i)?.let { option(it, o.text) } }
+            onClear = { clips.clearUnpinned(); images.prune(clips.entries().map { it.text }); host.haptics.play(HapticEvent.GESTURE); refresh() }
         }
         favs = GridPanel(ctx, prefs).apply {
             theme = host.kbTheme; overlay = host.overlay
@@ -176,7 +177,8 @@ class ClipboardFeature(private val host: Host) {
         fun shown(e: ClipHistory.Entry) = filter.isEmpty() || kinds[e.text]?.name == filter
         // under a filter a card shows what a tap pastes: the code, the link, the number
         fun text(e: ClipHistory.Entry) = if (filter.isEmpty()) e.text else kinds[e.text]?.value ?: e.text
-        recent = all.filter(::shown)
+        // 最近 is what came in and is not kept: the kept ones are under 收藏
+        recent = all.filter { !it.pinned && shown(it) }
         favItems = all.filter { it.pinned && shown(it) }
         strip.emptyText = if (filter.isEmpty()) "复制过的文字会出现在这里" else "最近没有复制过$filter"
         strip.setCards(recent.map { e ->

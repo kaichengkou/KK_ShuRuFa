@@ -96,7 +96,7 @@ class EmojiFeature(private val host: Host) {
         top.addView(cells, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
         val bottom = host.newKeyboard()
         bottom.setRows(listOf(listOf(
-            Key(fn = "abc", label = "ABC", width = 1.5f), Key(fn = "space", width = 4f),
+            Key(fn = "abc", label = "ABC", width = 1.5f, style = com.kk.shurufa.keyboard.KeyStyle.TINT), Key(fn = "space", width = 4f),
             Key(fn = "backspace", width = 1.5f), Key(fn = "enter", width = 1.5f),
         )))
         panel.addView(top, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
