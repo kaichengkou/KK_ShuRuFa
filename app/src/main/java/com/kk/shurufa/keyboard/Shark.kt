@@ -188,8 +188,28 @@ object Shark {
      */
     fun drawLive(c: Canvas, cx: Float, cy: Float, size: Float, alpha: Int = 255, still: Boolean = false): Long {
         val (pose, wait) = SharkLife.frame(Motion.now(), java.time.LocalTime.now().hour, still)
-        draw(c, cx, cy, size, pose, alpha)
+        drawCrisp(c, cx, cy, size, pose, alpha)
         return if (wait <= 20) 0L else wait
+    }
+
+    private const val SP = 28
+    private val sprite by lazy { android.graphics.Bitmap.createBitmap(SP, SP, android.graphics.Bitmap.Config.ARGB_8888) }
+    private val spriteCanvas by lazy { Canvas(sprite) }
+    private val blit = Paint().apply { isFilterBitmap = false; isAntiAlias = false; isDither = false }
+    private val dst = android.graphics.RectF()
+
+    /**
+     * [draw], as one picture: 小K is drawn at one pixel per cell and the picture scaled up without
+     * smoothing. No seam shows between cells, however it is moved, turned or faded, and it moves
+     * by fractions of a pixel, smoothly.
+     */
+    fun drawCrisp(c: Canvas, cx: Float, cy: Float, size: Float, pose: Pose, alpha: Int = 255, wear: Wear? = wearToday()) {
+        sprite.eraseColor(0)
+        draw(spriteCanvas, SP / 2f, SP / 2f + 0.5f, 13f, pose, 255, wear)
+        val cellPx = cellFor(size)
+        dst.set(cx - SP / 2f * cellPx, cy - (SP / 2f + 0.5f) * cellPx, cx + SP / 2f * cellPx, cy + (SP / 2f - 0.5f) * cellPx)
+        blit.alpha = alpha
+        c.drawBitmap(sprite, null, dst, blit)
     }
 
     private const val GREY = 0xFF9AA3AF.toInt()
