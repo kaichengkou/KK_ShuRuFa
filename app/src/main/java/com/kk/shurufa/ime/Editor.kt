@@ -27,7 +27,7 @@ class Editor(private val ime: InputMethodService, private val prefs: Prefs) {
      * Sends an image as content (what chat apps take for a pasted picture). False when the field
      * says it takes no image of this type, or the app turned it down.
      */
-    fun commitImage(uri: android.net.Uri, mime: String): Boolean {
+    fun commitImage(uri: android.net.Uri, mime: String): Boolean { dirty();
         val info = ime.currentInputEditorInfo ?: return false
         val ic = ic ?: return false
         val accepted = EditorInfoCompat.getContentMimeTypes(info)
@@ -53,15 +53,34 @@ class Editor(private val ime: InputMethodService, private val prefs: Prefs) {
     /** 选择模式 of the edit panel: caret moves extend the selection. */
     var selectMode = false
 
-    fun onSelection(start: Int, end: Int) { selStart = start; selEnd = end }
+    fun onSelection(start: Int, end: Int) { selStart = start; selEnd = end; dirty() }
 
     /** Drops the selection to a caret at its end. */
-    fun collapseSelection() { ic?.setSelection(selEnd, selEnd) }
+    fun collapseSelection() { dirty(); ic?.setSelection(selEnd, selEnd) }
 
     /** A new field: nothing to undo, nothing selected on purpose. */
-    fun reset() { history.clear(); selectMode = false; charLog.clear(); deletedRun.clear() }
+    fun reset() { dirty(); history.clear(); selectMode = false; charLog.clear(); deletedRun.clear() }
 
-    fun textBefore(n: Int) = ic?.getTextBeforeCursor(n, 0)?.toString().orEmpty()
+    /**
+     * The text before the caret. Each read is a call into the app (a round trip to another
+     * process), and one key asks several times; what was read is kept until the keyboard changes
+     * the field or the selection moves.
+     */
+    fun textBefore(n: Int): String {
+        if (n <= 0) return ""
+        val c = beforeCache
+        if (c != null && (n <= beforeAsked || c.length < beforeAsked)) return if (c.length <= n) c else c.substring(c.length - n)
+        val ask = maxOf(n, 64)
+        val t = ic?.getTextBeforeCursor(ask, 0)?.toString() ?: return ""
+        beforeCache = t; beforeAsked = ask
+        return if (t.length <= n) t else t.substring(t.length - n)
+    }
+    private var beforeCache: String? = null
+    private var beforeAsked = 0
+    /** Read now, not kept: for reads in the middle of a change (what was read would be stale right after). */
+    private fun raw(n: Int) = ic?.getTextBeforeCursor(n, 0)?.toString().orEmpty()
+    /** The field is about to change (or did): what was read of it is read again. */
+    fun dirty() { beforeCache = null }
     fun textAfter(n: Int) = ic?.getTextAfterCursor(n, 0)?.toString().orEmpty()
     fun selectedText(): String? = ic?.getSelectedText(0)?.toString()
 
@@ -80,7 +99,7 @@ class Editor(private val ime: InputMethodService, private val prefs: Prefs) {
      * Types [text]: commits it (pairing brackets when [pairable]) and records it for undo.
      * [syllables] are the pinyin that produced its Chinese characters (for 删除后联想).
      */
-    fun type(text: String, pairable: Boolean = true, syllables: List<String>? = null, source: TypingStats.Source = TypingStats.Source.TYPED) {
+    fun type(text: String, pairable: Boolean = true, syllables: List<String>? = null, source: TypingStats.Source = TypingStats.Source.TYPED) { dirty();
         val tail = commit(text, pairable, syllables, source) ?: return
         history.push(EditHistory.Op.Insert(tail.first, tail.second))
     }
@@ -89,7 +108,7 @@ class Editor(private val ime: InputMethodService, private val prefs: Prefs) {
      * Commits [text] without recording it; `‸` marks where the caret should land. Returns what
      * went in before and after the caret, or null when nothing did.
      */
-    fun commit(text: String, pairable: Boolean = true, syllables: List<String>? = null, source: TypingStats.Source = TypingStats.Source.TYPED): Pair<String, String>? {
+    fun commit(text: String, pairable: Boolean = true, syllables: List<String>? = null, source: TypingStats.Source = TypingStats.Source.TYPED): Pair<String, String>? { dirty();
         val ic = ic ?: return null
         logChars(text.replace("‸", ""), syllables)
         var t = text
@@ -121,7 +140,7 @@ class Editor(private val ime: InputMethodService, private val prefs: Prefs) {
     }
 
     /** Replaces the whole field (or the selection) with [text], undoable. */
-    fun replace(text: String, wholeField: Boolean) {
+    fun replace(text: String, wholeField: Boolean) { dirty();
         val ic = ic ?: return
         ic.beginBatchEdit()
         if (wholeField) {
@@ -136,7 +155,7 @@ class Editor(private val ime: InputMethodService, private val prefs: Prefs) {
     }
 
     /** Puts [text] after the selection (or at the caret), leaving the selection's text alone. */
-    fun insertAfterSelection(text: String) {
+    fun insertAfterSelection(text: String) { dirty();
         val ic = ic ?: return
         ic.beginBatchEdit()
         selection()?.let { ic.setSelection(it.second, it.second) }
@@ -147,12 +166,12 @@ class Editor(private val ime: InputMethodService, private val prefs: Prefs) {
     }
 
     /** Shows [text] as composing text (replaced by the next compose or commit). */
-    fun compose(text: String) { ic?.setComposingText(text, 1) }
+    fun compose(text: String) { dirty(); ic?.setComposingText(text, 1) }
 
-    fun finishComposingText() { ic?.finishComposingText() }
+    fun finishComposingText() { dirty(); ic?.finishComposingText() }
 
     /** Replaces the composing preview with a finished sentence, after deleting [deleteBefore] characters. */
-    fun commitVoice(deleteBefore: Int, text: String) {
+    fun commitVoice(deleteBefore: Int, text: String) { dirty();
         val ic = ic ?: return
         ic.setComposingText("", 1)
         ic.beginBatchEdit()
@@ -164,15 +183,15 @@ class Editor(private val ime: InputMethodService, private val prefs: Prefs) {
     }
 
     /** Deletes [text] when it is right before the caret. */
-    fun deleteIfBefore(text: String) {
+    fun deleteIfBefore(text: String) { dirty();
         val ic = ic ?: return
-        if (text.isNotEmpty() && textBefore(text.length) == text) ic.deleteSurroundingText(text.length, 0)
+        if (text.isNotEmpty() && raw(text.length) == text) ic.deleteSurroundingText(text.length, 0)
     }
 
     /** Deletes [before] characters, then types [text]: one step for undo. */
-    fun replaceBefore(before: Int, text: String) {
+    fun replaceBefore(before: Int, text: String) { dirty();
         val ic = ic ?: return
-        val old = textBefore(before)
+        val old = raw(before)
         ic.beginBatchEdit()
         // where a plain delete does not reach the page (Samsung Notes), the characters are selected and replaced
         val et = if (app in stubborn) ic.getExtractedText(ExtractedTextRequest(), 0) else null
@@ -193,7 +212,7 @@ class Editor(private val ime: InputMethodService, private val prefs: Prefs) {
      * which every editor handles. A few apps take a delete into the text they show the keyboard
      * but never onto the page ([stubborn]): there the character is selected and replaced instead.
      */
-    fun deleteBackward(): Boolean {
+    fun deleteBackward(): Boolean { dirty();
         val ic = ic ?: return false
         val info = ime.currentInputEditorInfo
         if (info?.inputType == InputType.TYPE_NULL) { ime.sendDownUpKeyEvents(KeyEvent.KEYCODE_DEL); return true }
@@ -251,7 +270,7 @@ class Editor(private val ime: InputMethodService, private val prefs: Prefs) {
     }
 
     /** 上滑清空: the whole field, undoable. Returns false when there was nothing to clear. */
-    fun clearAll(): Boolean {
+    fun clearAll(): Boolean { dirty();
         val ic = ic ?: return false
         val et = ic.getExtractedText(ExtractedTextRequest(), 0)
         val text = et?.text?.toString()
@@ -273,7 +292,7 @@ class Editor(private val ime: InputMethodService, private val prefs: Prefs) {
     }
 
     /** 下滑撤销: undoes the keyboard's own last edit, or asks the app (Ctrl+Z) when there is none. */
-    fun undo() {
+    fun undo() { dirty();
         val ic = ic ?: return
         when (val op = history.pop()) {
             is EditHistory.Op.Insert -> {
@@ -299,7 +318,7 @@ class Editor(private val ime: InputMethodService, private val prefs: Prefs) {
 
     private fun ctrlZ() = sendKey(KeyEvent.KEYCODE_Z, KeyEvent.META_CTRL_ON)
 
-    fun performEnter() {
+    fun performEnter() { dirty();
         val ic = ic ?: return
         val info = ime.currentInputEditorInfo
         val action = (info?.imeOptions ?: 0) and EditorInfo.IME_MASK_ACTION
@@ -319,7 +338,7 @@ class Editor(private val ime: InputMethodService, private val prefs: Prefs) {
         else -> "回车"
     }
 
-    fun contextMenu(id: Int) = ic?.performContextMenuAction(id)
+    fun contextMenu(id: Int)  { dirty(); ic?.performContextMenuAction(id) }
 
     /** The field is a password: nothing is copied out of it. */
     var secret = false
@@ -351,7 +370,7 @@ class Editor(private val ime: InputMethodService, private val prefs: Prefs) {
 
     // ---- the caret ----
 
-    fun sendKey(code: Int, meta: Int = 0) {
+    fun sendKey(code: Int, meta: Int = 0) { dirty();
         val ic = ic ?: return
         val t = SystemClock.uptimeMillis()
         ic.sendKeyEvent(KeyEvent(t, t, KeyEvent.ACTION_DOWN, code, 0, meta))
@@ -361,7 +380,7 @@ class Editor(private val ime: InputMethodService, private val prefs: Prefs) {
     /** Shift for caret keys while selecting. */
     fun shiftMeta() = if (selectMode) KeyEvent.META_SHIFT_ON else 0
 
-    fun moveBy(n: Int) {
+    fun moveBy(n: Int) { dirty();
         val ic = ic ?: return
         val sel = selection()
         if (sel != null) {
@@ -378,7 +397,7 @@ class Editor(private val ime: InputMethodService, private val prefs: Prefs) {
      * stops there: arrow keys sent past the edge would move the focus to other parts of the app.
      * In selection mode the moving end of the selection is extended. Returns false at an edge.
      */
-    fun caretStep(code: Int): Boolean {
+    fun caretStep(code: Int): Boolean { dirty();
         val ic = ic ?: return false
         val et = ic.getExtractedText(ExtractedTextRequest(), 0)
         val text = et?.text?.toString()
@@ -409,7 +428,7 @@ class Editor(private val ime: InputMethodService, private val prefs: Prefs) {
     }
 
     /** 学术键盘 ⇥: to the next empty slot — (), {}, [] — or past the next separator. */
-    fun nextSlot() {
+    fun nextSlot() { dirty();
         val after = ic?.getTextAfterCursor(400, 0)?.toString() ?: return
         val m = SLOT.find(after)
         val off = if (m != null) m.range.first + (if (m.value.endsWith(" ")) m.value.length else 1)

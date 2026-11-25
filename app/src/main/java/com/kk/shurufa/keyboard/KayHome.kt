@@ -324,10 +324,17 @@ class KayHome(context: Context, prefs: Prefs) : KbView(context, prefs) {
             val text = bubble.substring(0, shown)
             tp.textAlign = Paint.Align.LEFT; tp.textSize = sp(Ui.SMALL + 1f); tp.typeface = Ui.regular; tp.color = t.ink
             val maxW = (area.width() - dp(16f)).toInt().coerceAtLeast(1)
-            val full = StaticLayout.Builder.obtain(bubble, 0, bubble.length, tp, maxW).setMaxLines(4).setEllipsize(TextUtils.TruncateAt.END).build()
-            var lw = 0f
-            for (i in 0 until full.lineCount) lw = maxOf(lw, full.getLineWidth(i))
-            val lay = StaticLayout.Builder.obtain(text, 0, text.length, tp, maxW).setMaxLines(4).setEllipsize(TextUtils.TruncateAt.END).build()
+            // laid out once per bubble (its size) and once per character that comes out, not per frame
+            if (fullFor != bubble || fullW != maxW) {
+                fullFor = bubble; fullW = maxW
+                fullLay = StaticLayout.Builder.obtain(bubble, 0, bubble.length, tp, maxW).setMaxLines(4).setEllipsize(TextUtils.TruncateAt.END).build()
+                fullLineW = (0 until fullLay!!.lineCount).maxOfOrNull { fullLay!!.getLineWidth(it) } ?: 0f
+                partFor = -1
+            }
+            val full = fullLay!!
+            val lw = fullLineW
+            if (partFor != shown) { partFor = shown; partLay = StaticLayout.Builder.obtain(text, 0, text.length, tp, maxW).setMaxLines(4).setEllipsize(TextUtils.TruncateAt.END).build() }
+            val lay = partLay!!
             val bw = lw + dp(20f); val bh = full.height + dp(12f)
             val fade = ((bubbleUntil - now) / 260f).coerceIn(0f, 1f)
             val pop = Motion.POP.getInterpolation(((now - bubblePop) / 220f).coerceIn(0f, 1f))
@@ -340,8 +347,8 @@ class KayHome(context: Context, prefs: Prefs) : KbView(context, prefs) {
             bg.color = t.surface; bg.alpha = (255 * fade * pop.coerceAtMost(1f)).toInt()
             r.set(bx, by, bx + bw, by + bh)
             c.drawRoundRect(r, dp(12f), dp(12f), bg)
-            val path = Path().apply { moveTo(tailX - dp(5f), r.bottom - 0.5f); lineTo(tailX, r.bottom + dp(6f)); lineTo(tailX + dp(5f), r.bottom - 0.5f); close() }
-            c.drawPath(path, bg)
+            tail.rewind(); tail.moveTo(tailX - dp(5f), r.bottom - 0.5f); tail.lineTo(tailX, r.bottom + dp(6f)); tail.lineTo(tailX + dp(5f), r.bottom - 0.5f); tail.close()
+            c.drawPath(tail, bg)
             tp.alpha = (255 * fade).toInt()
             c.translate(bx + dp(10f), by + dp(6f)); lay.draw(c)
             c.restore()
@@ -352,6 +359,9 @@ class KayHome(context: Context, prefs: Prefs) : KbView(context, prefs) {
         if (moving) postInvalidateOnAnimation() else invalidateIn(33L)
     }
     private var turned = false
+    private var fullFor = ""; private var fullW = 0; private var fullLay: StaticLayout? = null; private var fullLineW = 0f
+    private var partFor = -1; private var partLay: StaticLayout? = null
+    private val tail = Path()
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(e: MotionEvent): Boolean {

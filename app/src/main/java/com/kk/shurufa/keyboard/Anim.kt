@@ -49,7 +49,10 @@ object Motion {
     fun on(prefs: Prefs): Boolean = prefs.animations && ValueAnimator.areAnimatorsEnabled()
 
     /** [ms] scaled by the user's speed and the system's animator scale, or 0 when nothing should move. */
-    fun dur(prefs: Prefs, ms: Long): Long = if (on(prefs)) (ms * prefs.animSpeed * ValueAnimator.getDurationScale()).toLong() else 0L
+    fun dur(prefs: Prefs, ms: Long): Long = if (on(prefs)) (ms * prefs.animSpeed * systemScale()).toLong() else 0L
+
+    /** The system's animator duration scale (Android 13+ says it; before, an animator scale of 0 is caught by [on]). */
+    private fun systemScale(): Float = if (android.os.Build.VERSION.SDK_INT >= 33) ValueAnimator.getDurationScale() else 1f
 
     /** The time every animation of one frame agrees on. */
     fun now(): Long = AnimationUtils.currentAnimationTimeMillis()

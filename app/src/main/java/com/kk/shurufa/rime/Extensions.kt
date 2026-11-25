@@ -206,7 +206,7 @@ object ImportedDicts {
         fun parse(s: String): List<Entry> {
             val raw = ArrayList<Triple<String, String?, Int?>>()
             for (line0 in s.lineSequence()) {
-                val line = line0.trim().removePrefix("﻿")
+                val line = line0.trim().removePrefix("\uFEFF")
                 if (line.isEmpty() || line.startsWith("#") || line == "---" || line == "...") continue
                 if (line.contains(':') && !line.contains('\t')) continue  // a yaml header line
                 val parts = line.split('\t').map { it.trim() }.filter { it.isNotEmpty() }

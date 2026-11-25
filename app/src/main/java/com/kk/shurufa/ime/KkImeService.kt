@@ -1313,6 +1313,8 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     }
 
     override fun onOutput(key: Key, output: Output) {
+        // what was read of the field lasts for one key at most (the app may have changed it since)
+        editor.dirty()
         corrected = null
         dropGreeting()
         if (panel == Panel.MATH) { mathOut(output); return }
@@ -1430,6 +1432,8 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     }
 
     override fun onFunction(key: Key) {
+        // what was read of the field lasts for one key at most (the app may have changed it since)
+        editor.dirty()
         dropGreeting()
         when (key.fn) {
             "backspace" -> {
@@ -1685,6 +1689,8 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     }
 
     override fun onCandidate(index: Int) {
+        // what was read of the field lasts for one key at most (the app may have changed it since)
+        editor.dirty()
         if (index < 0 && sink == Sink.AI && !composing) { runInstruction(); return }
         if (index < 0 && sink == Sink.EMOJI && !composing) { searchResults.getOrNull(-1 - index)?.let { emoji.type(it) }; return }
         if (index < 0 && cloudShown.isNotEmpty()) {

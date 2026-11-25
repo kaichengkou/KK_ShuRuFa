@@ -40,7 +40,7 @@ class PanguTest {
         android.inputmethodservice.InputMethodService::class.java.getDeclaredField("mStartedInputConnection")
             .apply { isAccessible = true }.set(ime, field)
         ime.onStartInputView(EditorInfo().apply { inputType = InputType.TYPE_CLASS_TEXT; packageName = "test.app" }, false)
-        field.commitText(start, 1)
+        field.commitText(start, 1); ime.onUpdateSelection(0, 0, start.length, start.length, -1, -1)
         for (ch in type) {
             // a digit is a flick, not a key's main character
             val k = if (ch.isDigit()) Key(main = Output.of("x")) else Key(main = Output.of(ch.toString()))

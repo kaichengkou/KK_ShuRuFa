@@ -11,7 +11,8 @@ import java.io.File
  * three months, so what is no longer written fades; at most a few thousand pairs are kept. Only
  * on this phone.
  */
-class ZhMemory(private val context: Context) {
+class ZhMemory(context: Context) {
+    private val context: Context = context.applicationContext
     private class Entry(var count: Float, var day: Int)
 
     /** context → (what followed → how often, and when last). */

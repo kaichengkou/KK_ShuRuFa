@@ -140,7 +140,7 @@ class AutocorrectTest {
         type("t"); while (predictions().isEmpty() && System.currentTimeMillis() < until) { idle(); back(); type("t") }
         back()
         // auto-capitalisation is on at the start: type in lowercase after a word
-        field.text.clear(); field.text.append("ok "); Selection.setSelection(field.text, 3)
+        field.text.clear(); field.text.append("ok "); Selection.setSelection(field.text, 3); ime.onUpdateSelection(0, 0, 3, 3, -1, -1)
         type("teh ")
         assertEquals("ok the ", field.text.toString())
         assertEquals("the word as typed comes first", "teh", predictions().first())

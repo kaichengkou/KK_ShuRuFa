@@ -110,18 +110,18 @@ class DetailsTest {
         fun idle() { Thread.sleep(20); shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(20)) }
         fun type(s: String) { for (ch in s) { if (ch == ' ') ime.onFunction(Key(fn = "space")) else { val k = Key(main = Output.of(ch.toString())); ime.onOutput(k, k.main!!) }; idle() } }
         fun back() { ime.onFunction(Key(fn = "backspace")); idle() }
-        field.text.append("ok"); Selection.setSelection(field.text, 2)
+        field.text.append("ok"); Selection.setSelection(field.text, 2); ime.onUpdateSelection(0, 0, 2, 2, -1, -1)
         // 双击空格 made a full stop: backspace gives the two spaces back
         type("  ")
         assertEquals("ok. ", field.text.toString())
         back(); assertEquals("ok  ", field.text.toString())
         back(); assertEquals("ok ", field.text.toString())
         // 3, then Chinese: the comma was a sentence's, full-width again
-        field.text.clear(); field.text.append("共3,"); Selection.setSelection(field.text, 3)
+        field.text.clear(); field.text.append("共3,"); Selection.setSelection(field.text, 3); ime.onUpdateSelection(0, 0, 3, 3, -1, -1)
         KkImeService::class.java.getDeclaredField("halfAfterDigit").apply { isAccessible = true }.set(ime, "," to "，")
         KkImeService::class.java.getDeclaredMethod("restoreFullWidth", String::class.java).apply { isAccessible = true }.invoke(ime, "好的")
         assertEquals("共3，", field.text.toString())
-        field.text.clear(); field.text.append("ok "); Selection.setSelection(field.text, 3)
+        field.text.clear(); field.text.append("ok "); Selection.setSelection(field.text, 3); ime.onUpdateSelection(0, 0, 3, 3, -1, -1)
         // 双击句号 made an ellipsis: backspace gives the two periods back
         type("..")
         assertEquals("ok …", field.text.toString())
