@@ -95,6 +95,8 @@ class Prefs(context: Context) {
     val zhEmoji get() = b(ZH_EMOJI, true)
     val zhPreeditInline get() = b(ZH_PREEDIT_INLINE, false)
     val zhPredict get() = b(ZH_PREDICT, true)
+    /** 联想记忆: the associations learn what this person writes after what. */
+    val zhPredictLearn get() = b(ZH_PREDICT_LEARN, true)
     /** 临时模式: nothing typed is learned or recorded, and the keyboard wears other colors. Kept in the state, not the settings. */
     val incognito get() = state.getBoolean(INCOGNITO, false)
     /** 俄语联想: completions and next words for languages written in words. */
@@ -324,6 +326,7 @@ class Prefs(context: Context) {
         const val ZH_EMOJI = "zh_emoji"
         const val ZH_PREEDIT_INLINE = "zh_preedit_inline"
         const val ZH_PREDICT = "zh_predict"
+        const val ZH_PREDICT_LEARN = "zh_predict_learn"
         const val INCOGNITO = "incognito"
         const val WORD_PREDICT = "word_predict"
         const val WORD_LEARN = "word_learn"

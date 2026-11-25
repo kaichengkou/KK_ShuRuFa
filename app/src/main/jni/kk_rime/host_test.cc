@@ -93,6 +93,39 @@ int main(int argc, char** argv) {
              (long long)std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - lt0).count());
       continue;
     }
+    if (strncmp(seq, "@teach=", 7) == 0) {  // @teach=kaichengkou:开成口 — the keyboard's own way of learning (kk_rime.cc learn)
+      std::string arg(seq + 7); size_t c = arg.find(':');
+      std::string input = arg.substr(0, c), text = arg.substr(c + 1);
+      RimeSessionId t = api->create_session();
+      api->set_option(t, "_kk_no_learning", False);
+      bool ok = false;
+      if (api->set_input(t, input.c_str())) {
+        std::string done;
+        for (int step = 0; step < 8 && !ok; ++step) {
+          const std::string rest = text.substr(std::min(done.size(), text.size()));
+          int pick = -1; size_t best = 0;
+          RimeCandidateListIterator it = {0};
+          if (api->candidate_list_begin(t, &it)) {
+            for (int i = 0; i < 300 && api->candidate_list_next(&it); ++i) {
+              const std::string cc = it.candidate.text ? it.candidate.text : "";
+              if (cc.empty() || rest.compare(0, cc.size(), cc) != 0) continue;
+              if (cc.size() > best) { best = cc.size(); pick = it.index; }
+              if (cc.size() == rest.size()) break;
+            }
+            api->candidate_list_end(&it);
+          }
+          if (pick < 0) break;
+          api->select_candidate(t, pick);
+          done += rest.substr(0, best);
+          RIME_STRUCT(RimeCommit, cm);
+          if (api->get_commit(t, &cm)) { ok = cm.text && text == cm.text; api->free_commit(&cm); break; }
+        }
+      }
+      api->clear_composition(t);
+      api->destroy_session(t);
+      printf("  teach %s -> %d\n", arg.c_str(), ok);
+      continue;
+    }
     if (strncmp(seq, "@many=", 6) == 0) {  // @many=300:zhongguorenmin — time typing it and listing that many candidates
       std::string arg(seq + 6); size_t c = arg.find(':');
       int n = atoi(arg.substr(0, c).c_str());

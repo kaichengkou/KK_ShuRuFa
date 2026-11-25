@@ -77,6 +77,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
 
     private lateinit var repo: LayoutRepo
     private lateinit var predictor: Predictor
+    private lateinit var zhMemory: ZhMemory
     private lateinit var zh: ZhComposer
     private val translateService by lazy { TranslateService(prefs) }
     private lateinit var emoji: EmojiFeature
@@ -197,7 +198,9 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         com.kk.shurufa.keyboard.FrameRate.window = window.window
         haptics = Haptics(this, prefs)
         repo = LayoutRepo(this, overrides = { KeyOverrides.load(prefs, it) })
-        predictor = Predictor(this)
+        zhMemory = ZhMemory(this).also { if (prefs.zhPredictLearn) it.load() }
+        predictor = Predictor(this, zhMemory)
+        learning.onTaught = { i -> if (prefs.zhPredictLearn && i.before.isNotEmpty()) zhMemory.learn(i.before, i.text) }
         zh = ZhComposer(this, prefs).also { it.preload() }
         if (prefs.zhPredict) predictor.load()
         if (prefs.packPoetry) predictor.loadPoetry()
@@ -254,6 +257,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         when (key) {
             Prefs.ZH_EMOJI, Prefs.ZH_TRAD -> applyRimeOptions()
             Prefs.ZH_PREDICT -> if (prefs.zhPredict) predictor.load() else { predictions = emptyList(); syncBar() }
+            Prefs.ZH_PREDICT_LEARN -> if (prefs.zhPredictLearn) zhMemory.load()
             Prefs.ZH_CORRECTION, Prefs.GRAMMAR -> RimeEngine.redeploy(this)
             Prefs.TOUCH_ADAPT -> if (built) keyboard.touch = if (prefs.touchAdapt) touchModel else null
             Prefs.PACK_POETRY -> { if (prefs.packPoetry) predictor.loadPoetry() else predictor.dropPoetry(); RimeEngine.redeploy(this) }
@@ -548,6 +552,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         com.kk.shurufa.keyboard.FrameRate.idle()
         stopBackgroundWork()
         wordPredictors.values.forEach { it.save() }
+        zhMemory.save()
         Background.run { TypingStats.get(this).save() }
     }
 
@@ -1188,7 +1193,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
             }
             zh.reset()
             // learned later if it stays (a slip deleted right away teaches nothing)
-            if (learnHere && commit.any { isCjk(it) }) learning.committed(syl.joinToString(""), commit)
+            if (learnHere && commit.any { isCjk(it) }) learning.committed(syl.joinToString(""), commit, before = editor.textBefore(8))
             restoreFullWidth(out)
             val spaced = pangu(out)
             editor.type(spaced, pairable = false, syllables = if (out == commit) syl else null)
@@ -1662,6 +1667,8 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
             // an association: commit it and suggest what follows
             val word = predictions.getOrNull(-1 - index) ?: return
             val run = editor.deletedRun.toList()
+            // 联想记忆: an association picked is what this person writes after this
+            if (learnHere) learning.committed("", word, before = editor.textBefore(8))
             editor.type(pangu(word), pairable = false, syllables = run.takeIf { it.size == word.count { c -> isCjk(c) } })
             predictions = predictor.suggest(editor.textBefore(20).ifEmpty { word })
             predictionLabel = ""

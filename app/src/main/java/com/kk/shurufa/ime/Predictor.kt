@@ -8,7 +8,7 @@ import android.content.Context
  * sorted UTF-8 files searched in place: nothing is parsed into objects, so they cost little
  * more memory than their bytes.
  */
-class Predictor(private val context: Context) {
+class Predictor(private val context: Context, private val memory: ZhMemory? = null) {
     @Volatile private var words: TsvIndex? = null
     @Volatile private var poetry: TsvIndex? = null
 
@@ -44,6 +44,8 @@ class Predictor(private val context: Context) {
         nextLine(before)?.let { out += it }
         val han = before.takeLastWhile { Character.UnicodeScript.of(it.code) == Character.UnicodeScript.HAN }
         if (han.isEmpty()) return out.toList()
+        // what this person writes after this, before what the dictionary says
+        memory?.suggest(han)?.forEach { out += it }
         for (len in minOf(4, han.length) downTo 1) {
             lookup(han.takeLast(len)).forEach { out += it }
             if (out.size >= 12) break

@@ -16,16 +16,20 @@ import com.kk.shurufa.rime.RimeBridge
  * learned at the time.
  */
 class DeferredLearning(private val delayMs: Long = DELAY_MS) {
-    class Item(val input: String, val text: String, val at: Long)
+    /** [before]: the text just before it in the field, for 联想记忆; [input] empty for an association picked (nothing for Rime). */
+    class Item(val input: String, val text: String, val at: Long, val before: String = "")
+
+    /** A commit that stayed, as it is taught (on the main thread). */
+    var onTaught: ((Item) -> Unit)? = null
 
     private val items = ArrayDeque<Item>()
     private val main = Handler(Looper.getMainLooper())
     private val due = Runnable { flush(all = false) }
 
     /** [text] was committed from [input] (the pinyin syllables behind it, joined). */
-    fun committed(input: String, text: String) {
-        if (input.isEmpty() || text.isEmpty()) return
-        items.addLast(Item(input, text, SystemClock.uptimeMillis()))
+    fun committed(input: String, text: String, before: String = "") {
+        if (text.isEmpty() || (input.isEmpty() && before.isEmpty())) return
+        items.addLast(Item(input, text, SystemClock.uptimeMillis(), before))
         while (items.size > 30) teach(listOf(items.removeFirst()))
         main.removeCallbacks(due)
         main.postDelayed(due, delayMs)
@@ -60,7 +64,11 @@ class DeferredLearning(private val delayMs: Long = DELAY_MS) {
     }
 
     /** On Rime's own thread, after any deploy in progress; nothing while the engine is not running. */
-    private fun teach(list: List<Item>) = com.kk.shurufa.rime.RimeEngine.whenReady { for (i in list) runCatching { RimeBridge.learn(i.input, i.text) } }
+    private fun teach(list: List<Item>) {
+        list.forEach { onTaught?.invoke(it) }
+        val rime = list.filter { it.input.isNotEmpty() }
+        if (rime.isNotEmpty()) com.kk.shurufa.rime.RimeEngine.whenReady { for (i in rime) runCatching { RimeBridge.learn(i.input, i.text) } }
+    }
 
     val pending get() = items.size
 

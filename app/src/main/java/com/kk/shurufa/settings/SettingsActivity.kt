@@ -829,6 +829,13 @@ private fun ChinesePage(prefs: Prefs, openDict: () -> Unit) {
         Toggle(prefs, Prefs.ZH_TRAD, "输出繁体", null, false)
         Toggle(prefs, Prefs.ZH_EMOJI, "候选里带 emoji", "黄脸表情排在原位，其他 emoji 排在前五个词之后", true)
         Toggle(prefs, Prefs.ZH_PREDICT, "联想", "上屏后在候选栏推荐常接的词", true)
+        Toggle(prefs, Prefs.ZH_PREDICT_LEARN, "联想记住我的习惯", "记住你在一个词后面常接什么（上屏后停留几秒、没被删掉才算），下次联想时排在最前；点选的联想词也算。每三个月减半，只存在本机，临时模式和密码框里不记", true)
+        run {
+            var cleared by remember { mutableStateOf(false) }
+            TextButton(enabled = !cleared, onClick = { com.kk.shurufa.ime.ZhMemory.clearAll(ctx); cleared = true }) {
+                Text(if (cleared) "已清除" else "清除联想记住的词")
+            }
+        }
         Toggle(prefs, Prefs.ZH_CORRECTION, "按键纠错", "按错相邻键、字母打反也能出正确的词；缩写和名字不纠。切换后重新部署", true)
         Toggle(prefs, Prefs.PANGU, "中英文之间自动加空格", "盘古之白：汉字和英文字母、数字相邻时自动隔开，如「用 iPhone 拍了 3 张」", false)
         Toggle(prefs, Prefs.TONE_FILTER, "声调筛选", "展开候选后按声调筛选，多个字时可以逐字挑声调", true)
