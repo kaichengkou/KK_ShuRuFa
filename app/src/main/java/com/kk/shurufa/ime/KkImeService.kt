@@ -457,6 +457,10 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     override val isZh: Boolean get() = layout(curLang).engine == "rime"
     private val composing get() = isZh && RimeEngine.ready && RimeBridge.input().isNotEmpty()
 
+    /** Passwords, web and mail addresses are written in Latin letters: English if it is there, else the first such language. */
+    private fun latinLanguage(): String = prefs.languages.firstOrNull { it == "en" }
+        ?: prefs.languages.firstOrNull { layout(it).engine != "rime" && it != "ru" } ?: "en"
+
     override fun onStartInputView(info: EditorInfo, restarting: Boolean) {
         super.onStartInputView(info, restarting)
         // Rime's session can have been made anew (a backup's sync): its options with it
@@ -471,13 +475,24 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         if (prefs.perAppLanguage && !restarting) prefs.appLanguage(info.packageName ?: "")?.takeIf { it in prefs.languages }?.let { lang = it }
         val isPassword = cls == InputType.TYPE_CLASS_TEXT && variation in PASSWORDS
         val isAddress = cls == InputType.TYPE_CLASS_TEXT && variation in ADDRESSES
-        if ((isPassword || isAddress) && isZh) tempLang = prefs.languages.firstOrNull { layout(it).engine != "rime" } ?: "en"
+        if ((isPassword || isAddress) && (isZh || curLang == "ru")) tempLang = latinLanguage()
         // 打字数据: never from passwords, addresses or fields that ask not to be learned from
         applyPrivacy(info)
         autoSpaced = false
+        // the field says what goes in it: numbers get the number pad, with the marks that field takes
+        fieldOps = when (cls) {
+            InputType.TYPE_CLASS_PHONE -> PHONE_OPS
+            InputType.TYPE_CLASS_DATETIME -> DATE_OPS
+            InputType.TYPE_CLASS_NUMBER -> buildList {
+                if (info.inputType and InputType.TYPE_NUMBER_FLAG_SIGNED != 0) add("-")
+                if (info.inputType and InputType.TYPE_NUMBER_FLAG_DECIMAL != 0) { add("."); add(",") }
+                if (variation != InputType.TYPE_NUMBER_VARIATION_PASSWORD) addAll(listOf("-", "/", ":", " ").filter { it !in this })
+            }.ifEmpty { listOf(" ") }
+            else -> null
+        }
         panel = when {
-            cls == InputType.TYPE_CLASS_PHONE -> Panel.PHONE
-            (cls == InputType.TYPE_CLASS_NUMBER || cls == InputType.TYPE_CLASS_DATETIME) && prefs.numberFieldMath -> { mathTab = "basic"; numPanel() }
+            cls == InputType.TYPE_CLASS_PHONE -> Panel.NUM
+            (cls == InputType.TYPE_CLASS_NUMBER || cls == InputType.TYPE_CLASS_DATETIME) && prefs.numberFieldMath -> Panel.NUM
             else -> Panel.LETTERS
         }
         shift = 0; autoShift = false
@@ -706,7 +721,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
                 refreshMath(slide = 0)
                 content.addView(mathPanel, fixed)
             }
-            Panel.NUM -> { numPad.keys.setRows(layout("num").rows); numPad.setItems(NUM_OPS); content.addView(numPad, fixed); showMoneyChip() }
+            Panel.NUM -> { numPad.keys.setRows(layout("num").rows); numPad.setItems(numOps.map { if (it == " ") "空格" else it }); content.addView(numPad, fixed); showMoneyChip() }
             Panel.CURSOR -> { editor.refreshSelection(); syncEditPanel(); content.addView(editPanel, fixed) }
             Panel.SYMBOLS -> { refreshSymbols(); content.addView(symbolPanel, fixed) }
             Panel.CLIPBOARD -> { clipboard.refresh(); content.addView(clipPanel, fixed) }
@@ -1025,6 +1040,10 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     /** 简易/科学: !#1 and number fields open the number keyboard in the mode used last. */
     private fun numPanel() = if (prefs.numMode == "sci") Panel.MATH else Panel.NUM
 
+    /** The marks of the number pad's column for the field: a phone number's, a date's, a number's; null in a text field (the arithmetic ones). */
+    private var fieldOps: List<String>? = null
+    private val numOps get() = fieldOps ?: NUM_OPS
+
     private fun showCalcResult() {
         if (!prefs.mathCalc) return
         val line = editor.textBefore(200).substringAfterLast('\n').dropLast(1)
@@ -1035,7 +1054,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         val strip = GridPanel(this, prefs).apply {
             theme = kbTheme; cellStyle = GridPanel.CellStyle.SOFT; columns = 1; textSp = 20f
             cellPadDp = 0f; cellGapDp = prefs.keyGapDp
-            onItem = { i -> NUM_OPS.getOrNull(i)?.let { onNumOp(it) } }
+            onItem = { i -> numOps.getOrNull(i)?.let { onNumOp(it) } }
             onFeedback = { haptics.play(HapticEvent.LETTER) }
         }
         numPad = NumPadView(this, newKeyboard(), strip)
@@ -1050,6 +1069,8 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
 
     /** 大写金额: after a number on the number pad, a chip offers it written out (壹佰贰拾叁元整). */
     private fun showMoneyChip() {
+        // a phone number, a card's digits, a code: no 大写金额 for those
+        if (fieldOps != null) { bar.showMoney(null); return }
         val num = Regex("(\\d{1,16}(?:\\.\\d{1,2})?)$").find(editor.textBefore(24))?.value
         val before = editor.textBefore(26).dropLast(num?.length ?: 0)
         // not the digits of a longer expression's result or a date
@@ -2054,6 +2075,9 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         const val HALF_RETYPE_MS = 4000L
         /** 运算符列 of the standard number pad: five on screen, the rest by scrolling. */
         val NUM_OPS = listOf("+", "−", "×", "÷", "=", "%", "(", ")", "/", ",", "±")
+        /** 电话 fields: what goes in a phone number (and the * and # of a dial pad). */
+        val PHONE_OPS = listOf("+", "-", " ", "*", "#", "(", ")", ",", ";")
+        val DATE_OPS = listOf("-", "/", ":", " ", ".")
         val DIRS = listOf(Dir.UP, Dir.DOWN, Dir.LEFT, Dir.RIGHT)
         const val VOWELS = "аеёиоуыэюя"
         /** Candidates fetched for the bar: more than fit, so a swipe finds more without a pause. */

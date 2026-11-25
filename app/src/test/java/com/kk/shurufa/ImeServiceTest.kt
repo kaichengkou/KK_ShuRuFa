@@ -68,6 +68,28 @@ class ImeServiceTest {
         out.recycle(); b.recycle()
     }
 
+    /** The field says what it takes: phone numbers, card codes and dates get the number pad with their own marks; passwords and addresses get Latin letters. */
+    @Test fun fieldTypes() {
+        val (ime, view) = start("light")
+        fun open(type: Int): Panel {
+            ime.onFinishInputView(true)
+            ime.onStartInputView(EditorInfo().apply { inputType = type; packageName = "test.app" }, false); idle()
+            return ime.panel
+        }
+        fun ops() = (KkImeService::class.java.getDeclaredMethod("getNumOps").apply { isAccessible = true }.invoke(ime) as List<*>)
+        assertEquals(Panel.NUM, open(InputType.TYPE_CLASS_PHONE))
+        assertEquals(listOf("+", "-", " ", "*", "#", "(", ")", ",", ";"), ops())
+        shot(view, "field_phone")
+        assertEquals(Panel.NUM, open(InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD))
+        assertEquals(listOf(" "), ops())
+        assertEquals(Panel.NUM, open(InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL))
+        assertTrue("." in ops())
+        assertEquals(Panel.LETTERS, open(InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI))
+        assertEquals("en", ime.language)
+        assertEquals(Panel.LETTERS, open(InputType.TYPE_CLASS_TEXT))
+        ime.onDestroy()
+    }
+
     /** The two styles at night (and 纸墨 by day), as tuned: for build/screens/theme_*.png. */
     @Test fun themes() {
         val prefs = Prefs(ctx)

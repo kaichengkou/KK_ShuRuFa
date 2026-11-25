@@ -169,7 +169,12 @@ class KayHome(context: Context, prefs: Prefs) : KbView(context, prefs) {
         joking = false
         move(listOf("wiggle", "hop", "roam", "turn", "shake", "dance").random())
         val tier = SharkTalk.POKED[(pokes - 1).coerceAtMost(SharkTalk.POKED.size - 1)]
-        say(if (inThread && rnd.nextInt(10) < 6) SharkTalk.deal(SharkTalk.INTERRUPTED) else SharkTalk.deal(tier), 2800)
+        val l = if (inThread && rnd.nextInt(10) < 6) SharkTalk.deal(SharkTalk.INTERRUPTED) else SharkTalk.deal(tier)
+        // a line and its follow-up: the second goes on after the first
+        val first = l.substringBefore('|'); val then = l.substringAfter('|', "")
+        say(first, if (then.isEmpty()) 2800 else 1000)
+        val n = pokes
+        if (then.isNotEmpty()) postDelayed({ if (isAttachedToWindow && pokes == n) say("$first\n$then", 2800, from = first.length) }, sayTime(first) + 900L)
         onPoke?.invoke()
         quietAgain(6500)
     }
