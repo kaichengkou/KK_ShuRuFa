@@ -117,14 +117,14 @@ data class KbTheme(
                 val ink = Color.parseColor("#ECEEF1")
                 KbTheme(
                     dark = true,
-                    background = Color.parseColor("#121417"),
-                    surface = Color.parseColor("#2A2E34"),
-                    surfacePressed = Color.parseColor("#3B4048"),
+                    background = Color.parseColor("#0E1013"),
+                    surface = Color.parseColor("#2C3138"),
+                    surfacePressed = Color.parseColor("#3F454E"),
                     soft = Colors.alpha(ink, 0x17),
                     softPressed = Colors.alpha(ink, 0x30),
                     ink = ink,
-                    inkSoft = Color.parseColor("#B9BEC6"),
-                    hint = Color.parseColor("#80868F"),
+                    inkSoft = Color.parseColor("#C4C9D0"),
+                    hint = Color.parseColor("#8C929B"),
                     accent = accent,
                     accentPressed = Colors.blend(accent, Color.WHITE, 0.25f),
                     onAccent = Color.parseColor("#0C1013"),
@@ -164,22 +164,22 @@ data class KbTheme(
  * The views add a faint paper grain to its background.
  */
 private fun paper(night: Boolean, accent: Int): KbTheme = if (night) {
-    val ink = Color.parseColor("#ECE5D8")
+    val ink = Color.parseColor("#F3EEE5")
     KbTheme(
         dark = true,
-        background = Color.parseColor("#191816"),
-        surface = Color.parseColor("#2C2A27"),
-        surfacePressed = Color.parseColor("#3C3935"),
+        background = Color.parseColor("#121110"),
+        surface = Color.parseColor("#312E2A"),
+        surfacePressed = Color.parseColor("#45413B"),
         soft = Colors.alpha(ink, 0x16),
         softPressed = Colors.alpha(ink, 0x2E),
         ink = ink,
-        inkSoft = Color.parseColor("#BDB5A8"),
-        hint = Color.parseColor("#877F74"),
+        inkSoft = Color.parseColor("#CDC5B8"),
+        hint = Color.parseColor("#988F83"),
         accent = accent,
         accentPressed = Colors.blend(accent, Color.WHITE, 0.2f),
         onAccent = Color.parseColor("#1A1513"),
         accentSoft = Colors.alpha(accent, 0x30),
-        popup = Color.parseColor("#36332F"),
+        popup = Color.parseColor("#3B3833"),
         shadow = Colors.alpha(Color.BLACK, 0x48),
         divider = Colors.alpha(ink, 0x14),
     )

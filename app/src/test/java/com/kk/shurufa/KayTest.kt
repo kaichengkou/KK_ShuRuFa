@@ -257,6 +257,8 @@ class KayTest {
         ime.onTool("ai"); idle()
         assertEquals("AI", panel())
         shot("kay_flow_1_home")
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(2500))
+        shot("kay_flow_1b_home_talking")
         // 改写: the keyboard comes back, the strip above it holds the field's text
         ime.openStrip("rewrite"); idle()
         assertEquals("LETTERS", panel())
@@ -265,16 +267,15 @@ class KayTest {
         shot("kay_flow_2_rewrite")
         // its list, open
         val strip = feature().strip
-        strip.javaClass.getDeclaredField("picking").apply { isAccessible = true }.set(strip, "menu")
-        strip.requestLayout(); idle()
+        strip.open("opt"); idle()
         shot("kay_flow_3_menu")
         strip.closeLists(); idle()
         // a way picked from the list: 翻译, the text stays
-        strip.onPick?.invoke("menu", "mode:translate"); idle()
+        strip.onPick?.invoke("mode", "mode:translate"); idle()
         assertEquals("translate", feature().mode)
         shot("kay_flow_4_translate")
         // 聊天: what is typed is said to 小K
-        strip.onPick?.invoke("menu", "mode:chat"); idle()
+        strip.onPick?.invoke("mode", "mode:chat"); idle()
         assertEquals("chat", feature().mode)
         assertEquals("", ime.query.toString())
         shot("kay_flow_5_chat")

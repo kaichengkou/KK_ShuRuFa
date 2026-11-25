@@ -107,7 +107,7 @@ class TranslateFeature(private val host: Host, private val service: TranslateSer
         // a rewrite stops with its strip; 小K goes on answering (the conversation keeps it)
         if (mode == "rewrite") ai.cancel()
         rewriting = false
-        handler.removeCallbacks(run)
+        handler.removeCallbacks(run); handler.removeCallbacks(rewriteRun); rewriteFor = ""
         if (!::strip.isInitialized || strip.visibility != View.VISIBLE) return
         strip.closeLists()
         if (Motion.on(prefs)) {
@@ -121,8 +121,8 @@ class TranslateFeature(private val host: Host, private val service: TranslateSer
     /** Another way, from the strip's list: the text stays, the answer goes. */
     private fun switchTo(m: String) {
         if (m == mode) return
-        service.cancel(); ai.cancel(); handler.removeCallbacks(run)
-        mode = m; custom = false
+        service.cancel(); ai.cancel(); handler.removeCallbacks(run); handler.removeCallbacks(rewriteRun)
+        mode = m; custom = false; rewriting = false; rewriteFor = ""
         result = ""; resultFor = ""; answer = ""; status = ""; rewriteBase = null
         if (m == "rewrite" && host.query.isBlank()) {
             val all = host.editor.allText() ?: host.editor.textBefore(4000)
@@ -135,32 +135,36 @@ class TranslateFeature(private val host: Host, private val service: TranslateSer
         host.syncBar()
     }
 
-    // ---- the list at the top left ----
+    // ---- the two lists at the top left: what it does, and how ----
 
-    private fun menuItems(): List<PickList.Item> = when (mode) {
-        "translate" -> TranslateService.LANGS.map { (id, name) -> PickList.Item("to:$id", "译成 $name", if (id == to) "当前" else "") } +
-            (listOf("auto" to "自动识别") + TranslateService.LANGS).map { (id, name) -> PickList.Item("from:$id", "原文：$name", if (id == from) "当前" else "") } +
-            switches()
+    private fun modeItems() = listOf("rewrite" to "改写", "translate" to "翻译", "chat" to "聊天")
+        .map { (m, n) -> PickList.Item("mode:$m", n, if (m == mode) "当前" else "") }
+
+    private fun optItems(): List<PickList.Item> = when (mode) {
+        "translate" -> TranslateService.LANGS.map { (id, name) -> PickList.Item("to:$id", "译成 $name") } +
+            (listOf("auto" to "自动识别") + TranslateService.LANGS).map { (id, name) -> PickList.Item("from:$id", "原文：$name", if (id == from) "当前" else "") }
         "rewrite" -> AiWriter.ACTIONS.filter { it.group == "改写" }.map { PickList.Item("act:${it.id}", it.title) } +
-            PickList.Item("custom", "✎ 我来说怎么改") + switches()
-        else -> listOf(PickList.Item("line", "一言", "今天那句"), PickList.Item("all", "看全部对话"), PickList.Item("clear", "清空对话")) + switches()
+            PickList.Item("custom", "✎ 我来说怎么改") + PickList.Item("copy", "复制结果")
+        else -> listOf(PickList.Item("line", "一言", "今天那句"), PickList.Item("all", "看全部对话"), PickList.Item("copy", "复制回答"), PickList.Item("clear", "清空对话"))
     }
-
-    private fun switches() = listOf("rewrite" to "改写", "translate" to "翻译", "chat" to "聊天")
-        .filter { it.first != mode }.map { (m, n) -> PickList.Item("mode:$m", n, "切换") }
 
     private fun pickMenu(id: String) {
         when {
             id.startsWith("mode:") -> switchTo(id.removePrefix("mode:"))
             id.startsWith("to:") -> { to = id.removePrefix("to:"); prefs.put(Prefs.TRANSLATE_TARGET, to); resultFor = ""; sync() }
             id.startsWith("from:") -> { from = id.removePrefix("from:"); resultFor = ""; sync() }
-            id.startsWith("act:") -> { prefs.put(Prefs.KAY_REWRITE, id.removePrefix("act:")); custom = false; host.haptics.play(HapticEvent.OPTION); rewrite() }
+            id.startsWith("act:") -> {
+                prefs.put(Prefs.KAY_REWRITE, id.removePrefix("act:"))
+                if (custom) { custom = false; host.query.setLength(0); host.query.append(fromField) }
+                host.haptics.play(HapticEvent.OPTION); rewriteFor = ""; sync()
+            }
             id == "custom" -> {
                 // the text stays the field's; what is typed now says how to change it
                 if (!custom) { custom = true; if (fromField.isEmpty()) fromField = host.query.toString(); host.query.setLength(0) }
                 result = ""; rewriteBase = null; status = ""; sync(); host.syncBar()
             }
             id == "line" -> { ai.recallLine(); answer = ai.lastAnswer(); sync() }
+            id == "copy" -> button("copy")
             id == "all" -> ai.showConversation()
             id == "clear" -> { ai.forget(); answer = ""; sync() }
         }
@@ -188,16 +192,18 @@ class TranslateFeature(private val host: Host, private val service: TranslateSer
         val q = host.query.toString()
         val st = strip
         st.mode = mode
-        st.menuItems = menuItems()
+        st.modeItems = modeItems()
+        st.optItems = optItems()
         val aiTarget = Llm.resolve(prefs, prefs.aiProvider)
         when (mode) {
             "translate" -> {
                 val src = if (from == "auto") TranslateService.guess(q) else from
                 if (src == to) to = if (src == "zh") "en" else "zh"
                 val fromName = if (from == "auto") (if (q.isBlank()) "自动" else TranslateService.name(src)) else TranslateService.name(from)
-                st.modeLabel = "翻译 · $fromName → ${TranslateService.name(to)}"
+                st.modeLabel = "翻译"
+                st.optLabel = "$fromName → ${TranslateService.name(to)}"
                 st.showSwap = true
-                st.menuCurrent = "to:$to"
+                st.optCurrent = "to:$to"
                 st.engineName = service.engineName()
                 st.engine = service.engine
                 st.engines = listOf(PickList.Item("mlkit", "离线翻译", "ML Kit")) + aiItems(prefs, Llm.targets(prefs))
@@ -206,61 +212,74 @@ class TranslateFeature(private val host: Host, private val service: TranslateSer
                 if (q.isEmpty()) fromField = ""
                 st.insertable = if (q.isEmpty() && !fromSelection) insertable().first else ""
                 val fresh = resultFor == q
-                st.buttons = if (result.isNotEmpty() && fresh) listOf("commit" to if (fromSelection || fromField.isNotEmpty()) "替换" else "上屏") else emptyList()
+                st.action = if (result.isNotEmpty() && fresh) "commit" to (if (fromSelection || fromField.isNotEmpty()) "替换" else "上屏") else null
                 if (!fresh) { st.result = ""; st.busy = q.isNotBlank() }
                 if (q.isBlank()) st.status = ""
                 if (!fresh && q.isNotBlank()) {
                     handler.removeCallbacks(run)
                     val cached = cache[key(q)]
-                    if (cached != null) { resultFor = q; result = cached; st.result = cached; st.busy = false; st.status = ""; st.buttons = listOf("commit" to if (fromSelection || fromField.isNotEmpty()) "替换" else "上屏") }
+                    if (cached != null) { resultFor = q; result = cached; st.result = cached; st.busy = false; st.status = ""; st.action = "commit" to (if (fromSelection || fromField.isNotEmpty()) "替换" else "上屏") }
                     else handler.postDelayed(run, delayFor(q))
                 }
             }
             "rewrite" -> {
                 val a = rewriteAction()
-                st.modeLabel = if (custom) "改写 · 我来说" else "改写 · ${a.title}"
+                st.modeLabel = "改写"
+                st.optLabel = if (custom) "我来说" else a.title
                 st.showSwap = false
-                st.menuCurrent = if (custom) "custom" else "act:${a.id}"
+                st.optCurrent = if (custom) "custom" else "act:${a.id}"
                 aiHeader(st, aiTarget)
                 st.sourceIsSelection = fromSelection && !custom
+                st.source = q
                 if (custom) {
-                    st.source = q; st.placeholder = "说说要怎么改，比如「语气软一点」"
-                    st.sourceTag = if (fromField.isNotBlank()) "改 ${if (fromSelection) "选中" else "全文"} ${fromField.length} 字" else ""
+                    st.placeholder = "说说要怎么改，比如「语气软一点」"
+                    st.sourceTag = if (fromField.isNotBlank()) "改${if (fromSelection) "选中" else "全文"} ${fromField.length} 字" else ""
                     st.insertable = ""
                 } else {
-                    st.source = q; st.placeholder = "要改的文字"; st.sourceTag = ""
+                    st.placeholder = "要改的文字"; st.sourceTag = ""
                     st.insertable = if (q.isEmpty() && !fromSelection) insertable().first else ""
                 }
-                st.busyText = "${a.title.takeIf { !custom } ?: "改写"}中…"
+                st.busyText = "${if (custom) "改写" else a.title}中…"
                 st.resultHint = when {
                     aiTarget == null -> "先在设置里添加 AI 服务"
-                    custom -> "↵ 发出后，按这句话改"
-                    else -> "按 ↵ 或「开始」，用「${a.title}」改；左上角换做法"
+                    custom -> "说完按回车，就按这句话改"
+                    else -> "改好的文字会显示在这里"
                 }
-                st.result = result; st.busy = rewriting; st.status = status
-                st.buttons = when {
-                    rewriting -> listOf("stop" to "停止")
-                    result.isNotEmpty() -> listOf("copy" to "复制", "insert" to "插入", "apply" to if (fromSelection || fromField.isNotEmpty()) "替换" else "上屏")
-                    aiTarget == null -> listOf("setup" to "去设置")
-                    else -> listOf("go" to "开始")
+                // like 翻译: the text as it is now is rewritten once typing pauses
+                val k = rewriteKey(q)
+                val fresh = rewriteFor == k && !rewriting
+                // (a text that failed is not asked again until it changes, or ↵ asks)
+                if (!custom && aiTarget != null && q.isNotBlank() && rewriteFor != k && failedFor != k) {
+                    val cached = rewriteCache[k]
+                    handler.removeCallbacks(rewriteRun)
+                    if (cached != null) { rewriteFor = k; result = cached; rewriteBase = q; status = "" }
+                    else { result = ""; status = ""; handler.postDelayed(rewriteRun, if (q == fromField) 150L else prefs.translatePauseMs.toLong()) }
+                }
+                if (q.isBlank() && !custom) { result = ""; status = "" }
+                st.result = if (custom || rewriteFor == k) result else ""
+                st.busy = rewriting || (!custom && q.isNotBlank() && aiTarget != null && rewriteFor != k && failedFor != k)
+                st.status = status
+                st.action = when {
+                    aiTarget == null -> "setup" to "去设置"
+                    result.isNotEmpty() && (custom || fresh) && !rewriting -> "apply" to if (fromSelection || fromField.isNotEmpty()) "替换" else "上屏"
+                    else -> null
                 }
             }
             else -> {
-                st.modeLabel = "聊天 · ${ai.kayName}"
+                st.modeLabel = "聊天"
+                st.optLabel = ai.kayName
                 st.showSwap = false
-                st.menuCurrent = ""
+                st.optCurrent = ""
                 aiHeader(st, aiTarget)
                 st.source = q; st.sourceIsSelection = false; st.sourceTag = ""; st.insertable = ""
-                st.placeholder = "跟${ai.kayName}说点什么"
+                st.placeholder = "跟${ai.kayName}说点什么，回车发出"
                 st.busyText = "${ai.kayName}在想…"
-                st.resultHint = if (aiTarget == null) "先在设置里添加 AI 服务" else "回车发出"
-                val busy = ai.chatBusy
-                st.result = answer; st.busy = busy; st.status = status
-                st.buttons = when {
-                    busy -> listOf("stop" to "停止")
-                    answer.isNotEmpty() -> listOf("all" to "看全部", "copy" to "复制", "insert" to "插入")
-                    aiTarget == null -> listOf("setup" to "去设置")
-                    else -> emptyList()
+                st.resultHint = if (aiTarget == null) "先在设置里添加 AI 服务" else "${ai.kayName}的回答会显示在这里"
+                st.result = answer; st.busy = ai.chatBusy && answer.isEmpty(); st.status = status
+                st.action = when {
+                    aiTarget == null -> "setup" to "去设置"
+                    answer.isNotEmpty() && !ai.chatBusy -> "insert" to "插入"
+                    else -> null
                 }
             }
         }
@@ -276,7 +295,7 @@ class TranslateFeature(private val host: Host, private val service: TranslateSer
     /** ↵: what the strip is for. */
     fun enter() = when (mode) {
         "translate" -> commit()
-        "rewrite" -> if (result.isNotEmpty() && !rewriting && !custom) button("apply") else rewrite()
+        "rewrite" -> if (result.isEmpty() && !rewriting) { failedFor = ""; handler.removeCallbacks(rewriteRun); rewrite() } else if (result.isNotEmpty() && !rewriting && (custom || rewriteFor == rewriteKey(host.query.toString()))) button("apply") else { handler.removeCallbacks(rewriteRun); rewrite() }
         else -> send()
     }
 
@@ -299,19 +318,32 @@ class TranslateFeature(private val host: Host, private val service: TranslateSer
 
     // ---- 改写 ----
 
+    private val rewriteRun = Runnable { rewrite() }
+    private val rewriteCache = object : LinkedHashMap<String, String>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>?) = size > 24
+    }
+    /** What the answer (or the request on its way) is for: the way and the text. */
+    private var rewriteFor = ""
+    private var failedFor = ""
+    private fun rewriteKey(q: String) = "${prefs.aiProvider}|${rewriteAction().id}|$q"
+
     private fun rewrite() {
         val q = host.query.toString()
+        if (host.sink != Sink.TRANSLATE || mode != "rewrite") return
         val src = if (custom) fromField else q
         if (src.isBlank()) { status = "没有要改的文字：在上面打字，或点「一键插入」"; sync(); return }
         if (custom && q.isBlank()) { status = "先说说要怎么改"; sync(); return }
         val a = if (custom) AiWriter.custom(q) else rewriteAction()
+        val k = if (custom) "custom|$q" else rewriteKey(q)
         rewriting = true; status = ""; result = ""; rewriteBase = if (a.diff) src else null
+        rewriteFor = k
         sync()
         ai.rewrite(a, src,
-            onText = { s -> if (mode == "rewrite") { result = s; strip.result = s; strip.refresh() } },
+            onText = { s -> if (mode == "rewrite" && rewriteFor == k) { result = s; strip.result = s; strip.busy = false; strip.refresh() } },
             onDone = { r ->
+                if (rewriteFor != k) return@rewrite
                 rewriting = false
-                r.onSuccess { result = it }.onFailure { result = ""; status = it.message ?: "出错了" }
+                r.onSuccess { result = it; if (!custom) rewriteCache[k] = it }.onFailure { result = ""; status = it.message ?: "出错了"; failedFor = k; rewriteFor = "" }
                 if (mode == "rewrite") sync()
             })
     }

@@ -428,8 +428,8 @@ class KeyboardRenderTest {
         }
         panelShot("ai", ap) { it.activeTool = "ai" }
         val tstrip = com.kk.shurufa.keyboard.TranslateStrip(ctx, prefs).apply {
-            modeLabel = "翻译 · 中文 → English"; engineName = "DeepSeek"
-            source = "明天下午三点在学校门口见"; result = "See you at the school gate at three tomorrow afternoon."; buttons = listOf("commit" to "上屏")
+            modeLabel = "翻译"; optLabel = "中文 → English"; engineName = "DeepSeek"
+            source = "明天下午三点在学校门口见"; result = "See you at the school gate at three tomorrow afternoon."; action = "commit" to "上屏"
         }
         val tcol = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
         tcol.addView(tstrip, LinearLayout.LayoutParams(-1, -2))

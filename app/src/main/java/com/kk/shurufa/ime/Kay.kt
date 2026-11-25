@@ -98,6 +98,34 @@ class Kay(private val context: Context, private val prefs: Prefs) {
 
     private companion object { const val LOG_DAYS = 30 }
 
+    // ---- what it chatters on its page ----
+
+    /** Lines an AI wrote for 小K's page today (none without one, or when 一言 is not written by AI). */
+    fun chatter(today: LocalDate = LocalDate.now()): List<String> {
+        val st = prefs.state
+        if (!prefs.kayAiGreet || st.getString(Prefs.KAY_CHATTER_FOR, "") != today.toString()) return emptyList()
+        return (st.getString(Prefs.KAY_CHATTER, "") ?: "").lines().filter { it.isNotBlank() }
+    }
+
+    /** Once a day, a handful of new things for 小K to say on its page (nothing typed is sent). */
+    fun prefetchChatter(done: () -> Unit) {
+        if (!prefs.kayAiGreet) return
+        val today = LocalDate.now().toString()
+        val st = prefs.state
+        if (st.getString(Prefs.KAY_CHATTER_FOR, "") == today || st.getString(Prefs.KAY_CHATTER_ASKED, "") == today) return
+        val target = Llm.resolve(prefs, prefs.quickTarget.ifEmpty { prefs.aiProvider }) ?: return
+        if (!com.kk.shurufa.online.AiBudget.mayAsk()) return
+        st.edit().putString(Prefs.KAY_CHATTER_ASKED, today).apply()
+        val facts = KayLines.facts(LocalDate.now(), age(), 0)
+        Background.download({
+            com.kk.shurufa.online.AiBudget.asked(prefs)
+            Llm.completeQuick(prefs, target, KayLines.chatterSystem(name), KayLines.greetUser(facts, emptyList()))
+        }) { raw ->
+            val lines = raw.lines().map { it.replace(Regex("^\\s*[-•*]?\\s*\\d*[.、)）]?\\s*"), "") }.map { KayLines.cleanLine(it) }.filterNotNull().filter { it.length <= 24 }.distinct().take(24)
+            if (lines.size >= 5) { st.edit().putString(Prefs.KAY_CHATTER_FOR, today).putString(Prefs.KAY_CHATTER, lines.joinToString("\n")).apply(); done() }
+        }
+    }
+
     // ---- talking ----
 
     class Turn(val mine: Boolean, val text: String)

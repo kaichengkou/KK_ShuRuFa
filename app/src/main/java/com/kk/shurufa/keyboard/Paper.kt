@@ -42,7 +42,8 @@ object Paper {
     fun grain(c: Canvas, w: Int, h: Int, dark: Boolean) {
         if (w <= 0 || h <= 0) return
         if (paint.shader == null) paint.shader = BitmapShader(tile(), Shader.TileMode.REPEAT, Shader.TileMode.REPEAT)
-        paint.color = if (dark) 0x14FFFFFF else 0x1C5B4A36
+        // at night the grain is barely there: white specks on black read as haze
+        paint.color = if (dark) 0x09FFFFFF else 0x1C5B4A36
         c.drawRect(0f, 0f, w.toFloat(), h.toFloat(), paint)
     }
 }

@@ -6,3 +6,12 @@ patch:
   # face emoji keep their place; other emoji move behind the first five words
   engine/filters/+:
     - lua_filter@*kk_emoji_order
+  # 日期、时间这类功能联想（rq sj xq dt ts…）不进候选：工具栏的快捷插入里有，用户自己去点
+  date_translator/date: ""
+  date_translator/time: ""
+  date_translator/week: ""
+  date_translator/datetime: ""
+  date_translator/timestamp: ""
+  date_translator/datezh: ""
+  date_translator/dateen: ""
+  lunar: ""

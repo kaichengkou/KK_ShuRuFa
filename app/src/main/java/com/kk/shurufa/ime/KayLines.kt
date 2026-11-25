@@ -135,6 +135,16 @@ object KayLines {
 - 只输出这一句话本身（含颜文字），不要引号，不要解释
 """.trim()
 
+    fun chatterSystem(name: String) = """
+你是「$name」，一只住在主人手机键盘里的像素小鲨鱼。主人打开了你的小页面，却什么也没做，你在屏幕里自己喋喋不休。
+
+写 20 句你会冒出来的话，每句一行：
+- 每句不超过 18 个字，口语、俏皮、有点话痨、奇奇怪怪又可可爱爱，可以逗主人、自言自语、编点小谎、学一句方言
+- 可以落在给你的事实上（日期、节气、星期几），但大多数是无关紧要的碎碎念
+- 不说教，不灌鸡汤，不说自己是 AI，不用引号和编号，不要颜文字
+- 只输出这 20 行
+""".trim()
+
     fun greetUser(facts: List<String>, recent: List<String>) = buildString {
         append("事实：\n"); facts.forEach { append("- ").append(it).append('\n') }
         if (recent.isNotEmpty()) { append("最近说过：\n"); recent.forEach { append("- ").append(it).append('\n') } }

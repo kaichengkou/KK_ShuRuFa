@@ -200,7 +200,8 @@ class KeyboardView(context: Context, prefs: Prefs) : KbView(context, prefs) {
         surfaceShader?.let { if (shaderFor == key) return it }
         // 纸墨 is matte paper: no sheen, at most a breath of shading; the modern keys are molded
         val paper = prefs.style == "paper"
-        val top = if (t.dark && !paper) Colors.blend(t.surface, android.graphics.Color.WHITE, 0.045f) else t.surface
+        // at night a key catches a little light along its top, so it reads clear of the ground
+        val top = if (t.dark) Colors.blend(t.surface, android.graphics.Color.WHITE, if (paper) 0.04f else 0.06f) else t.surface
         val bottom = if (paper) (if (t.dark) t.surface else Colors.blend(t.surface, t.background, 0.04f))
             else if (t.dark) t.surface else Colors.blend(t.surface, t.background, 0.22f)
         return android.graphics.LinearGradient(0f, 0f, 0f, h, top, bottom, android.graphics.Shader.TileMode.CLAMP)

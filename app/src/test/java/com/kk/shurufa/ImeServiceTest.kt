@@ -68,6 +68,20 @@ class ImeServiceTest {
         out.recycle(); b.recycle()
     }
 
+    /** The two styles at night (and 纸墨 by day), as tuned: for build/screens/theme_*.png. */
+    @Test fun themes() {
+        val prefs = Prefs(ctx)
+        for ((name, style, theme, warmth) in listOf(
+            listOf("plain_dark", "modern", "dark", 0), listOf("paper_dark", "paper", "dark", 0),
+            listOf("paper_dark_cool", "paper", "dark", -30), listOf("paper_light_cool", "paper", "light", -30))) {
+            prefs.put(Prefs.STYLE, style as String); prefs.sp.edit().putInt(Prefs.THEME_WARMTH, warmth as Int).commit()
+            val (ime, view) = start(theme as String)
+            shot(view, "theme_$name")
+            ime.onDestroy()
+        }
+        prefs.sp.edit().remove(Prefs.STYLE).remove(Prefs.THEME_WARMTH).remove(Prefs.THEME).commit()
+    }
+
     private fun tour(theme: String) {
         val (ime, view) = start(theme)
         val tag = "ime_${theme}"

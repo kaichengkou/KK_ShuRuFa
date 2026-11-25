@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.RectF
 import android.text.Layout
 import android.text.StaticLayout
@@ -11,21 +12,28 @@ import android.text.TextPaint
 import android.text.TextUtils
 import android.view.MotionEvent
 import com.kk.shurufa.Prefs
+import kotlin.math.PI
+import kotlin.math.abs
+import kotlin.math.cos
+import kotlin.math.sin
 
 /**
- * 小K's page, where the keyboard was when the 小K key is tapped: 小K itself, large and alive, its
- * line of the day in a bubble, and the three things it does (改写, 翻译, 聊天) as large cards.
- * Picking one brings the keyboard back with 小K's strip above it.
+ * 小K's page, where the keyboard was when the 小K key is tapped: 小K on the left, large and
+ * alive, and on the right the three things it does (改写, 翻译, 聊天). Picking one brings the
+ * keyboard back with 小K's strip above it.
  *
- * It comes in in a cascade: 小K rises first, the bubble opens, the cards follow one after
- * another; a card pressed sinks a little under the finger.
+ * Poked, 小K does something (wriggles, hops, wanders off a little, spins, shakes) and says
+ * something; its words come out a character at a time in a bubble over it. Left alone it gets
+ * chatty, and when it has run out of things to say it starts telling itself cold jokes, until
+ * something is done.
  */
 @SuppressLint("ViewConstructor")
 class KayHome(context: Context, prefs: Prefs) : KbView(context, prefs) {
     /** "rewrite", "translate", "chat", "all" (the conversation), "setup". */
     var onChoose: ((String) -> Unit)? = null
     var onFeedback: (() -> Unit)? = null
-    var onPat: (() -> Unit)? = null
+    /** 小K was poked (for a buzz). */
+    var onPoke: (() -> Unit)? = null
 
     var kayName = "小K"
     var line = ""
@@ -36,6 +44,8 @@ class KayHome(context: Context, prefs: Prefs) : KbView(context, prefs) {
     var placeOk: Boolean? = null
     /** Turns in the conversation so far (a way back to it when there are any). */
     var talks = 0
+    /** Lines an AI wrote for 小K today, mixed in with its own. */
+    var extraLines: List<String> = emptyList()
 
     private class Card(val id: String, val title: String, val sub: String, val icon: String)
     private val cards get() = listOf(
@@ -52,10 +62,96 @@ class KayHome(context: Context, prefs: Prefs) : KbView(context, prefs) {
     private val bg = Paint(Paint.ANTI_ALIAS_FLAG)
     private val tp = TextPaint(Paint.ANTI_ALIAS_FLAG)
     private val ip = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND }
+    private val rnd = java.util.Random()
 
-    /** The page comes into view: the cascade plays. */
+    // ---- 小K's own motion on this page ----
+
+    /** Where it is, as an offset from its place (px), moving smoothly. */
+    private val posX = Tween(0f)
+    private val posY = Tween(0f)
+    private var facingLeft = false
+    private var act: String? = null
+    private var actAt = 0L
+    private var actMs = 0L
+    private val area = RectF()
+
+    // ---- what it says ----
+
+    private var bubble = ""
+    private var bubbleAt = 0L
+    private var bubbleUntil = 0L
+    private var chatty = 0
+    private var joking = false
+    private val idleTick = Runnable { idle() }
+
+    /** The page comes into view: the cascade plays, and 小K starts with its line of the day. */
     fun entered() {
         if (Motion.on(prefs)) { appear.set(0f); appear.animateTo(1f, dur(520), Motion.LINEAR) } else appear.set(1f)
+        posX.set(0f); posY.set(0f); act = null; chatty = 0; joking = false
+        if (line.isNotEmpty()) say(line, 5000, delay = 350) else bubble = ""
+        quietAgain(9000)
+        invalidate()
+    }
+
+    /** Something was done: the chatter waits again. */
+    private fun quietAgain(ms: Long = 8000) {
+        removeCallbacks(idleTick)
+        postDelayed(idleTick, ms)
+    }
+
+    override fun onDetachedFromWindow() {
+        super.onDetachedFromWindow()
+        removeCallbacks(idleTick)
+    }
+
+    private fun say(text: String, holdMs: Long = 3800, delay: Long = 0) {
+        bubble = text
+        bubbleAt = Motion.now() + delay
+        bubbleUntil = bubbleAt + text.length * CHAR_MS + holdMs
+        invalidate()
+    }
+
+    /** Nobody has done anything for a while: it talks; out of things to say, it tells jokes. */
+    private fun idle() {
+        if (!isAttachedToWindow) return
+        when {
+            joking || chatty >= CHATTY_BEFORE_JOKES -> {
+                if (!joking) { joking = true; say(SharkTalk.JOKES_START, 2400); move("hop"); quietAgain(3800); return }
+                val j = SharkTalk.deal(SharkTalk.JOKES)
+                val (setUp, answer) = j.substringBefore('|') to j.substringAfter('|', "")
+                say(setUp, 1800)
+                if (answer.isNotEmpty()) postDelayed({ if (isAttachedToWindow && joking) { say("$setUp\n——$answer", 4200); move(listOf("wiggle", "spin", "hop").random()) } }, setUp.length * CHAR_MS + 2200)
+                quietAgain(setUp.length * CHAR_MS + answer.length * CHAR_MS + 9000)
+            }
+            else -> {
+                chatty++
+                say(SharkTalk.deal(SharkTalk.CHATTY, extraLines))
+                if (rnd.nextInt(10) < 5) move(listOf("roam", "roam", "shake", "hop").random())
+                quietAgain(6500L + rnd.nextInt(2500))
+            }
+        }
+    }
+
+    /** Poked: something to do, and something to say. */
+    private fun poke() {
+        joking = false; chatty = 0
+        move(listOf("wiggle", "hop", "roam", "spin", "shake", "dance").random())
+        say(SharkTalk.deal(SharkTalk.POKED, extraLines))
+        onPoke?.invoke()
+        quietAgain()
+    }
+
+    private fun move(kind: String) {
+        if (!Motion.on(prefs)) return
+        act = kind; actAt = Motion.now()
+        actMs = when (kind) { "wiggle" -> 700L; "hop" -> 560L; "spin" -> 520L; "shake" -> 620L; "dance" -> 1100L; else -> 700L }
+        if (kind == "roam" && !area.isEmpty) {
+            // somewhere else in its corner, facing where it goes
+            val tx = (rnd.nextFloat() - 0.5f) * area.width() * 0.55f
+            val ty = (rnd.nextFloat() - 0.5f) * area.height() * 0.25f
+            facingLeft = tx < posX.value
+            posX.animateTo(tx, actMs, Motion.MOVE); posY.animateTo(ty, actMs, Motion.MOVE)
+        }
         invalidate()
     }
 
@@ -69,18 +165,21 @@ class KayHome(context: Context, prefs: Prefs) : KbView(context, prefs) {
         val t = theme
         c.drawColor(t.background)
         hits.clear()
-        var again = appear.running || pressT.running
+        val now = Motion.now()
+        var again = appear.running || pressT.running || posX.running || posY.running
         val pad = dp(Ui.EDGE + 2f)
         val w = width.toFloat(); val h = height.toFloat()
-        // the top line, quiet: where the internet sees us, and the model
+        val split = w * 0.46f
+        // the right side: a quiet line on top (where the internet sees us, the model), the three below
         tp.textSize = sp(Ui.SMALL - 1f); tp.typeface = Ui.regular; tp.color = t.hint
         val top = dp(18f)
         val info = listOfNotNull(place, provider.takeIf { it.isNotEmpty() }).joinToString("  ·  ")
         if (info.isNotEmpty()) {
             tp.textAlign = Paint.Align.RIGHT
-            c.drawText(info, w - pad, top, tp)
+            val shown = TextUtils.ellipsize(info, tp, w - pad - split - dp(14f), TextUtils.TruncateAt.END).toString()
+            c.drawText(shown, w - pad, top, tp)
             if (place != null) {
-                val dx = w - pad - tp.measureText(info) - dp(7f)
+                val dx = w - pad - tp.measureText(shown) - dp(7f)
                 bg.color = when (placeOk) { true -> 0xFF4CAF7A.toInt(); false -> 0xFFE0A33A.toInt(); null -> t.hint }
                 c.drawCircle(dx, top - dp(4f), dp(2.6f), bg)
             }
@@ -91,68 +190,103 @@ class KayHome(context: Context, prefs: Prefs) : KbView(context, prefs) {
             c.drawText(s, pad, top, tp)
             hits.add("all", pad - dp(6f), top - dp(16f), pad + tp.measureText(s) + dp(6f), top + dp(8f))
         }
-        // the cards along the bottom
+        val colL = split; val colR = w - pad
+        val colT = dp(28f); val colB = h - dp(12f)
         val gap = dp(8f)
-        val cardH = minOf(dp(92f), h * 0.36f)
-        val cardW = (w - 2 * pad - 2 * gap) / 3
-        val cardT = h - dp(12f) - cardH
-        // 小K and its bubble in the space above them
-        val s0 = stage(0)
-        // 小K as large as the room above the cards allows, its bubble under it
-        val face = minOf(dp(100f), cardT - dp(26f) - dp(50f))
-        val sharkCy = dp(24f) + face * 0.5f + (1 - s0) * dp(18f)
-        val wait = Shark.drawLive(c, w / 2, sharkCy, face, alpha = (255 * s0).toInt())
-        if (wait == 0L) again = true else if (!again) invalidateIn(wait)
-        hits.add("pat", w / 2 - face * 0.7f, sharkCy - face * 0.6f, w / 2 + face * 0.7f, sharkCy + face * 0.6f)
-        val s1 = stage(1)
-        if (line.isNotEmpty() && s1 > 0f) {
-            tp.textAlign = Paint.Align.LEFT; tp.textSize = sp(Ui.BODY); tp.typeface = Ui.regular; tp.color = t.ink; tp.alpha = (255 * s1).toInt()
-            val maxW = (w - 2 * pad - dp(24f)).toInt()
-            val lay = StaticLayout.Builder.obtain(line, 0, line.length, tp, maxW).setMaxLines(2).setEllipsize(TextUtils.TruncateAt.END)
-                .setAlignment(Layout.Alignment.ALIGN_CENTER).build()
-            var lw = 0f
-            for (i in 0 until lay.lineCount) lw = maxOf(lw, lay.getLineWidth(i))
-            val bw = lw + dp(24f); val bh = lay.height + dp(14f)
-            val by = sharkCy + face * 0.5f + dp(8f)
-            val scale = 0.9f + 0.1f * s1
-            c.save(); c.scale(scale, scale, w / 2, by)
-            bg.color = t.surface; bg.alpha = (255 * s1).toInt()
-            r.set(w / 2 - bw / 2, by, w / 2 + bw / 2, by + bh)
-            c.drawRoundRect(r, dp(14f), dp(14f), bg)
-            // its tail, toward 小K
-            val path = android.graphics.Path().apply { moveTo(w / 2 - dp(6f), by + 0.5f); lineTo(w / 2, by - dp(6f)); lineTo(w / 2 + dp(6f), by + 0.5f); close() }
-            c.drawPath(path, bg)
-            c.translate(w / 2 - maxW / 2f, by + dp(7f)); lay.draw(c)
-            c.restore()
-            tp.alpha = 255
-        }
+        val rowH = (colB - colT - 2 * gap) / 3
+        val rad = Ui.radiusLarge(dp(prefs.keyRadiusDp), dp(1f))
         for ((i, card) in cards.withIndex()) {
-            val s = stage(2 + i)
+            val s = stage(1 + i)
             if (s <= 0f) continue
-            val l = pad + i * (cardW + gap)
-            r.set(l, cardT, l + cardW, cardT + cardH)
+            val y = colT + i * (rowH + gap)
+            r.set(colL, y, colR, y + rowH)
             val press = if (pressed == card.id) pressT.value else 0f
-            val sc = (0.94f + 0.06f * s) * (1f - 0.04f * press)
+            val sc = 1f - 0.03f * press
             c.save()
-            c.translate(0f, (1 - s) * dp(16f))
+            c.translate((1 - s) * dp(20f), 0f)
             c.scale(sc, sc, r.centerX(), r.centerY())
             bg.color = if (pressed == card.id) Colors.blend(t.surface, t.accentSoft, 0.5f * press) else t.surface
             bg.alpha = (255 * s).toInt()
-            val rad = Ui.radiusLarge(dp(prefs.keyRadiusDp), dp(1f))
             c.drawRoundRect(r, rad, rad, bg)
             val dim = !aiReady && card.id != "translate"
             ip.color = Colors.fade(if (dim) t.hint else t.accent, s); ip.strokeWidth = dp(1.7f)
-            Icons.draw(c, card.icon, r.centerX(), r.top + cardH * 0.32f, dp(24f), ip)
-            tp.textAlign = Paint.Align.CENTER; tp.textSize = sp(Ui.BODY + 1f); tp.typeface = Ui.medium
+            val iconX = r.left + dp(24f)
+            Icons.draw(c, card.icon, iconX, r.centerY(), dp(22f), ip)
+            tp.textAlign = Paint.Align.LEFT; tp.textSize = sp(Ui.BODY + 1f); tp.typeface = Ui.medium
             tp.color = Colors.fade(if (dim) t.inkSoft else t.ink, s)
-            c.drawText(card.title, r.centerX(), r.top + cardH * 0.64f, tp)
-            tp.textSize = sp(Ui.SMALL - 1f); tp.typeface = Ui.regular; tp.color = Colors.fade(t.hint, s)
-            val sub = TextUtils.ellipsize(card.sub, tp, cardW - dp(10f), TextUtils.TruncateAt.END).toString()
-            c.drawText(sub, r.centerX(), r.top + cardH * 0.84f, tp)
+            val tx = iconX + dp(22f)
+            val twoLines = rowH >= dp(52f)
+            c.drawText(card.title, tx, if (twoLines) r.centerY() - dp(2f) else r.centerY() + sp(Ui.BODY) * 0.35f, tp)
+            if (twoLines) {
+                tp.textSize = sp(Ui.SMALL - 1f); tp.typeface = Ui.regular; tp.color = Colors.fade(t.hint, s)
+                val sub = TextUtils.ellipsize(card.sub, tp, r.right - tx - dp(10f), TextUtils.TruncateAt.END).toString()
+                c.drawText(sub, tx, r.centerY() + dp(16f), tp)
+            }
             c.restore()
             hits.add(card.id, r)
         }
+        // the left side: 小K, and its words over it
+        area.set(pad, colT, split - dp(10f), colB)
+        val s0 = stage(0)
+        val face = minOf(dp(92f), area.width() * 0.62f, area.height() * 0.52f)
+        val homeX = area.centerX(); val homeY = area.bottom - face * 0.62f
+        var x = homeX + posX.value; var y = homeY + posY.value + (1 - s0) * dp(18f)
+        var rot = 0f; var scaleX = 1f
+        val a = act
+        if (a != null) {
+            val p = ((now - actAt).toFloat() / actMs).coerceIn(0f, 1f)
+            when (a) {
+                "wiggle" -> rot = 12f * sin(2 * PI.toFloat() * 3 * p) * (1 - p)
+                "hop" -> y -= dp(20f) * abs(sin(2 * PI.toFloat() * p))
+                "spin" -> scaleX = cos(PI.toFloat() * 2 * p)
+                "shake" -> x += dp(7f) * sin(2 * PI.toFloat() * 4 * p) * (1 - p)
+                "dance" -> { y -= dp(12f) * abs(sin(2 * PI.toFloat() * 2 * p)); rot = 10f * sin(2 * PI.toFloat() * 2 * p) }
+                "roam" -> y -= dp(5f) * sin(PI.toFloat() * p)
+            }
+            if (p >= 1f) act = null else again = true
+        }
+        val (pose0, wait) = SharkLife.frame(now, java.time.LocalTime.now().hour, still = false)
+        // talking while the words come out: the mouth opens and closes
+        val typing = bubble.isNotEmpty() && now >= bubbleAt && now < bubbleAt + bubble.length * CHAR_MS
+        var pose = pose0.copy(flip = pose0.flip xor facingLeft)
+        if (typing && pose.face == Shark.Face.CALM) pose = pose.copy(face = if ((now / 140) % 2 == 0L) Shark.Face.HAPPY else Shark.Face.CALM)
+        c.save()
+        c.translate(x, y); c.rotate(rot); c.scale(if (abs(scaleX) < 0.08f) 0.08f else abs(scaleX), 1f)
+        Shark.draw(c, 0f, 0f, face, pose, alpha = (255 * s0).toInt())
+        c.restore()
+        hits.add("poke", x - face * 0.7f, y - face * 0.65f, x + face * 0.7f, y + face * 0.6f)
+        if (typing) again = true
+        // the bubble, its words a character at a time
+        if (bubble.isNotEmpty() && now >= bubbleAt && now < bubbleUntil) {
+            val shown = ((now - bubbleAt) / CHAR_MS).toInt().coerceIn(1, bubble.length)
+            val text = bubble.substring(0, shown)
+            tp.textAlign = Paint.Align.LEFT; tp.textSize = sp(Ui.SMALL + 1f); tp.typeface = Ui.regular; tp.color = t.ink
+            val maxW = (area.width() + dp(6f)).toInt()
+            val full = StaticLayout.Builder.obtain(bubble, 0, bubble.length, tp, maxW).setMaxLines(4).setEllipsize(TextUtils.TruncateAt.END).build()
+            var lw = 0f
+            for (i in 0 until full.lineCount) lw = maxOf(lw, full.getLineWidth(i))
+            val lay = StaticLayout.Builder.obtain(text, 0, text.length, tp, maxW).setMaxLines(4).setEllipsize(TextUtils.TruncateAt.END).build()
+            val bw = lw + dp(20f); val bh = full.height + dp(12f)
+            val fade = ((bubbleUntil - now) / 250f).coerceIn(0f, 1f) * ((now - bubbleAt) / 160f).coerceIn(0f, 1f)
+            val minX = pad - dp(4f)
+            val bx = (x - bw / 2).coerceIn(minX, maxOf(minX, split - dp(6f) - bw))
+            val by = (y - face * 0.62f - dp(8f) - bh).coerceAtLeast(dp(24f))
+            bg.color = t.surface; bg.alpha = (255 * fade).toInt()
+            r.set(bx, by, bx + bw, by + bh)
+            c.drawRoundRect(r, dp(12f), dp(12f), bg)
+            val tailX = x.coerceIn(r.left + dp(12f), r.right - dp(12f))
+            val path = Path().apply { moveTo(tailX - dp(5f), r.bottom - 0.5f); lineTo(tailX, r.bottom + dp(6f)); lineTo(tailX + dp(5f), r.bottom - 0.5f); close() }
+            c.drawPath(path, bg)
+            tp.alpha = (255 * fade).toInt()
+            c.save(); c.translate(bx + dp(10f), by + dp(6f)); lay.draw(c); c.restore()
+            tp.alpha = 255
+            if (fade < 1f) again = true
+        }
         if (again) postInvalidateOnAnimation()
+        else {
+            val next = listOf(wait, if (bubble.isNotEmpty() && now < bubbleUntil) bubbleUntil - 240 - now else Long.MAX_VALUE).filter { it > 0 }.minOrNull() ?: wait
+            if (next == 0L) postInvalidateOnAnimation() else invalidateIn(next.coerceAtMost(60_000L))
+        }
     }
 
     @SuppressLint("ClickableViewAccessibility")
@@ -162,7 +296,7 @@ class KayHome(context: Context, prefs: Prefs) : KbView(context, prefs) {
                 pressed = hits.at(e.x, e.y)
                 if (pressed != null) {
                     onFeedback?.invoke()
-                    if (pressed != "pat" && pressed != "all") { pressT.set(0f); pressT.animateTo(1f, dur(90), Motion.ENTER) }
+                    if (pressed != "poke" && pressed != "all") { pressT.set(0f); pressT.animateTo(1f, dur(90), Motion.ENTER) }
                 }
                 invalidate()
             }
@@ -170,11 +304,11 @@ class KayHome(context: Context, prefs: Prefs) : KbView(context, prefs) {
                 val p = pressed
                 if (p != null && hits.at(e.x, e.y) == p) {
                     when {
-                        p == "pat" -> onPat?.invoke()
+                        p == "poke" -> poke()
                         !aiReady && (p == "rewrite" || p == "chat") -> onChoose?.invoke("setup")
                         else -> onChoose?.invoke(p)
                     }
-                }
+                } else quietAgain()
                 if (Motion.on(prefs)) pressT.animateTo(0f, dur(160), Motion.ENTER) else pressT.set(0f)
                 postDelayed({ pressed = null; invalidate() }, dur(160))
                 invalidate()
@@ -182,5 +316,11 @@ class KayHome(context: Context, prefs: Prefs) : KbView(context, prefs) {
             MotionEvent.ACTION_CANCEL -> { pressed = null; invalidate() }
         }
         return true
+    }
+
+    private companion object {
+        /** A character of a bubble comes out every this many ms. */
+        const val CHAR_MS = 55L
+        const val CHATTY_BEFORE_JOKES = 5
     }
 }

@@ -1323,7 +1323,8 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
             val half = smartPunct(t)
             val made = pangu(half)
             editor.type(made)
-            madeAuto(made, t)
+            // a mark made half-width is not put back by backspace: deleted and typed again soon, it is the full one
+            if (half == t) madeAuto(made, t)
             // 3, stays half-width before more digits; Chinese after it turns it back (3，好的)
             halfAfterDigit = if (half != t) half to t else null
             syncBar()
@@ -1388,9 +1389,20 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         if (before.length == 2 && before[0].isDigit() && before.substring(1) == half) editor.replaceBefore(1, full)
     }
 
-    /** 数字后的标点保持半角: after a digit, Chinese punctuation that would break a number is typed half-width. */
+    /** The full-width mark whose half-width form was just deleted, and when: typed again soon, it stays full. */
+    private var halfUndone: String? = null
+    private var halfUndoneAt = 0L
+
+    /**
+     * 数字后的标点保持半角: after a digit, Chinese punctuation that would break a number is typed
+     * half-width. Deleted and typed again within a few seconds, it is the Chinese mark after all
+     * (once: the next time after a digit it is half-width again).
+     */
     private fun smartPunct(t: String): String {
         if (!prefs.smartPunct) return t
+        val undone = halfUndone
+        halfUndone = null
+        if (undone == t && SystemClock.uptimeMillis() - halfUndoneAt < HALF_RETYPE_MS) return t
         val before = editor.textBefore(1)
         if (before.isNotEmpty() && before[0].isDigit()) return when (t) { "。" -> "."; "：" -> ":"; "，" -> ","; else -> t }
         return t
@@ -1406,6 +1418,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
                     sink != null -> { if (query.isNotEmpty()) query.setLength(query.offsetByCodePoints(query.length, -1)); syncBar() }
                     revertCorrection() -> {}
                     else -> {
+                        halfAfterDigit?.let { (half, full) -> if (editor.textBefore(half.length) == half) { halfUndone = full; halfUndoneAt = SystemClock.uptimeMillis() } }
                         learning.deleting { n -> editor.textBefore(n) }
                         editor.deleteBackward(); updateAutoCap(); suggestAfterDelete(); if (panel == Panel.NUM) showMoneyChip(); syncBar()
                     }
@@ -2037,6 +2050,8 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     }
 
     internal companion object {
+        /** 3。 deleted and typed again within this long: the full-width mark stays. */
+        const val HALF_RETYPE_MS = 4000L
         /** 运算符列 of the standard number pad: five on screen, the rest by scrolling. */
         val NUM_OPS = listOf("+", "−", "×", "÷", "=", "%", "(", ")", "/", ",", "±")
         val DIRS = listOf(Dir.UP, Dir.DOWN, Dir.LEFT, Dir.RIGHT)

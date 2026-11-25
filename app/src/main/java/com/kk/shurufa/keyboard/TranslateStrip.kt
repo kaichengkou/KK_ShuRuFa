@@ -14,16 +14,17 @@ import android.view.MotionEvent
 import com.kk.shurufa.Prefs
 
 /**
- * 小K's strip above the toolbar, for 改写 · 翻译 · 聊天 alike: one chip at the top left says what
- * it does now (改写 · 纠错, 翻译 · 自动 → English, 聊天) and opens the list of what it can do; the
- * engine and ✕ on the right. Below, the text it works on, typed with the keyboard (or brought in
- * with 一键插入), and under it the answer with its buttons.
+ * 小K's strip above the toolbar, for 改写 · 翻译 · 聊天 alike, all laid out the way 翻译 always
+ * was: two chips at the top left, what it does (改写 ▾) and how (润色 ▾, 中文 → English ▾), the
+ * engine and ✕ on the right; the text it works on (typed with the keyboard below, or brought in
+ * with 一键插入), a line, and the answer with its one button beside it.
  *
- * It grows when it needs to (the list open, a long answer) and shrinks back, smoothly; a change of
+ * It grows when it needs to (a list open, a long answer) and shrinks back, smoothly; a change of
  * what it does crossfades the content.
  */
 @SuppressLint("ViewConstructor")
 class TranslateStrip(context: Context, prefs: Prefs) : KbView(context, prefs) {
+    /** [which] is "mode", "opt" or "engine". */
     var onPick: ((which: String, id: String) -> Unit)? = null
     var onSwap: (() -> Unit)? = null
     var onEngine: (() -> Unit)? = null
@@ -36,16 +37,18 @@ class TranslateStrip(context: Context, prefs: Prefs) : KbView(context, prefs) {
 
     /** "translate", "rewrite" or "chat". */
     var mode = "translate"
-    /** The chip at the top left: what the strip does now. */
+    /** The first chip: what the strip does (改写 · 翻译 · 聊天). */
     var modeLabel = "翻译"
+    /** The second chip: how (润色, 中文 → English, 小K). */
+    var optLabel = ""
     var showSwap = true
     var placeholder = "输入要翻译的文字"
     /** A small tag at the end of the text line (改写 by instruction: what it will change). */
     var sourceTag = ""
     var resultHint = "译文会显示在这里"
     var busyText = "翻译中…"
-    /** The answer's buttons, (id, label); the last is the main one. */
-    var buttons: List<Pair<String, String>> = emptyList()
+    /** The answer's button, (id, label), when there is one. */
+    var action: Pair<String, String>? = null
 
     var engineName = "离线"
     var source = ""
@@ -60,19 +63,29 @@ class TranslateStrip(context: Context, prefs: Prefs) : KbView(context, prefs) {
     var engine: String
         get() = pick.current
         set(v) { pick.current = v }
-    /** What the top-left chip offers. */
-    var menuItems: List<PickList.Item>
-        get() = menu.items
-        set(v) { menu.items = v }
-    var menuCurrent: String
-        get() = menu.current
-        set(v) { menu.current = v }
+    var modeItems: List<PickList.Item>
+        get() = modes.items
+        set(v) { modes.items = v }
+    var optItems: List<PickList.Item>
+        get() = opts.items
+        set(v) { opts.items = v }
+    var optCurrent: String
+        get() = opts.current
+        set(v) { opts.current = v }
     private val pick = PickList(this).apply { rowDp = 36f }
-    private val menu = PickList(this).apply { rowDp = 38f }
-    private var picking: String? = null   // "menu" | "engine"
+    private val modes = PickList(this).apply { rowDp = 40f }
+    private val opts = PickList(this).apply { rowDp = 38f }
+    private var picking: String? = null   // "mode" | "opt" | "engine"
+
+    /** Spans set on [result] by the host (the changes of 改写, marked). */
+    var marks: ((CharSequence) -> CharSequence)? = null
 
     /** The texts changed: lay them out again. */
-    fun refresh() { srcLayout = null; resLayout = null; caretSince = SystemClock.uptimeMillis(); if (isLaidOut && heightT.target != needFor(width)) requestLayout(); invalidate() }
+    fun refresh() {
+        srcLayout = null; resLayout = null; caretSince = SystemClock.uptimeMillis()
+        if (isLaidOut && heightT.target != needFor(width)) requestLayout()
+        invalidate()
+    }
 
     /** What it does changed: the content crossfades into the new one. */
     fun switched() {
@@ -100,6 +113,8 @@ class TranslateStrip(context: Context, prefs: Prefs) : KbView(context, prefs) {
     override fun onThemeChanged() { srcLayout = null; resLayout = null }
 
     private val baseH get() = dp(136f)
+    private val inputH get() = dp(48f)
+    private val headH get() = dp(6f) + dp(8f) + dp(30f) + dp(4f)
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val w = MeasureSpec.getSize(widthMeasureSpec)
@@ -110,19 +125,20 @@ class TranslateStrip(context: Context, prefs: Prefs) : KbView(context, prefs) {
         setMeasuredDimension(w, heightT.value.toInt())
     }
 
-    /** Asks for a new height if the content needs one. */
-    private fun wantHeight(h: Float) { if (heightT.target != h) requestLayout() }
+    private fun textW(w: Int): Int {
+        val bw = action?.let { chipWidth(it.second, textSp = Ui.SMALL + 1f) + dp(10f) } ?: 0f
+        return (w - 2 * dp(Ui.EDGE) - dp(28f) - bw).toInt().coerceAtLeast(1)
+    }
 
+    private fun answerText() = when { result.isNotEmpty() -> result; busy -> busyText; status.isNotEmpty() -> status; else -> resultHint }
+
+    /** The header, the text line, and the answer's lines (two at least, up to a few). */
     private fun needFor(w: Int): Float {
-        when (picking) { "engine" -> return dp(250f); "menu" -> return dp(270f) }
-        if (mode == "translate") return baseH
+        when (picking) { "engine" -> return dp(250f); "mode" -> return headH + dp(40f) * 3 + dp(16f); "opt" -> return dp(280f) }
         body.textSize = sp(Ui.BODY)
-        val textW = (w - 2 * dp(Ui.EDGE) - dp(28f)).toInt().coerceAtLeast(1)
-        val res = when { result.isNotEmpty() -> result; busy -> busyText; status.isNotEmpty() -> status; else -> resultHint }
-        val lines = StaticLayout.Builder.obtain(res, 0, res.length, body, textW).setMaxLines(MAX_LINES).setLineSpacing(0f, 1.05f).build().lineCount
-        val withButtons = buttons.isNotEmpty()
-        val need = dp(6f) + dp(8f) + dp(30f) + dp(4f) + dp(48f) + dp(1f) + dp(8f) + lines.coerceAtLeast(1) * body.fontSpacing * 1.05f +
-            (if (withButtons) dp(8f) + dp(Ui.CHIP_H) else 0f) + dp(16f)
+        val res = answerText()
+        val lines = StaticLayout.Builder.obtain(res, 0, res.length, body, textW(w)).setMaxLines(MAX_LINES).setLineSpacing(0f, 1.05f).build().lineCount
+        val need = headH + inputH + dp(1f) + lines.coerceAtLeast(2) * body.fontSpacing * 1.05f + dp(18f) + dp(4f)
         return maxOf(baseH, need)
     }
 
@@ -137,37 +153,43 @@ class TranslateStrip(context: Context, prefs: Prefs) : KbView(context, prefs) {
         bg.color = t.surface
         c.drawRoundRect(card, rad, rad, bg)
         val cardL = card.left; val cardR = card.right; val cardT = card.top; val cardB = card.bottom
-        // header: what it does … engine ×. The right end is placed first; the chip on the left
-        // gets what is left, shortened if it must be
+        // header: what ▾ how ▾ … engine ×. The right end is placed first; the how-chip gets what
+        // is left, shortened if it must be
         val hy = cardT + dp(8f); val hh = dp(30f)
         r.set(cardR - dp(6f) - hh - dp(6f), hy, cardR - dp(6f), hy + hh)
         drawChip(c, r, "", ChipStyle.GHOST, pressed = pressed == "close", icon = "close")
         hits.add("close", r, slop = dp(4f))
-        val engineLabel = fit(engineName, (cardR - cardL) * 0.3f, Ui.SMALL)
+        val engineLabel = fit(engineName, (cardR - cardL) * 0.28f, Ui.SMALL)
         val ew = chipWidth(engineLabel, chevron = true, textSp = Ui.SMALL)
         r.set(r.left - dp(4f) - ew, hy + dp(2f), r.left - dp(4f), hy + hh - dp(2f))
         drawChip(c, r, engineLabel, if (picking == "engine") ChipStyle.ACTIVE else ChipStyle.SOFT, pressed = pressed == "engine", chevron = true, textSp = Ui.SMALL)
         hits.add("engine", r, slop = dp(4f))
         val engineLeft = r.left
-        val swapW = if (showSwap) hh + dp(8f) else 0f
-        val room = engineLeft - dp(10f) - (cardL + dp(8f)) - swapW
-        val label = fit(modeLabel, room, Ui.SMALL + 1f)
-        val mw = chipWidth(label, chevron = true, textSp = Ui.SMALL + 1f)
-        r.set(cardL + dp(8f), hy, cardL + dp(8f) + mw, hy + hh)
-        drawChip(c, r, label, ChipStyle.ACTIVE, pressed = pressed == "menu" || picking == "menu", chevron = true, textSp = Ui.SMALL + 1f)
-        hits.add("menu", r, slop = dp(4f))
-        if (showSwap) {
-            r.set(r.right + dp(2f), hy, r.right + dp(2f) + hh + dp(6f), hy + hh)
-            drawChip(c, r, "", ChipStyle.GHOST, pressed = pressed == "swap", icon = "swap")
-            hits.add("swap", r, slop = dp(4f))
+        var x = cardL + dp(8f)
+        val mw = chipWidth(modeLabel, chevron = true, textSp = Ui.SMALL + 1f)
+        r.set(x, hy, x + mw, hy + hh)
+        drawChip(c, r, modeLabel, ChipStyle.ACTIVE, pressed = pressed == "mode" || picking == "mode", chevron = true, textSp = Ui.SMALL + 1f)
+        hits.add("mode", r, slop = dp(4f))
+        x = r.right + dp(6f)
+        if (optLabel.isNotEmpty()) {
+            val swapW = if (showSwap) hh + dp(8f) else 0f
+            val room = engineLeft - dp(8f) - x - swapW
+            val label = fit(optLabel, room, Ui.SMALL + 1f)
+            val ow = chipWidth(label, chevron = true, textSp = Ui.SMALL + 1f)
+            r.set(x, hy, x + ow, hy + hh)
+            drawChip(c, r, label, if (picking == "opt") ChipStyle.ACTIVE else ChipStyle.SOFT, pressed = pressed == "opt", chevron = true, textSp = Ui.SMALL + 1f)
+            hits.add("opt", r, slop = dp(4f))
+            if (showSwap) {
+                r.set(r.right + dp(2f), hy, r.right + dp(2f) + hh + dp(6f), hy + hh)
+                drawChip(c, r, "", ChipStyle.GHOST, pressed = pressed == "swap", icon = "swap")
+                hits.add("swap", r, slop = dp(4f))
+            }
         }
         val innerL = cardL + dp(14f); val innerR = cardR - dp(14f)
         val innerT = hy + hh + dp(4f); val innerB = cardB - dp(8f)
         val listArea = r.apply { set(cardL + dp(4f), hy + hh + dp(2f), cardR - dp(4f), cardB - dp(4f)) }
-        when (picking) {
-            "engine" -> { if (pick.draw(c, listArea, t, rad)) postInvalidateOnAnimation(); return }
-            "menu" -> { if (menu.draw(c, listArea, t, rad)) postInvalidateOnAnimation(); return }
-        }
+        val list = when (picking) { "engine" -> pick; "mode" -> modes; "opt" -> opts; else -> null }
+        if (list != null) { if (list.draw(c, listArea, t, rad)) postInvalidateOnAnimation(); return }
         // the content, crossfading in when what it does changed
         val k = swapT.value
         val save = if (k < 1f) c.saveLayerAlpha(card.left, innerT, card.right, card.bottom, (255 * k).toInt()) else c.save()
@@ -179,10 +201,9 @@ class TranslateStrip(context: Context, prefs: Prefs) : KbView(context, prefs) {
     private fun drawContent(c: Canvas, innerL: Float, innerT: Float, innerR: Float, innerB: Float) {
         val t = theme
         val btnH = dp(Ui.CHIP_H)
-        val compact = mode == "translate"
         body.textSize = sp(Ui.BODY)
         // the text line: two lines at most, its end in view
-        val inputH = dp(48f)
+        val inputH = inputH
         val tagW = when {
             source.isEmpty() && !sourceIsSelection && insertable.isNotEmpty() -> chipWidth("一键插入", icon = "clipboard", textSp = Ui.SMALL + 1f)
             sourceTag.isNotEmpty() -> tagWidth(sourceTag)
@@ -216,41 +237,19 @@ class TranslateStrip(context: Context, prefs: Prefs) : KbView(context, prefs) {
         } else if (sourceTag.isNotEmpty()) drawTag(c, sourceTag, innerR, innerT + inputH / 2)
         bg.color = t.divider
         c.drawRect(innerL, innerT + inputH, innerR, innerT + inputH + dp(0.8f), bg)
-        // the answer
+        // the answer beside its one button, as many lines as it needs (up to a few)
         val resT = innerT + inputH + dp(1f)
-        val res = when { result.isNotEmpty() -> result; busy -> busyText; status.isNotEmpty() -> status; else -> resultHint }
-        val withButtons = buttons.isNotEmpty() && (result.isNotEmpty() || !compact)
-        val bw = buttons.sumOf { (_, l) -> chipWidth(l, textSp = Ui.SMALL + 1f).toDouble() }.toFloat() + dp(6f) * (buttons.size - 1).coerceAtLeast(0)
-        if (compact) {
-            // 翻译 as it was: the answer beside its one button
-            val textW = (innerR - innerL - (if (withButtons) bw + dp(10f) else 0f)).toInt().coerceAtLeast(1)
-            val rl = resLayout ?: layout(res, textW, if (result.isNotEmpty()) t.ink else t.hint, TextUtils.TruncateAt.END, 2, medium = result.isNotEmpty()).also { resLayout = it }
-            val half = innerB - resT
-            c.save(); c.translate(innerL, resT + (half - rl.height) / 2); rl.draw(c); c.restore()
-            if (withButtons) drawButtons(c, innerR, resT + (half - btnH) / 2, btnH)
-            return
-        }
-        // 改写 · 聊天: the answer in full width (as many lines as it needs, up to a point), buttons under it
-        val textW = (innerR - innerL).toInt().coerceAtLeast(1)
-        val rl = resLayout ?: layout(res, textW, if (result.isNotEmpty()) t.ink else t.hint, TextUtils.TruncateAt.END, MAX_LINES, medium = false, marked = result.isNotEmpty()).also { resLayout = it }
-        val textTop = resT + dp(8f)
-        c.save(); c.clipRect(innerL, resT, innerR, innerB - (if (withButtons) btnH + dp(6f) else 0f)); c.translate(innerL, textTop); rl.draw(c); c.restore()
-        if (withButtons) drawButtons(c, innerR, innerB - btnH, btnH)
-        wantHeight(needFor(width))
-    }
-
-    /** Spans set on [result] by the host (the changes of 改写, marked). */
-    var marks: ((CharSequence) -> CharSequence)? = null
-
-    private fun drawButtons(c: Canvas, right: Float, top: Float, h: Float) {
-        var x = right
-        for ((i, b) in buttons.withIndex().reversed()) {
-            val (id, label) = b
+        val res = answerText()
+        val has = result.isNotEmpty()
+        val rl = resLayout ?: layout(res, textW(width), if (has) t.ink else t.hint, TextUtils.TruncateAt.END, MAX_LINES, medium = has && mode == "translate", marked = has).also { resLayout = it }
+        val room = innerB - resT
+        c.save(); c.clipRect(innerL, resT, innerR, innerB); c.translate(innerL, resT + ((room - rl.height) / 2).coerceAtLeast(dp(6f))); rl.draw(c); c.restore()
+        action?.let { (id, label) ->
             val w = chipWidth(label, textSp = Ui.SMALL + 1f)
-            r.set(x - w, top, x, top + h)
-            drawChip(c, r, label, if (i == buttons.size - 1) ChipStyle.PRIMARY else ChipStyle.SOFT, pressed = pressed == "b:$id", textSp = Ui.SMALL + 1f)
-            hits.add("b:$id", r, slop = dp(5f))
-            x = r.left - dp(6f)
+            val top = resT + ((room - btnH) / 2).coerceAtMost(dp(30f))
+            r.set(innerR - w, top, innerR, top + btnH)
+            drawChip(c, r, label, ChipStyle.PRIMARY, pressed = pressed == "b:$id", textSp = Ui.SMALL + 1f)
+            hits.add("b:$id", r, slop = dp(6f))
         }
     }
 
@@ -283,7 +282,7 @@ class TranslateStrip(context: Context, prefs: Prefs) : KbView(context, prefs) {
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(e: MotionEvent): Boolean {
-        val list = when (picking) { "engine" -> pick; "menu" -> menu; else -> null }
+        val list = when (picking) { "engine" -> pick; "mode" -> modes; "opt" -> opts; else -> null }
         if (list != null && (list.busy || (e.actionMasked == MotionEvent.ACTION_DOWN && list.contains(e.x, e.y)))) {
             if (e.actionMasked == MotionEvent.ACTION_DOWN) onFeedback?.invoke()
             list.onTouch(e)?.let { id -> val w = picking!!; picking = null; onPick?.invoke(w, id); refresh() }
@@ -299,7 +298,7 @@ class TranslateStrip(context: Context, prefs: Prefs) : KbView(context, prefs) {
             MotionEvent.ACTION_UP -> {
                 when (val p = pressed) {
                     null -> if (picking != null) picking = null
-                    "menu" -> { picking = if (picking == "menu") null else "menu"; if (picking != null) menu.reveal() }
+                    "mode", "opt" -> { picking = if (picking == p) null else p; if (p == "opt" && picking != null) opts.reveal() }
                     "swap" -> { picking = null; onSwap?.invoke() }
                     "engine" -> { picking = if (picking == "engine") null else "engine"; if (picking != null) pick.reveal(); onEngine?.invoke() }
                     "close" -> onClose?.invoke()
@@ -313,5 +312,8 @@ class TranslateStrip(context: Context, prefs: Prefs) : KbView(context, prefs) {
         return true
     }
 
-    private companion object { const val MAX_LINES = 7 }
+    /** The list a test or the host opens by hand. */
+    fun open(list: String?) { picking = list; refresh() }
+
+    private companion object { const val MAX_LINES = 6 }
 }

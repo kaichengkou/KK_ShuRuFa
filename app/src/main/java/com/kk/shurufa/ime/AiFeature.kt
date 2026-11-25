@@ -34,7 +34,7 @@ class AiFeature(private val host: Host, private val kay: Kay) {
         home = KayHome(host.context, prefs).apply {
             theme = host.kbTheme
             onFeedback = { host.haptics.play(HapticEvent.FUNCTION) }
-            onPat = { SharkLife.pat(Motion.now()); host.haptics.play(HapticEvent.OPTION); invalidate() }
+            onPoke = { host.haptics.play(HapticEvent.OPTION) }
             onChoose = { id ->
                 when (id) {
                     "setup" -> host.openSettings("ai")
@@ -85,6 +85,8 @@ class AiFeature(private val host: Host, private val kay: Kay) {
         home.aiReady = target() != null
         home.talks = kay.talk.size
         home.provider = target()?.let { Llm.targetName(prefs, it) }.orEmpty()
+        home.extraLines = kay.chatter()
+        kay.prefetchChatter { home.extraLines = kay.chatter() }
         showPlace(force = false)
         crossfade(panel, home, animate)
         if (animate) home.entered()
