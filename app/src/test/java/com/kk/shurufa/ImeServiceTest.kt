@@ -87,6 +87,16 @@ class ImeServiceTest {
         assertEquals(Panel.LETTERS, open(InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI))
         assertEquals("en", ime.language)
         assertEquals(Panel.LETTERS, open(InputType.TYPE_CLASS_TEXT))
+        // login pages that do not say what the field is: its hint, or the app, does
+        fun openWith(hint: String?, pkg: String): String {
+            ime.onFinishInputView(true)
+            ime.onStartInputView(EditorInfo().apply { inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_WEB_EDIT_TEXT; hintText = hint; packageName = pkg }, false); idle()
+            return ime.language
+        }
+        assertEquals("en", openWith("电子邮件地址或电话号码", "com.android.chrome"))
+        assertEquals("en", openWith("Email or phone", "com.android.chrome"))
+        assertEquals("en", openWith(null, "com.google.android.gms"))
+        assertTrue(openWith("搜索", "com.android.chrome") != "en" || Prefs(ctx).languages.first() == "en")
         ime.onDestroy()
     }
 

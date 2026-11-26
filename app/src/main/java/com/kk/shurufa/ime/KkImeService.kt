@@ -283,8 +283,9 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     private fun applyPrivacy(info: EditorInfo) {
         val cls = info.inputType and InputType.TYPE_MASK_CLASS
         val variation = info.inputType and InputType.TYPE_MASK_VARIATION
-        val isPassword = cls == InputType.TYPE_CLASS_TEXT && variation in PASSWORDS
-        val isAddress = cls == InputType.TYPE_CLASS_TEXT && variation in ADDRESSES
+        val kind = fieldKind(info)
+        val isPassword = kind == "password"
+        val isAddress = kind == "address"
         val noLearning = (info.imeOptions and EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING) != 0 || prefs.incognito
         editor.recording = prefs.typingStats && !isPassword && !isAddress && !noLearning
         editor.secret = isPassword
@@ -457,6 +458,25 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     override val isZh: Boolean get() = layout(curLang).engine == "rime"
     private val composing get() = isZh && RimeEngine.ready && RimeBridge.input().isNotEmpty()
 
+    /**
+     * "password", "address" (a mail or web address, an account name) or null, by what the field
+     * says it is, and, for fields that do not say (login pages often don't), by its hint
+     * ("邮箱或手机号", "Email or phone", "Пароль") and by the app (Google's own account screens).
+     */
+    private fun fieldKind(info: EditorInfo): String? {
+        val cls = info.inputType and InputType.TYPE_MASK_CLASS
+        if (cls != InputType.TYPE_CLASS_TEXT) return null
+        val variation = info.inputType and InputType.TYPE_MASK_VARIATION
+        if (variation in PASSWORDS) return "password"
+        if (variation in ADDRESSES) return "address"
+        if (variation != InputType.TYPE_TEXT_VARIATION_NORMAL && variation != InputType.TYPE_TEXT_VARIATION_WEB_EDIT_TEXT) return null
+        val words = listOfNotNull(info.hintText, info.label).joinToString(" ").lowercase()
+        if (PASSWORD_WORDS.any { it in words }) return "password"
+        if (ACCOUNT_WORDS.any { it in words }) return "address"
+        if (info.packageName in ACCOUNT_APPS) return "address"
+        return null
+    }
+
     /** Passwords, web and mail addresses are written in Latin letters: English if it is there, else the first such language. */
     private fun latinLanguage(): String = prefs.languages.firstOrNull { it == "en" }
         ?: prefs.languages.firstOrNull { layout(it).engine != "rime" && it != "ru" } ?: "en"
@@ -473,8 +493,9 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         val cls = info.inputType and InputType.TYPE_MASK_CLASS
         val variation = info.inputType and InputType.TYPE_MASK_VARIATION
         if (prefs.perAppLanguage && !restarting) prefs.appLanguage(info.packageName ?: "")?.takeIf { it in prefs.languages }?.let { lang = it }
-        val isPassword = cls == InputType.TYPE_CLASS_TEXT && variation in PASSWORDS
-        val isAddress = cls == InputType.TYPE_CLASS_TEXT && variation in ADDRESSES
+        val kind = fieldKind(info)
+        val isPassword = kind == "password"
+        val isAddress = kind == "address"
         if ((isPassword || isAddress) && (isZh || curLang == "ru")) tempLang = latinLanguage()
         // 打字数据: never from passwords, addresses or fields that ask not to be learned from
         applyPrivacy(info)
@@ -507,6 +528,8 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         // back after a long while: it wakes with a start
         if (!restarting && greeting == null) com.kk.shurufa.keyboard.SharkLife.woke(SystemClock.uptimeMillis())
         if (built) { paintNavigationBar(); show(panel) }
+        // the app started the field over (web pages do, as they re-render): pinyin being typed stays
+        if (restarting && composing && prefs.zhPreeditInline) editor.compose(RimeBridge.input())
         updateAutoCap()
     }
 
@@ -1341,6 +1364,13 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
                 if (rimeKey(t[0].code)) return
                 if (!RimeEngine.ready) { editor.type(t); return }
             }
+            if (composing && t == "@") {
+                // the letters before @ were an address, not pinyin: they go in as typed
+                val raw = RimeBridge.input()
+                RimeBridge.clearComposition(); zh.reset(); flushRime()
+                editor.type(raw + t)
+                syncBar(); return
+            }
             finishComposing()
             if (ellipsis(t)) { syncBar(); return }
             val half = smartPunct(t)
@@ -2098,6 +2128,11 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         /** Quick-panel tools that open 雾凇's own candidates: tile → what is typed for them. */
         val RIME_TOOLS = linkedMapOf("date" to "rq", "time" to "sj", "week" to "xq", "lunar" to "nl")
         val PASSWORDS = setOf(InputType.TYPE_TEXT_VARIATION_PASSWORD, InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD, InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD)
+        val PASSWORD_WORDS = listOf("密码", "password", "passcode", "пароль", "口令")
+        val ACCOUNT_WORDS = listOf("邮箱", "电子邮件", "email", "e-mail", "账号", "帐号", "用户名", "username", "user name", "login", "登录名",
+            "почта", "логин", "网址", "url", "域名")
+        /** Apps whose text fields are account names and the like (Google's sign-in). */
+        val ACCOUNT_APPS = setOf("com.google.android.gms", "com.google.android.gsf.login")
         val ADDRESSES = setOf(InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS, InputType.TYPE_TEXT_VARIATION_URI, InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS)
     }
 }
