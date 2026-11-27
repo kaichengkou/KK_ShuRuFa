@@ -197,6 +197,8 @@ object Shark {
     private val spriteCanvas by lazy { Canvas(sprite) }
     private val blit = Paint().apply { isFilterBitmap = false; isAntiAlias = false; isDither = false }
     private val dst = android.graphics.RectF()
+    private var spritePose: Pose? = null
+    private var spriteWear: Wear? = null
 
     /**
      * [draw], as one picture: 小K is drawn at one pixel per cell and the picture scaled up without
@@ -204,8 +206,12 @@ object Shark {
      * by fractions of a pixel, smoothly.
      */
     fun drawCrisp(c: Canvas, cx: Float, cy: Float, size: Float, pose: Pose, alpha: Int = 255, wear: Wear? = wearToday()) {
-        sprite.eraseColor(0)
-        draw(spriteCanvas, SP / 2f, SP / 2f + 0.5f, 13f, pose, 255, wear)
+        // the picture is made again only when the pose changes (most frames move it, not change it)
+        if (pose != spritePose || wear !== spriteWear) {
+            sprite.eraseColor(0)
+            draw(spriteCanvas, SP / 2f, SP / 2f + 0.5f, 13f, pose, 255, wear)
+            spritePose = pose; spriteWear = wear
+        }
         val cellPx = cellFor(size)
         dst.set(cx - SP / 2f * cellPx, cy - (SP / 2f + 0.5f) * cellPx, cx + SP / 2f * cellPx, cy + (SP / 2f - 0.5f) * cellPx)
         blit.alpha = alpha

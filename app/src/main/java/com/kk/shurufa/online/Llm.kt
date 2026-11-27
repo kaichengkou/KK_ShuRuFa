@@ -129,16 +129,16 @@ object Llm {
     fun completeQuick(prefs: Prefs, target: String, system: String, user: String, cancelled: () -> Boolean = { false }): String {
         val id = targetId(target); val m = targetModel(prefs, target)
         if (!configured(prefs, id)) error("还没有设置 ${provider(id).title} 的 API Key")
-        thinking = prefs.aiThinking
+        val think = prefs.aiThinking
         return when (protocol(prefs, id)) {
             "claude" -> try {
-                claude(key(prefs, id), m, system, user, {}, cancelled, if (id == "claude") null else base(prefs, id))
+                claude(key(prefs, id), m, system, user, {}, cancelled, if (id == "claude") null else base(prefs, id), think)
             } catch (e: IllegalStateException) {
                 // the SDK's rate limit comes back as a message; it means the same as a 429
                 if (e.message?.contains("频繁") == true) throw HttpError(429, e.message.orEmpty()) else throw e
             }
-            "gemini" -> gemini(base(prefs, id), key(prefs, id), m, system, user, {}, cancelled)
-            else -> openAi(base(prefs, id), key(prefs, id), m, system, user, {}, cancelled, id)
+            "gemini" -> gemini(base(prefs, id), key(prefs, id), m, system, user, {}, cancelled, think = think)
+            else -> openAi(base(prefs, id), key(prefs, id), m, system, user, {}, cancelled, id, think)
         }.trim()
     }
 
@@ -154,6 +154,7 @@ object Llm {
     fun complete(prefs: Prefs, id: String, system: String, user: String, onText: (String) -> Unit = {}, cancelled: () -> Boolean = { false }, model: String? = null, search: Boolean = false): String {
         if (!configured(prefs, id)) error("还没有设置 ${provider(id).title} 的 API Key")
         val m0 = model?.takeIf { it.isNotBlank() } ?: model(prefs, id)
+        val think = prefs.aiThinking
         // a busy free tier (503, 429) is common: wait and try again, then a lighter Gemini model
         val models = if (protocol(prefs, id) == "gemini") listOf(m0) + GEMINI_FALLBACK.filter { it != m0 } else listOf(m0)
         var last: HttpError? = null
@@ -164,9 +165,9 @@ object Llm {
                 try {
                     return when (protocol(prefs, id)) {
                         // Claude itself, or a service that speaks the Anthropic format at its own address
-                        "claude" -> claude(key(prefs, id), m, system, user, { streamed = true; onText(it) }, cancelled, if (id == "claude") null else base(prefs, id))
-                        "gemini" -> gemini(base(prefs, id), key(prefs, id), m, system, user, { streamed = true; onText(it) }, cancelled, search)
-                        else -> openAi(base(prefs, id), key(prefs, id), m, system, user, { streamed = true; onText(it) }, cancelled, id)
+                        "claude" -> claude(key(prefs, id), m, system, user, { streamed = true; onText(it) }, cancelled, if (id == "claude") null else base(prefs, id), think)
+                        "gemini" -> gemini(base(prefs, id), key(prefs, id), m, system, user, { streamed = true; onText(it) }, cancelled, search, think)
+                        else -> openAi(base(prefs, id), key(prefs, id), m, system, user, { streamed = true; onText(it) }, cancelled, id, think)
                     }.trim().also { if (m != m0) remember(prefs, id, model, m0, m, last) }
                 } catch (e: HttpError) {
                     last = e
@@ -198,8 +199,7 @@ object Llm {
      * Off asks each model for the least it accepts. Gemini: thinkingLevel (Gemini 3) or
      * thinkingBudget (2.5); each model's accepted form is remembered after a 400.
      */
-    @Volatile var thinking = "off"
-    private fun geminiLevels(): List<JSONObject?> {
+    private fun geminiLevels(thinking: String): List<JSONObject?> {
         fun lv(l: String) = JSONObject().put("thinkingLevel", l)
         fun bd(b: Int) = JSONObject().put("thinkingBudget", b)
         return when (thinking) {
@@ -210,8 +210,8 @@ object Llm {
         }
     }
     private val levelFor = java.util.concurrent.ConcurrentHashMap<String, Int>()
-    private fun <T> withThinking(model: String, call: (JSONObject) -> T): T {
-        val levels = geminiLevels()
+    private fun <T> withThinking(model: String, thinking: String, call: (JSONObject) -> T): T {
+        val levels = geminiLevels(thinking)
         val key = "$thinking|$model"
         var i = (levelFor[key] ?: 0).coerceAtMost(levels.lastIndex)
         while (true) {
@@ -224,7 +224,7 @@ object Llm {
     }
 
     /** OpenAI-format models that take a reasoning setting: what to send for [thinking] (null: nothing). */
-    private fun openAiThinking(id: String, model: String, body: JSONObject) {
+    private fun openAiThinking(id: String, model: String, body: JSONObject, thinking: String) {
         val m = model.lowercase()
         val off = thinking == "off"
         when {
@@ -393,7 +393,7 @@ object Llm {
             .put(JSONObject().put("inline_data", JSONObject().put("mime_type", "audio/wav").put("data", android.util.Base64.encodeToString(wav, android.util.Base64.NO_WRAP))))
             .put(JSONObject().put("text", "Transcribe this recording exactly as spoken, in $langName, with natural punctuation. " +
                 "Leave out hesitation sounds. Output only the transcript, nothing else.")))))
-        val c = withThinking(model) { cfg -> post("$base/models/$model:generateContent", mapOf("x-goog-api-key" to key), body.put("generationConfig", cfg)) }
+        val c = withThinking(model, "off") { cfg -> post("$base/models/$model:generateContent", mapOf("x-goog-api-key" to key), body.put("generationConfig", cfg)) }
         val text = try { c.inputStream.bufferedReader().readText() } catch (e: java.io.IOException) { error("连接中断了，再试一次") } finally { c.disconnect() }
         val parts = runCatching { JSONObject(text).getJSONArray("candidates").getJSONObject(0).getJSONObject("content").getJSONArray("parts") }.getOrNull() ?: return ""
         return (0 until parts.length()).map { parts.getJSONObject(it) }.filter { !it.optBoolean("thought") }.joinToString("") { it.optString("text") }
@@ -401,8 +401,23 @@ object Llm {
 
     // ---- Claude (official SDK) ----
 
-    private fun claude(key: String, model: String, system: String, user: String, onText: (String) -> Unit, cancelled: () -> Boolean, baseUrl: String? = null): String {
-        val client = AnthropicOkHttpClient.builder().apiKey(key).apply { if (baseUrl != null) baseUrl(baseUrl) }.build()
+    /**
+     * One client per key and address, kept: a client of its own for each request would set up a
+     * new connection (and its TLS handshake) every time, a good part of a 云联想 request's time.
+     */
+    private val claudeClients = java.util.concurrent.ConcurrentHashMap<String, com.anthropic.client.AnthropicClient>()
+
+    private fun claudeClient(key: String, baseUrl: String?): com.anthropic.client.AnthropicClient {
+        val id = "$key|${baseUrl.orEmpty()}"
+        claudeClients[id]?.let { return it }
+        // a key changed in the settings: the clients of the old ones go
+        if (claudeClients.size >= 4) claudeClients.values.toList().also { claudeClients.clear() }.forEach { runCatching { it.close() } }
+        return claudeClients.getOrPut(id) { AnthropicOkHttpClient.builder().apiKey(key).apply { if (baseUrl != null) baseUrl(baseUrl) }.build() }
+    }
+
+    private fun claude(key: String, model: String, system: String, user: String, onText: (String) -> Unit, cancelled: () -> Boolean, baseUrl: String? = null, thinking: String = "off"): String {
+        val client = claudeClient(key, baseUrl)
+        val out = Stream(onText)
         val b = MessageCreateParams.builder()
             .model(model)
             .maxTokens(8000L)
@@ -425,7 +440,7 @@ object Llm {
                 while (it.hasNext()) {
                     if (cancelled()) break
                     val ev = it.next()
-                    ev.contentBlockDelta().ifPresent { d -> d.delta().text().ifPresent { t -> sb.append(t.text()); onText(sb.toString()) } }
+                    ev.contentBlockDelta().ifPresent { d -> d.delta().text().ifPresent { t -> sb.append(t.text()); out.text(sb) } }
                     ev.messageDelta().ifPresent { m -> m.delta().stopReason().ifPresent { r -> if (r == BetaStopReason.REFUSAL) refused = true } }
                 }
             }
@@ -443,12 +458,28 @@ object Llm {
             error("Claude 出错了（${e.statusCode()}）")
         } catch (e: AnthropicIoException) {
             error("连不上 Claude，检查一下网络")
-        } finally {
-            client.close()
         }
         if (refused && sb.isEmpty()) error("这段内容 Claude 不便处理")
+        out.done(sb)
         return sb.toString()
     }
+
+    /**
+     * Hands the text so far to [onText] as it streams: the first piece at once, then at most every
+     * [STREAM_MS] (each call copies the whole text, and the panel lays all of it out again), and
+     * whatever came last when the stream ends.
+     */
+    private class Stream(private val onText: (String) -> Unit) {
+        private var at = 0L
+        private var given = 0
+        fun text(sb: StringBuilder) {
+            val now = android.os.SystemClock.uptimeMillis()
+            if (given > 0 && now - at < STREAM_MS) return
+            at = now; given = sb.length; onText(sb.toString())
+        }
+        fun done(sb: StringBuilder) { if (sb.length != given && sb.isNotEmpty()) { given = sb.length; onText(sb.toString()) } }
+    }
+    private const val STREAM_MS = 60L
 
     // ---- HTTP helpers for the other services ----
 
@@ -494,14 +525,14 @@ object Llm {
 
     // ---- OpenAI, DeepSeek and compatible services: Chat Completions ----
 
-    private fun openAi(base: String, key: String, model: String, system: String, user: String, onText: (String) -> Unit, cancelled: () -> Boolean, id: String = ""): String {
+    private fun openAi(base: String, key: String, model: String, system: String, user: String, onText: (String) -> Unit, cancelled: () -> Boolean, id: String = "", thinking: String = "off"): String {
         fun body(reason: Boolean) = JSONObject()
             .put("model", model)
             .put("stream", true)
             .put("messages", JSONArray()
                 .put(JSONObject().put("role", "system").put("content", system))
                 .put(JSONObject().put("role", "user").put("content", user)))
-            .also { if (reason) openAiThinking(id, model, it) }
+            .also { if (reason) openAiThinking(id, model, it, thinking) }
         val reason = model !in noReasoning
         val c = try { post("$base/chat/completions", mapOf("Authorization" to "Bearer $key"), body(reason)) } catch (e: HttpError) {
             // a model that does not take the reasoning setting: without it, and remembered
@@ -510,11 +541,13 @@ object Llm {
             post("$base/chat/completions", mapOf("Authorization" to "Bearer $key"), body(false))
         }
         val sb = StringBuilder()
+        val out = Stream(onText)
         sse(c, cancelled) { d ->
             val choice = runCatching { JSONObject(d).getJSONArray("choices").optJSONObject(0) }.getOrNull() ?: return@sse
             val t = choice.optJSONObject("delta")?.optString("content").orEmpty()
-            if (t.isNotEmpty() && t != "null") { sb.append(t); onText(sb.toString()) }
+            if (t.isNotEmpty() && t != "null") { sb.append(t); out.text(sb) }
         }
+        out.done(sb)
         return sb.toString()
     }
 
@@ -522,10 +555,10 @@ object Llm {
 
     private class NoTools : RuntimeException()
 
-    private fun gemini(base: String, key: String, model: String, system: String, user: String, onText: (String) -> Unit, cancelled: () -> Boolean, search: Boolean = false): String =
-        try { geminiRun(base, key, model, system, user, onText, cancelled, search) } catch (e: NoTools) { geminiRun(base, key, model, system, user, onText, cancelled, false) }
+    private fun gemini(base: String, key: String, model: String, system: String, user: String, onText: (String) -> Unit, cancelled: () -> Boolean, search: Boolean = false, think: String = "off"): String =
+        try { geminiRun(base, key, model, system, user, onText, cancelled, search, think) } catch (e: NoTools) { geminiRun(base, key, model, system, user, onText, cancelled, false, think) }
 
-    private fun geminiRun(base: String, key: String, model: String, system: String, user: String, onText: (String) -> Unit, cancelled: () -> Boolean, search: Boolean): String {
+    private fun geminiRun(base: String, key: String, model: String, system: String, user: String, onText: (String) -> Unit, cancelled: () -> Boolean, search: Boolean, think: String): String {
         // some models (Gemma, the transcribe model) refuse a system instruction: put it in the message instead
         val tools = search && model !in noTools
         fun body(fold: Boolean) = JSONObject().apply {
@@ -535,7 +568,7 @@ object Llm {
             put("contents", JSONArray().put(JSONObject().put("role", "user").put("parts", JSONArray().put(JSONObject().put("text", if (fold) "$system\n\n$user" else user)))))
         }
         val url = "$base/models/$model:streamGenerateContent?alt=sse"
-        val c = withThinking(model) { cfg ->
+        val c = withThinking(model, think) { cfg ->
             if (model in noSystem) post(url, mapOf("x-goog-api-key" to key), body(true).put("generationConfig", cfg))
             else try { post(url, mapOf("x-goog-api-key" to key), body(false).put("generationConfig", cfg)) } catch (e: HttpError) {
                 // a model without search: asked again without it, and not offered it again
@@ -546,15 +579,17 @@ object Llm {
             }
         }
         val sb = StringBuilder()
+        val out = Stream(onText)
         sse(c, cancelled) { d ->
             val parts = runCatching { JSONObject(d).getJSONArray("candidates").getJSONObject(0).getJSONObject("content").getJSONArray("parts") }.getOrNull() ?: return@sse
             for (i in 0 until parts.length()) {
                 val p = parts.getJSONObject(i)
                 if (p.optBoolean("thought")) continue
                 val t = p.optString("text")
-                if (t.isNotEmpty()) { sb.append(t); onText(sb.toString()) }
+                if (t.isNotEmpty()) { sb.append(t); out.text(sb) }
             }
         }
+        out.done(sb)
         return sb.toString()
     }
 }

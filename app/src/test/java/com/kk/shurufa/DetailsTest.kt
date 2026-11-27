@@ -118,8 +118,8 @@ class DetailsTest {
         back(); assertEquals("ok ", field.text.toString())
         // 3, then Chinese: the comma was a sentence's, full-width again
         field.text.clear(); field.text.append("共3,"); Selection.setSelection(field.text, 3); ime.onUpdateSelection(0, 0, 3, 3, -1, -1)
-        KkImeService::class.java.getDeclaredField("halfAfterDigit").apply { isAccessible = true }.set(ime, "," to "，")
-        KkImeService::class.java.getDeclaredMethod("restoreFullWidth", String::class.java).apply { isAccessible = true }.invoke(ime, "好的")
+        ime.punct.typed(",", "，")
+        ime.punct.restoreFullWidth("好的")
         assertEquals("共3，", field.text.toString())
         field.text.clear(); field.text.append("ok "); Selection.setSelection(field.text, 3); ime.onUpdateSelection(0, 0, 3, 3, -1, -1)
         // 双击句号 made an ellipsis: backspace gives the two periods back

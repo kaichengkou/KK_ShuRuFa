@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 11 and older: what the system's own backup leaves out. The settings file holds the AI
+     services' API keys, which stay on this phone (设置 → 备份 carries the rest, without them); the
+     clipboard history holds codes and whatever else was copied. -->
+<full-backup-content>
+    <exclude domain="sharedpref" path="kk_prefs.xml" />
+    <exclude domain="file" path="clipboard.txt" />
+    <exclude domain="file" path="clips/" />
+</full-backup-content>

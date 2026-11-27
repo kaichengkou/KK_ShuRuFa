@@ -45,6 +45,13 @@ import com.kk.shurufa.keyboard.PopupOverlay
 import com.kk.shurufa.keyboard.QuickPanel
 import com.kk.shurufa.keyboard.SheetHandle
 import com.kk.shurufa.keyboard.SymbolCategory
+import com.kk.shurufa.keyboard.FloatPills
+import com.kk.shurufa.keyboard.FrameRate
+import com.kk.shurufa.keyboard.SharkLife
+import com.kk.shurufa.keyboard.TabStrip
+import com.kk.shurufa.keyboard.TouchModel
+import com.kk.shurufa.online.AiBudget
+import com.kk.shurufa.online.Llm
 import com.kk.shurufa.online.TranslateService
 import com.kk.shurufa.rime.RimeBridge
 import com.kk.shurufa.rime.RimeEngine
@@ -110,8 +117,8 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     private lateinit var candPanel: LinearLayout
     private lateinit var candGrid: GridPanel
     private lateinit var candHandle: SheetHandle
-    private lateinit var toneTabs: com.kk.shurufa.keyboard.TabStrip
-    private lateinit var syllableTabs: com.kk.shurufa.keyboard.TabStrip
+    private lateinit var toneTabs: TabStrip
+    private lateinit var syllableTabs: TabStrip
     private lateinit var symbolPanel: LinearLayout
     private lateinit var symRail: GridPanel
     private lateinit var symCells: GridPanel
@@ -159,6 +166,8 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     private var wordsHere = true
     /** What is typed here may be learned from. */
     private var learnHere = true
+    /** Neither a password nor an address (by its type or by its hint): sentences start with a capital. */
+    private var plainField = true
     /** 云联想, and the continuations at the front of the suggestions now. */
     private val cloud by lazy { CloudPredict(prefs) { syncBar() } }
     private var cloudShown: List<String> = emptyList()
@@ -167,7 +176,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     private var greeting: String? = null
     private var greetingAt = 0L
     /** AI 浮窗, and what it shows now: 云联想's lines or the AI 候选. */
-    private lateinit var floats: com.kk.shurufa.keyboard.FloatPills
+    private lateinit var floats: FloatPills
     private var floatCloud: List<String> = emptyList()
     private var floatCand: String? = null
 
@@ -198,6 +207,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     private var corrected: Correction? = null
     private var predictionLabel = ""
     private var searchResults: List<String> = emptyList()
+    private var searchFor = ""
     /** A notice raised before the bar existed (a layout file that failed to load). */
     private var pendingNotice: String? = null
 
@@ -209,7 +219,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
 
     override fun onCreate() {
         super.onCreate()
-        com.kk.shurufa.keyboard.FrameRate.window = window.window
+        FrameRate.window = window.window
         haptics = Haptics(this, prefs)
         repo = LayoutRepo(this, overrides = { KeyOverrides.load(prefs, it) })
         zhMemory = ZhMemory(this).also { if (prefs.zhPredictLearn) it.load() }
@@ -233,7 +243,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     }
 
     override fun onDestroy() {
-        com.kk.shurufa.keyboard.FrameRate.window = null
+        FrameRate.window = null
         voice.destroy()
         clipboard.unregister()
         prefs.sp.unregisterOnSharedPreferenceChangeListener(settingsListener)
@@ -246,9 +256,13 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
 
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
-        // the recognizer's models are by far the biggest thing held; they load again when needed
+        // the recognizer's models are by far the biggest thing held; they load again when needed.
+        // Only when memory is short: UI_HIDDEN (20) is above RUNNING_LOW (10) on the same scale, and
+        // it comes every time the keyboard goes away, which is no reason to read 6 MB again later.
         @Suppress("DEPRECATION")
-        if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
+        val short = level == ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW || level == ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL ||
+            level >= ComponentCallbacks2.TRIM_MEMORY_BACKGROUND
+        if (short) {
             voice.trimMemory()
             if (sink != Sink.TRANSLATE) translateService.trimMemory()
             // next come the word tables (the Russian ones are about 6 MB): those of languages not
@@ -263,6 +277,8 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     private fun onSetting(key: String?) {
         if (key == null) return
         if (key.startsWith("hap_")) { haptics.invalidate(); return }
+        // 小K's pace: read here when it changes, not on every frame it is drawn
+        if (key.startsWith("kay_")) SharkLife.tune = prefs.kayTune()
         if (Prefs.rebuildsKeyboard(key)) {
             layouts.clear(); math = null
             if (built) setInputView(onCreateInputView())
@@ -294,10 +310,9 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
      * What may be learned and recorded in this field: never from passwords, addresses or fields
      * that ask not to be learned from, and nothing at all in 临时模式.
      */
-    private fun applyPrivacy(info: EditorInfo) {
+    private fun applyPrivacy(info: EditorInfo, kind: String? = fieldKind(info)) {
         val cls = info.inputType and InputType.TYPE_MASK_CLASS
-        val variation = info.inputType and InputType.TYPE_MASK_VARIATION
-        val kind = fieldKind(info)
+        plainField = kind == null
         val isPassword = kind == "password"
         val isAddress = kind == "address"
         val noLearning = (info.imeOptions and EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING) != 0 || prefs.incognito
@@ -371,7 +386,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         column.addView(bar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         column.addView(content, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         root.addView(column, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM))
-        floats = com.kk.shurufa.keyboard.FloatPills(this, prefs).also {
+        floats = FloatPills(this, prefs).also {
             it.theme = kbTheme; it.visibility = View.GONE
             it.onFeedback = { haptics.play(HapticEvent.OPTION) }
             it.onPick = { i -> floatCand?.let { commitAiCandidate() } ?: floatCloud.getOrNull(i)?.let { p -> pickCloud(p) } }
@@ -447,7 +462,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     }
 
     /** 落点自适应 for the letter keys, kept across input views. */
-    private val touchModel by lazy { com.kk.shurufa.keyboard.TouchModel(prefs.state) }
+    private val touchModel by lazy { TouchModel(prefs.state) }
 
     override fun newKeyboard() = KeyboardView(this, prefs).also { it.theme = kbTheme; it.listener = this; it.overlay = overlay }
 
@@ -512,7 +527,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         val isAddress = kind == "address"
         if ((isPassword || isAddress) && (isZh || curLang == "ru")) tempLang = latinLanguage()
         // 打字数据: never from passwords, addresses or fields that ask not to be learned from
-        applyPrivacy(info)
+        applyPrivacy(info, kind)
         autoSpaced = false
         // the field says what goes in it: numbers get the number pad, with the marks that field takes
         fieldOps = when (cls) {
@@ -536,11 +551,11 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         if (!restarting && panel == Panel.LETTERS && wordsHere && !prefs.incognito && clipboard.pendingChip() == null && kay.greetingDue() &&
             editor.textBefore(1).isEmpty() && editor.textAfter(1).isEmpty()) {
             greeting = kay.line(); kay.markGreeted(line = greeting); greetingAt = SystemClock.uptimeMillis()
-            com.kk.shurufa.keyboard.SharkLife.greet(greetingAt)
+            SharkLife.greet(greetingAt)
         }
         if (!prefs.incognito) kay.prefetch()
         // back after a long while: it wakes with a start
-        if (!restarting && greeting == null) com.kk.shurufa.keyboard.SharkLife.woke(SystemClock.uptimeMillis())
+        if (!restarting && greeting == null) SharkLife.woke(SystemClock.uptimeMillis())
         if (built) { paintNavigationBar(); show(panel) }
         // the app started the field over (web pages do, as they re-render): pinyin being typed stays
         if (restarting && composing && prefs.zhPreeditInline) editor.compose(RimeBridge.input())
@@ -573,7 +588,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     override fun kayShy() = prefs.incognito || editor.secret
 
     override fun onKayPat() {
-        com.kk.shurufa.keyboard.SharkLife.pat(SystemClock.uptimeMillis())
+        SharkLife.pat(SystemClock.uptimeMillis())
         haptics.play(HapticEvent.OPTION)
         // on the space key it simply smiles; otherwise it says so there
         if (kayOnSpace()) keyboard.invalidate() else spaceSay(listOf("嘿嘿 (｡>ω<｡)", "再摸一下 (〃∀〃)", "${kay.name}在呢 (・ω・)").random())
@@ -604,7 +619,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     /** The keyboard went away without the field finishing (another app came up, the screen went off). */
     override fun onWindowHidden() {
         super.onWindowHidden()
-        com.kk.shurufa.keyboard.FrameRate.idle()
+        FrameRate.idle()
         stopBackgroundWork()
         wordPredictors.values.forEach { it.save() }
         zhMemory.save()
@@ -770,7 +785,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
             Panel.VOICE -> { content.addView(voicePanel, fixed); if (entering) voice.onOpened() }
             Panel.CANDIDATES -> {
                 syncToneTabs()
-                val (cands, comments) = zhCandidates(300)
+                val (cands, comments) = zhCandidates(GRID_CANDIDATES)
                 candGrid.notes = zh.annotations(cands, comments)
                 candGrid.setItems(cands)
                 content.addView(candPanel, fixed)
@@ -846,11 +861,22 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
 
     // ---- the bar ------------------------------------------------------------------------
 
+    /**
+     * Shows on the bar (and in the AI 浮窗) what the state calls for. What it shows is decided in
+     * [syncBarOnly]; the AI requests it may start ([askAiCandidate], [askCloud]) do nothing when what
+     * they are for is already waiting or on its way, so syncing again for another reason is free.
+     */
     override fun syncBar() {
         if (!built) return
         floatCloud = emptyList(); floatCand = null
         syncBarOnly()
         floats.show(floatCand?.let { listOf(it) } ?: floatCloud)
+        // the opened candidates without a composition: back to the letters
+        if (panel == Panel.CANDIDATES && !composing) showPanel(Panel.LETTERS)
+        if (AiBudget.justPaused) {
+            AiBudget.justPaused = false
+            notice("AI 服务说请求太多（免费额度可能用完了），云联想先歇 30 分钟")
+        }
     }
 
     private fun syncBarOnly() {
@@ -865,61 +891,74 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
                 val q = query.toString()
                 bar.showQuery("AI 指令", q, "说说想怎么改，比如“改成适合发朋友圈的语气”", if (q.isBlank()) null else "执行")
             }
-            greeting != null && s == null && letters && !composing && predictions.isEmpty() -> bar.showGreeting(greeting!!, com.kk.shurufa.online.Llm.resolve(prefs, prefs.quickTarget.ifEmpty { prefs.aiProvider }) != null)
-            s == Sink.EMOJI && !composing && letters -> {
-                val q = query.toString().trim()
-                searchResults = emoji.search(q)
-                when {
-                    q.isEmpty() -> bar.showQuery("查找表情", "", "输入中文或英文关键词，比如 开心、cat", null)
-                    else -> bar.showPredictions(searchResults, if (searchResults.isEmpty()) "没有找到和「$q」相关的表情" else "查找「$q」· 点按发送")
-                }
-            }
+            greeting != null && s == null && letters && !composing && predictions.isEmpty() -> bar.showGreeting(greeting!!, Llm.resolve(prefs, prefs.quickTarget.ifEmpty { prefs.aiProvider }) != null)
+            s == Sink.EMOJI && !composing && letters -> showEmojiSearch()
             isZh && RimeEngine.state == RimeEngine.State.DEPLOYING && letters -> bar.showMessage("正在部署雾凇拼音词库，首次约需一分钟…", busy = true)
             isZh && RimeEngine.state == RimeEngine.State.PREPARING && letters -> bar.showMessage("正在准备中文词库…", busy = true)
             isZh && RimeEngine.state == RimeEngine.State.FAILED && letters -> bar.showMessage("中文引擎没有启动 · 点按重试", tappable = true)
             composing && pinyinEdit -> bar.showEdit(RimeBridge.input(), RimeBridge.caretPos(), zh.gaps(RimeBridge.input(), RimeBridge.preedit()))
-            composing -> {
-                val pre = RimeBridge.preedit()
-                zh.track(pre)
-                val (cands, comments) = zhCandidates(CANDIDATES_ON_BAR)
-                val input = RimeBridge.input()
-                aiCand.update(input, pre.split(' ', '\'').count { it.isNotBlank() }, cands.firstOrNull().orEmpty(), { editor.textBefore(20) },
-                    allowed = learnHere && sink == null && !toneFiltering)
-                val aiAnswer = aiCand.answerFor(input)
-                // in the 浮窗 it leaves the bar as Rime has it
-                val floating = prefs.aiPlace == "float"
-                if (floating) floatCand = aiAnswer
-                val ai = aiAnswer.takeIf { !floating }
-                aiShown = ai != null
-                val notes = zh.annotations(cands, comments)
-                // second, marked AI: the first stays Rime's, which is what space takes
-                if (ai != null) bar.showCandidates(pre, cands.take(1) + ai + cands.drop(1),
-                    notes.take(1).ifEmpty { listOf("") } + "AI" + notes.drop(1), zh.caretInPreedit(pre, RimeBridge.cursor()))
-                else bar.showCandidates(pre, cands, notes, zh.caretInPreedit(pre, RimeBridge.cursor()))
-                if (prefs.zhPreeditInline) editor.compose(RimeBridge.input())
-            }
-            predictions.isNotEmpty() && letters -> {
-                // 云联想: the AI's continuations of this text, when they came, go first, marked 云
-                val before = editor.textBefore(prefs.cloudContext)
-                val revert = revertChip && corrected != null
-                if (predictionLabel.isEmpty() && !revert) cloud.update(before, allowed = learnHere && sink == null)
-                if (com.kk.shurufa.online.AiBudget.justPaused) {
-                    com.kk.shurufa.online.AiBudget.justPaused = false
-                    notice("AI 服务说请求太多（免费额度可能用完了），云联想先歇 30 分钟")
-                }
-                cloudShown = if (predictionLabel.isEmpty() && !revert) cloud.answerFor(before) else emptyList()
-                if (prefs.aiPlace == "float" && cloudShown.isNotEmpty()) { floatCloud = cloudShown; cloudShown = emptyList() }
-                if (revert) bar.showPredictions(predictions, predictionLabel, listOf("原"))
-                else if (cloudShown.isEmpty()) bar.showPredictions(predictions, predictionLabel)
-                else bar.showPredictions(cloudShown + predictions.filter { it !in cloudShown }, predictionLabel, cloudShown.map { "云" })
-            }
+            composing -> showComposition()
+            predictions.isNotEmpty() && letters -> showSuggestions()
             clipboard.pendingChip() != null && letters && !prefs.incognito -> clipboard.chip()?.let { (text, kind) -> bar.showClip(text, kind) }
-            else -> {
-                bar.showToolbar()
-                if (panel == Panel.CANDIDATES) showPanel(Panel.LETTERS)
-            }
+            else -> bar.showToolbar()
         }
     }
+
+    /** 查找表情: what matches the query, searched again only when it changed. */
+    private fun showEmojiSearch() {
+        val q = query.toString().trim()
+        if (q != searchFor || searchResults.isEmpty()) { searchResults = emoji.search(q); searchFor = q }
+        if (q.isEmpty()) bar.showQuery("查找表情", "", "输入中文或英文关键词，比如 开心、cat", null)
+        else bar.showPredictions(searchResults, if (searchResults.isEmpty()) "没有找到和「$q」相关的表情" else "查找「$q」· 点按发送")
+    }
+
+    /** The pinyin and Rime's candidates, with the AI 候选 second (or in the 浮窗) when it came. */
+    private fun showComposition() {
+        val pre = RimeBridge.preedit()
+        val input = RimeBridge.input()
+        zh.track(pre)
+        // a page or two at first; more as the row is scrolled toward its end (onMoreCandidates)
+        val barKey = input + "\u0000" + pre
+        if (barKey != barFor) { barFor = barKey; barCands = CANDIDATES_ON_BAR }
+        val (cands, comments) = zhCandidates(barCands)
+        askAiCandidate(input, pre, cands.firstOrNull().orEmpty())
+        val aiAnswer = aiCand.answerFor(input)
+        // in the 浮窗 it leaves the bar as Rime has it
+        val floating = prefs.aiPlace == "float"
+        if (floating) floatCand = aiAnswer
+        val ai = aiAnswer.takeIf { !floating }
+        aiShown = ai != null
+        val notes = zh.annotations(cands, comments)
+        val caret = zh.caretInPreedit(pre, RimeBridge.cursor())
+        // second, marked AI: the first stays Rime's, which is what space takes
+        if (ai != null) bar.showCandidates(pre, cands.take(1) + ai + cands.drop(1), notes.take(1).ifEmpty { listOf("") } + "AI" + notes.drop(1), caret)
+        else bar.showCandidates(pre, cands, notes, caret)
+        if (prefs.zhPreeditInline) editor.compose(input)
+    }
+
+    /** AI 候选 for this pinyin, after a pause, where it may be asked. */
+    private fun askAiCandidate(input: String, pre: String, first: String) =
+        aiCand.update(input, pre.split(' ', '\'').count { it.isNotBlank() }, first, { editor.textBefore(20) },
+            allowed = learnHere && sink == null && !toneFiltering)
+
+    /** The suggestions after a word, with 云联想's continuations first (or in the 浮窗) when they came. */
+    private fun showSuggestions() {
+        // read from the field only when it is going to be asked (each read is a call into the app)
+        val before = if (prefs.cloudPredict) editor.textBefore(prefs.cloudContext) else ""
+        val revert = revertChip && corrected != null
+        val cloudHere = predictionLabel.isEmpty() && !revert
+        if (cloudHere) askCloud(before)
+        cloudShown = if (cloudHere) cloud.answerFor(before) else emptyList()
+        if (prefs.aiPlace == "float" && cloudShown.isNotEmpty()) { floatCloud = cloudShown; cloudShown = emptyList() }
+        when {
+            revert -> bar.showPredictions(predictions, predictionLabel, listOf("原"))
+            cloudShown.isEmpty() -> bar.showPredictions(predictions, predictionLabel)
+            else -> bar.showPredictions(cloudShown + predictions.filter { it !in cloudShown }, predictionLabel, cloudShown.map { "云" })
+        }
+    }
+
+    /** 云联想 for the text before the caret, after a pause, where it may be asked. */
+    private fun askCloud(before: String) = cloud.update(before, allowed = learnHere && sink == null)
 
     /** A short notice floating above the keyboard (instead of a toast over the app). */
     override fun notice(text: String) {
@@ -950,7 +989,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         row.addView(candGrid, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
         row.addView(side, LinearLayout.LayoutParams(dp(68f).toInt(), ViewGroup.LayoutParams.MATCH_PARENT))
         // 声调筛选, in the opened candidates only: the bar stays as it was
-        toneTabs = com.kk.shurufa.keyboard.TabStrip(this, prefs).apply {
+        toneTabs = TabStrip(this, prefs).apply {
             theme = kbTheme; compact = true
             onFeedback = { haptics.play(HapticEvent.OPTION) }
             onTab = { t -> onToneFilter(t.toInt()) }
@@ -959,10 +998,10 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         candPanel = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         candPanel.addView(candHandle, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         // with several syllables, a row above picks which one the tones are for
-        syllableTabs = com.kk.shurufa.keyboard.TabStrip(this, prefs).apply {
+        syllableTabs = TabStrip(this, prefs).apply {
             theme = kbTheme; compact = true
             onFeedback = { haptics.play(HapticEvent.OPTION) }
-            onTab = { t -> toneSyllable = t.toInt(); syncToneTabs() }
+            onTab = { t -> toneFilter.syllable = t.toInt(); syncToneTabs() }
             onVerticalDrag = { phase, y, v -> when (phase) { 0 -> candHandle.begin(y); 1 -> candHandle.drag(y); else -> candHandle.end(v) } }
         }
         candPanel.addView(syllableTabs, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
@@ -1061,12 +1100,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
                 // leaving selection mode drops the selection back to a caret at its end
                 if (!editor.selectMode && editor.hasSelection) editor.collapseSelection()
             }
-            "up" -> editor.caretStep(KeyEvent.KEYCODE_DPAD_UP)
-            "down" -> editor.caretStep(KeyEvent.KEYCODE_DPAD_DOWN)
-            "left" -> editor.caretStep(KeyEvent.KEYCODE_DPAD_LEFT)
-            "right" -> editor.caretStep(KeyEvent.KEYCODE_DPAD_RIGHT)
-            "home" -> editor.sendKey(KeyEvent.KEYCODE_MOVE_HOME, editor.shiftMeta())
-            "end" -> editor.sendKey(KeyEvent.KEYCODE_MOVE_END, editor.shiftMeta())
+            in CARET_ACTIONS -> caretAction(id)
             "select_all" -> { editor.contextMenu(android.R.id.selectAll); editor.selectMode = true }
             "backspace" -> { haptics.play(HapticEvent.REPEAT); editor.deleteBackward() }
             "copy" -> { copied(editor.copySelection(cut = false), "已复制"); editor.selectMode = false; editor.collapseSelection() }
@@ -1074,6 +1108,20 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
             "paste" -> { editor.contextMenu(android.R.id.paste); editor.selectMode = false }
         }
         syncEditPanel()
+    }
+
+    /** The caret keys of the edit panel and the academic keyboard (with shift while selecting). */
+    private fun caretAction(id: String) {
+        when (id) {
+            "left" -> editor.caretStep(KeyEvent.KEYCODE_DPAD_LEFT)
+            "right" -> editor.caretStep(KeyEvent.KEYCODE_DPAD_RIGHT)
+            "up" -> editor.caretStep(KeyEvent.KEYCODE_DPAD_UP)
+            "down" -> editor.caretStep(KeyEvent.KEYCODE_DPAD_DOWN)
+            "word_left" -> editor.sendKey(KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.META_CTRL_ON or editor.shiftMeta())
+            "word_right" -> editor.sendKey(KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.META_CTRL_ON or editor.shiftMeta())
+            "home" -> editor.sendKey(KeyEvent.KEYCODE_MOVE_HOME, editor.shiftMeta())
+            "end" -> editor.sendKey(KeyEvent.KEYCODE_MOVE_END, editor.shiftMeta())
+        }
     }
 
     /** 简易/科学: !#1 and number fields open the number keyboard in the mode used last. */
@@ -1254,23 +1302,22 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
             zh.reset()
             // learned later if it stays (a slip deleted right away teaches nothing)
             if (learnHere && commit.any { isCjk(it) }) learning.committed(syl.joinToString(""), commit, before = editor.textBefore(8))
-            restoreFullWidth(out)
+            punct.restoreFullWidth(out)
             val spaced = pangu(out)
             editor.type(spaced, pairable = false, syllables = if (out == commit) syl else null)
             corrected = null; madeAuto(spaced, out)
-            predictions = if (prefs.zhPredict && !prefs.pinyinMode && out.any { isCjk(it) })
-                predictor.suggest(editor.textBefore(20).ifEmpty { out }) else emptyList()
+            predictions = if (out.any { isCjk(it) }) zhSuggestions(fallback = out) else emptyList()
             predictionLabel = ""
         } else if (prefs.zhPreeditInline && RimeBridge.input().isEmpty()) editor.finishComposingText()
         if (RimeBridge.input().isEmpty()) { zh.reset(); pinyinEdit = false; aiCand.clear(); aiShown = false }
-        syncBar()
-        if (panel == Panel.CANDIDATES) {
-            if (composing) {
-                val (c, comments) = zhCandidates(300)
-                candGrid.notes = zh.annotations(c, comments)
-                candGrid.setItems(c)
-            } else showPanel(Panel.LETTERS)
+        // the opened grid first: it fetches the most, and the bar then reads from what it fetched
+        if (panel == Panel.CANDIDATES && composing) {
+            val (c, comments) = zhCandidates(GRID_CANDIDATES)
+            candGrid.notes = zh.annotations(c, comments)
+            candGrid.setItems(c)
         }
+        syncBar()
+        if (panel == Panel.CANDIDATES && !composing) showPanel(Panel.LETTERS)
     }
 
     /**
@@ -1287,10 +1334,12 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         if (prefs.backspaceReselect && run.isNotEmpty() && RimeEngine.ready) {
             predictions = RimeBridge.query(run.joinToString(""), 24).filter { it.isNotEmpty() }.distinct()
             predictionLabel = "按原拼音 " + run.joinToString(" ")
-        } else if (prefs.zhPredict) {
-            predictions = predictor.suggest(editor.textBefore(20))
-        }
+        } else predictions = zhSuggestions()
     }
+
+    /** 中文联想 after what is before the caret ([fallback] where the field shows nothing), unless off or in 拼音模式. */
+    private fun zhSuggestions(fallback: String = ""): List<String> =
+        if (prefs.zhPredict && !prefs.pinyinMode) predictor.suggest(editor.textBefore(20).ifEmpty { fallback }) else emptyList()
 
     // ---- the field ----------------------------------------------------------------------
 
@@ -1319,9 +1368,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         if (!built || shift == 2) return
         val info = currentInputEditorInfo
         val cls = (info?.inputType ?: 0) and InputType.TYPE_MASK_CLASS
-        val variation = (info?.inputType ?: 0) and InputType.TYPE_MASK_VARIATION
-        val excluded = variation in PASSWORDS || variation in ADDRESSES
-        val caps = panel == Panel.LETTERS && !isZh && prefs.autoCap && cls == InputType.TYPE_CLASS_TEXT && !excluded && run {
+        val caps = panel == Panel.LETTERS && !isZh && prefs.autoCap && cls == InputType.TYPE_CLASS_TEXT && plainField && run {
             val before = currentInputConnection?.getTextBeforeCursor(3, 0)?.toString() ?: return@run false
             val t = before.trimEnd(' ')
             t.isEmpty() || t.last() in ".!?…\n。！？" && (before.endsWith(" ") || t.last() == '\n')
@@ -1389,13 +1436,13 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
             }
             finishComposing()
             if (ellipsis(t)) { syncBar(); return }
-            val half = smartPunct(t)
+            val half = punct.smartPunct(t)
             val made = pangu(half)
             editor.type(made)
             // a mark made half-width is not put back by backspace: deleted and typed again soon, it is the full one
             if (half == t) madeAuto(made, t)
             // 3, stays half-width before more digits; Chinese after it turns it back (3，好的)
-            halfAfterDigit = if (half != t) half to t else null
+            punct.typed(half, t)
             syncBar()
             return
         }
@@ -1415,66 +1462,15 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         if (panel == Panel.LETTERS) { suggestWords(); syncBar() }
     }
 
-    /**
-     * 盘古之白: a space between Chinese and Latin letters or digits ("用 iPhone 拍了 3 张"), put in
-     * front of [t] when the character before the caret and [t]'s first one are of the two kinds.
-     * Off by default; never in 拼音模式, which spaces its own syllables.
-     */
-    private fun pangu(t: String): String {
-        if (!prefs.pangu || prefs.pinyinMode || t.isEmpty() || !wordsHere) return t
-        val prev = editor.textBefore(1).firstOrNull() ?: return t
-        val first = t[0]
-        fun latin(c: Char) = c in 'a'..'z' || c in 'A'..'Z' || c in '0'..'9'
-        return if ((isCjk(prev) && latin(first)) || (latin(prev) && isCjk(first))) " $t" else t
-    }
+    /** 盘古之白, 双击句号, 数字后的半角标点. */
+    internal val punct by lazy { Punctuation(editor, prefs) { wordsHere } }
+    private fun pangu(t: String) = punct.pangu(t)
 
-    /**
-     * 双击句号: the period tapped again right away becomes an ellipsis, 。。→ …… and .. → …
-     * Returns true when it did (and the tap is used up).
-     */
+    /** 双击句号; true when the tap made an ellipsis (which the next backspace takes back). */
     private fun ellipsis(t: String): Boolean {
-        val now = SystemClock.uptimeMillis()
-        val quick = now - lastPeriodAt < DOUBLE_PERIOD_MS
-        lastPeriodAt = if (t == "。" || t == ".") now else 0L
-        if (!prefs.doublePeriodEllipsis || !quick || (t != "。" && t != ".")) return false
-        if (editor.textBefore(1) != t) return false
-        lastPeriodAt = 0L
-        val made = if (t == "。") "……" else "…"
-        editor.replaceBefore(1, made)
+        val made = punct.ellipsis(t) ?: return false
         corrected = Correction(made, t + t, "", isWord = false)
         return true
-    }
-    private var lastPeriodAt = 0L
-
-    /** A mark made half-width after a digit (",", "，"), until something else is typed after it. */
-    private var halfAfterDigit: Pair<String, String>? = null
-
-    /** Chinese going in right after such a mark: it was a sentence's after all, so it is full-width again. */
-    private fun restoreFullWidth(next: String) {
-        val (half, full) = halfAfterDigit ?: return
-        halfAfterDigit = null
-        if (next.firstOrNull()?.let { isCjk(it) } != true) return
-        val before = editor.textBefore(2)
-        if (before.length == 2 && before[0].isDigit() && before.substring(1) == half) editor.replaceBefore(1, full)
-    }
-
-    /** The full-width mark whose half-width form was just deleted, and when: typed again soon, it stays full. */
-    private var halfUndone: String? = null
-    private var halfUndoneAt = 0L
-
-    /**
-     * 数字后的标点保持半角: after a digit, Chinese punctuation that would break a number is typed
-     * half-width. Deleted and typed again within a few seconds, it is the Chinese mark after all
-     * (once: the next time after a digit it is half-width again).
-     */
-    private fun smartPunct(t: String): String {
-        if (!prefs.smartPunct) return t
-        val undone = halfUndone
-        halfUndone = null
-        if (undone == t && SystemClock.uptimeMillis() - halfUndoneAt < HALF_RETYPE_MS) return t
-        val before = editor.textBefore(1)
-        if (before.isNotEmpty() && before[0].isDigit()) return when (t) { "。" -> "."; "：" -> ":"; "，" -> ","; else -> t }
-        return t
     }
 
     override fun onFunction(key: Key) {
@@ -1489,7 +1485,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
                     sink != null -> { queryBack(); syncBar() }
                     revertCorrection() -> {}
                     else -> {
-                        halfAfterDigit?.let { (half, full) -> if (editor.textBefore(half.length) == half) { halfUndone = full; halfUndoneAt = SystemClock.uptimeMillis() } }
+                        punct.deleting()
                         learning.deleting { n -> editor.textBefore(n) }
                         editor.deleteBackward(); updateAutoCap(); suggestAfterDelete(); if (panel == Panel.NUM) showMoneyChip(); syncBar()
                     }
@@ -1527,7 +1523,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
                     // 发送: 小K jumps for the message that went out
                     val info = currentInputEditorInfo
                     if (info != null && (info.imeOptions and EditorInfo.IME_MASK_ACTION) == EditorInfo.IME_ACTION_SEND &&
-                        (info.imeOptions and EditorInfo.IME_FLAG_NO_ENTER_ACTION) == 0) { com.kk.shurufa.keyboard.SharkLife.sent(SystemClock.uptimeMillis()); keyboard.invalidate(); bar.invalidate() }
+                        (info.imeOptions and EditorInfo.IME_FLAG_NO_ENTER_ACTION) == 0) { SharkLife.sent(SystemClock.uptimeMillis()); keyboard.invalidate(); bar.invalidate() }
                     predictions = emptyList(); editor.performEnter(); updateAutoCap(); syncBar()
                 }
             }
@@ -1557,7 +1553,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
             "more_symbols" -> showPanel(Panel.SYMBOLS)
             "math" -> { finishComposing(); showPanel(Panel.MATH) }
             "abc" -> { editor.selectMode = false; showPanel(Panel.LETTERS) }
-            "collapse" -> { tones = IntArray(0); showPanel(Panel.LETTERS) }
+            "collapse" -> { toneFilter.reset(); showPanel(Panel.LETTERS) }
             "reinput" -> { RimeBridge.clearComposition(); flushRime(); showPanel(Panel.LETTERS) }
             "undo" -> undo()
             "lock" -> {
@@ -1565,14 +1561,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
                 symBottom.lockOn = symLock
                 notice(if (symLock) "已锁定：可以连续输入符号" else "已解锁：点一个符号就回到字母")
             }
-            "left" -> editor.caretStep(KeyEvent.KEYCODE_DPAD_LEFT)
-            "right" -> editor.caretStep(KeyEvent.KEYCODE_DPAD_RIGHT)
-            "up" -> editor.caretStep(KeyEvent.KEYCODE_DPAD_UP)
-            "down" -> editor.caretStep(KeyEvent.KEYCODE_DPAD_DOWN)
-            "word_left" -> editor.sendKey(KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.META_CTRL_ON or editor.shiftMeta())
-            "word_right" -> editor.sendKey(KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.META_CTRL_ON or editor.shiftMeta())
-            "home" -> editor.sendKey(KeyEvent.KEYCODE_MOVE_HOME, editor.shiftMeta())
-            "end" -> editor.sendKey(KeyEvent.KEYCODE_MOVE_END, editor.shiftMeta())
+            in CARET_ACTIONS -> caretAction(key.fn.orEmpty())
             "select_all" -> editor.contextMenu(android.R.id.selectAll)
             "copy" -> { copied(editor.copySelection(cut = false), "已复制"); editor.selectMode = false }
             "cut" -> { copied(editor.copySelection(cut = true), "已剪切"); editor.selectMode = false }
@@ -1599,7 +1588,11 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         val letters = mutableListOf<Output>()
         if (prefs.lpHints) DIRS.forEach { d -> key.flicks[d]?.let { symbols += it } }
         if (prefs.lpDigits && panel == Panel.LETTERS) {
-            val col = layout(curLang).rows.firstOrNull()?.indexOf(key) ?: -1
+            // the keys on screen (重音 and 上下标 put copies of the layout's keys there), and their
+            // top letter row, below the digits when 数字行 is on
+            val rows = lettersRows()
+            val top = if (prefs.numberRow && rows.size > 1) rows[1] else rows.firstOrNull()
+            val col = top?.indexOfFirst { it === key } ?: -1
             if (col in 0..9) symbols += Output.of(((col + 1) % 10).toString())
         }
         if (prefs.lpCase && key.isLetter) {
@@ -1698,7 +1691,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     override fun onPress(key: Key) {
         // 小K feels the keys: quick typing, a run of deletes
         val now = SystemClock.uptimeMillis()
-        if (key.fn == "backspace") com.kk.shurufa.keyboard.SharkLife.delete(now) else com.kk.shurufa.keyboard.SharkLife.key(now)
+        if (key.fn == "backspace") SharkLife.delete(now) else SharkLife.key(now)
         if (key.fn == "backspace" || key.fn == null) keyboard.invalidate()
         haptics.play(when (key.fn) {
             null -> HapticEvent.LETTER
@@ -1756,17 +1749,14 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
             // 联想记忆: an association picked is what this person writes after this
             if (learnHere) learning.committed("", word, before = editor.textBefore(8))
             editor.type(pangu(word), pairable = false, syllables = run.takeIf { it.size == word.count { c -> isCjk(c) } })
-            predictions = predictor.suggest(editor.textBefore(20).ifEmpty { word })
+            predictions = zhSuggestions(fallback = word)
             predictionLabel = ""
             syncBar()
             return
         }
-        if (aiShown) {
-            // the bar's second word is the AI's reading of the whole pinyin
-            if (index == AI_SLOT) { commitAiCandidate(); return }
-            pickZh(if (index > AI_SLOT) index - 1 else index); return
-        }
-        pickZh(index)
+        // the bar's second word may be the AI's reading of the whole pinyin
+        val r = barToRime(index) ?: return commitAiCandidate()
+        pickZh(r)
     }
 
     /** Picks Rime's candidate at [index] of what is shown (the grid's numbering, the bar's without AI). */
@@ -1869,78 +1859,28 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
 
     // ---- 声调筛选 ----------------------------------------------------------------------------
 
-    /**
-     * 声调筛选, syllable by syllable: [tones] holds the tone kept for each syllable typed (1–4, 0
-     * for any), for the pinyin in [toneFor] only. [toneSyllable] is the one the tone row is for.
-     */
-    private var tones = IntArray(0)
-    private var toneFor = ""
-    private var toneSyllable = 0
-    private val toneFiltering get() = tones.any { it != 0 }
-    /** While filtering: position on the bar or in the grid → Rime's own candidate index. */
-    private var toneIdx: IntArray? = null
-
-    private fun rimeIndex(i: Int) = toneIdx?.getOrNull(i) ?: i
-
-    /** The syllables still to be chosen for (what Rime shows after any part already picked). */
-    private fun toneSyllables(): List<String> =
-        RimeBridge.preedit().split(' ', '\'').filter { s -> s.isNotEmpty() && s.all { it in 'a'..'z' } }
+    private val toneFilter by lazy { ToneFilter(zh.tones) }
+    private val toneFiltering get() = toneFilter.filtering
+    private fun rimeIndex(i: Int) = toneFilter.rimeIndex(i)
 
     private fun onToneFilter(tone: Int) {
-        val syl = toneSyllables()
-        if (syl.isEmpty()) return
-        if (RimeBridge.input() != toneFor || tones.size != syl.size) { tones = IntArray(syl.size); toneFor = RimeBridge.input() }
-        val at = toneSyllable.coerceIn(0, syl.size - 1)
-        tones[at] = tone
-        // on to the next syllable that has no tone yet, so 你好 is two taps
-        if (tone != 0) (1 until syl.size).map { (at + it) % syl.size }.firstOrNull { tones[it] == 0 }?.let { toneSyllable = it }
+        if (!toneFilter.pick(tone)) return
         syncBar()
         if (panel == Panel.CANDIDATES) showPanel(Panel.CANDIDATES)
     }
 
-    /**
-     * The tone rows of the opened candidates: the syllables (each with the tone picked for it,
-     * nǐ·hao), and the four tones of the chosen one written on it (nī ní nǐ nì), so it is plain
-     * which character is being narrowed.
-     */
+    /** The tone rows of the opened candidates, or none (声调筛选 off, nothing to narrow). */
     private fun syncToneTabs() {
-        val syl = toneSyllables()
-        val on = prefs.toneFilter && syl.isNotEmpty()
-        if (RimeBridge.input() != toneFor || tones.size != syl.size) { tones = IntArray(syl.size); toneFor = RimeBridge.input(); toneSyllable = 0 }
-        toneSyllable = toneSyllable.coerceIn(0, (syl.size - 1).coerceAtLeast(0))
-        syllableTabs.visibility = if (on && syl.size > 1) View.VISIBLE else View.GONE
-        toneTabs.visibility = if (on) View.VISIBLE else View.GONE
-        if (!on) return
-        if (syl.size > 1) syllableTabs.setTabs(syl.mapIndexed { i, s -> i.toString() to PinyinTones.mark(s, tones[i]) }, toneSyllable.toString())
-        val s = syl[toneSyllable]
-        val vowel = s.any { it in "aeiouv" }
-        toneTabs.setTabs(listOf("0" to "全部") + (1..4).map { t -> t.toString() to (if (vowel) PinyinTones.mark(s, t) else "ˉˊˇˋ"[t - 1].toString()) },
-            tones[toneSyllable].toString())
+        val rows = if (prefs.toneFilter) toneFilter.rows() else null
+        syllableTabs.visibility = if (rows?.syllables != null) View.VISIBLE else View.GONE
+        toneTabs.visibility = if (rows != null) View.VISIBLE else View.GONE
+        if (rows == null) return
+        rows.syllables?.let { syllableTabs.setTabs(it, rows.syllable) }
+        toneTabs.setTabs(rows.tones, rows.tone)
     }
 
-    /**
-     * Up to [n] candidates with their comments. With tones picked, only those whose characters
-     * have them, each for its own syllable (行 is xíng for "xing", háng for "hang"); a candidate
-     * shorter than the syllables is checked as far as it goes.
-     */
-    private fun zhCandidates(n: Int): Pair<List<String>, List<String>> {
-        if (toneFiltering && RimeBridge.input() != toneFor) tones = IntArray(0)
-        if (!toneFiltering) {
-            toneIdx = null
-            val c = RimeBridge.candidates(n).toList()
-            return c to RimeBridge.candidateComments(c.size).toList()
-        }
-        val all = RimeBridge.candidates(400).toList()
-        val comments = RimeBridge.candidateComments(all.size).toList()
-        val syl = toneSyllables()
-        val keep = all.indices.filter { i ->
-            val c = all[i]
-            tones.indices.all { k -> tones[k] == 0 || (k >= c.length && k > 0) || c.getOrNull(k)?.let { ch -> tones[k] in zh.tones.tonesOf(ch, syl.getOrNull(k)) } == true }
-        }
-        toneIdx = keep.toIntArray()
-        val shown = keep.take(n)
-        return shown.map { all[it] } to shown.map { comments.getOrElse(it) { "" } }
-    }
+    /** Up to [n] candidates with their comments, narrowed by the tones picked. */
+    private fun zhCandidates(n: Int) = toneFilter.candidates(n, TONE_POOL)
 
     /** A 云联想 continuation taken: typed after the text, then what may follow it. */
     private fun pickCloud(phrase: String) {
@@ -1956,8 +1896,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         editor.type(text, pairable = false, source = TypingStats.Source.AI)
         autoSpaced = latin
         predictionLabel = ""
-        predictions = if (isZh) { if (prefs.zhPredict && !prefs.pinyinMode) predictor.suggest(editor.textBefore(20)) else emptyList() }
-            else { suggestWords(); predictions }
+        predictions = if (isZh) zhSuggestions() else { suggestWords(); predictions }
         updateAutoCap()
         syncBar()
     }
@@ -1969,29 +1908,33 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         zh.reset()
         aiCand.clear(); aiShown = false
         editor.type(pangu(text), pairable = false)
-        predictions = if (prefs.zhPredict && !prefs.pinyinMode) predictor.suggest(editor.textBefore(20)) else emptyList()
+        predictions = zhSuggestions()
         predictionLabel = ""
         syncBar()
     }
 
-    override fun candidateOptions(index: Int): List<Output> = when {
-        index < 0 -> predictionOptions(-1 - index)
-        !aiShown -> zhOptions(index)
-        index == AI_SLOT -> emptyList()
-        else -> zhOptions(if (index > AI_SLOT) index - 1 else index)
+    /** The candidate of Rime's at the bar's [index] (the AI 候选 shifts the rest by one), or null for the AI 候选 itself. */
+    private fun barToRime(index: Int): Int? = when {
+        !aiShown || index < AI_SLOT -> index
+        index == AI_SLOT -> null
+        else -> index - 1
     }
 
-    override fun onCandidateOption(index: Int, option: Output) = when {
-        index < 0 -> predictionOption(-1 - index, option)
-        !aiShown -> zhOption(index, option)
-        index == AI_SLOT -> Unit
-        else -> zhOption(if (index > AI_SLOT) index - 1 else index, option)
+    override fun candidateOptions(index: Int): List<Output> =
+        if (index < 0) predictionOptions(-1 - index) else barToRime(index)?.let { zhOptions(it) }.orEmpty()
+
+    override fun onCandidateOption(index: Int, option: Output) {
+        if (index < 0) predictionOption(-1 - index, option) else barToRime(index)?.let { zhOption(it, option) }
     }
+
+    /** [word] as a menu names it: six characters at most. */
+    private fun menuName(word: String) =
+        if (word.codePointCount(0, word.length) > 6) word.substring(0, word.offsetByCodePoints(0, 5)) + "…" else word
 
     /** An association held: put it in as it is, or never offer it again (and forget it was learned). */
     private fun predictionOptions(i: Int): List<Output> {
         val word = predictions.getOrNull(i) ?: return emptyList()
-        val shown = if (word.codePointCount(0, word.length) > 6) word.substring(0, word.offsetByCodePoints(0, 5)) + "…" else word
+        val shown = menuName(word)
         return listOf(Output("取消", "§cancel"), Output("上屏「$shown」", "§type"), Output("不再联想「$shown」", "§mute"))
     }
 
@@ -2010,8 +1953,8 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     }
 
     private fun zhOptions(index: Int): List<Output> {
-        val word = RimeBridge.candidates(rimeIndex(index) + 1).getOrNull(rimeIndex(index)) ?: return emptyList()
-        val shown = if (word.codePointCount(0, word.length) > 6) word.substring(0, word.offsetByCodePoints(0, 5)) + "…" else word
+        val word = RimeBridge.menu(rimeIndex(index) + 1).texts.getOrNull(rimeIndex(index)) ?: return emptyList()
+        val shown = menuName(word)
         val chars = word.codePoints().toArray().filter { Character.UnicodeScript.of(it) == Character.UnicodeScript.HAN }
         // 以词定字: a character of a word, the rest of the pinyin stays
         val pick = if (word.codePointCount(0, word.length) >= 2 && chars.size >= 2) listOf(
@@ -2030,7 +1973,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
             return
         }
         if (option.text == "§mute") {
-            val word = RimeBridge.candidates(rimeIndex(index) + 1).getOrNull(rimeIndex(index)) ?: return
+            val word = RimeBridge.menu(rimeIndex(index) + 1).texts.getOrNull(rimeIndex(index)) ?: return
             Muted.add(this, word)
             restartRimeEngine()
             notice("「$word」不会再出现，可以在「自定义词库」里恢复")
@@ -2066,6 +2009,16 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     }
 
     override fun onEditDone() { pinyinEdit = false; haptics.play(HapticEvent.FUNCTION); syncBar() }
+
+    /** Candidates fetched for the bar now, for the pinyin in [barFor]. */
+    private var barCands = CANDIDATES_ON_BAR
+    private var barFor = ""
+
+    override fun onMoreCandidates() {
+        if (!composing || barCands >= GRID_CANDIDATES) return
+        barCands += CANDIDATES_MORE
+        syncBar()
+    }
 
     override fun onExpand() {
         showPanel(if (panel == Panel.CANDIDATES) Panel.LETTERS else Panel.CANDIDATES)
@@ -2146,8 +2099,6 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     }
 
     internal companion object {
-        /** 3。 deleted and typed again within this long: the full-width mark stays. */
-        const val HALF_RETYPE_MS = 4000L
         /** 运算符列 of the standard number pad: five on screen, the rest by scrolling. */
         val NUM_OPS = listOf("+", "−", "×", "÷", "=", "%", "(", ")", "/", ",", "±")
         /** 电话 fields: what goes in a phone number (and the * and # of a dial pad). */
@@ -2155,12 +2106,17 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         val DATE_OPS = listOf("-", "/", ":", " ", ".")
         val DIRS = listOf(Dir.UP, Dir.DOWN, Dir.LEFT, Dir.RIGHT)
         const val VOWELS = "аеёиоуыэюя"
-        /** Candidates fetched for the bar: more than fit, so a swipe finds more without a pause. */
-        const val CANDIDATES_ON_BAR = 60
+        val CARET_ACTIONS = setOf("left", "right", "up", "down", "word_left", "word_right", "home", "end")
+        /** Candidates fetched for the bar at first: more than fit; the row asks for more as it is scrolled. */
+        const val CANDIDATES_ON_BAR = 20
+        /** …and how many more each time it does. */
+        const val CANDIDATES_MORE = 40
+        /** The opened candidate grid. */
+        const val GRID_CANDIDATES = 300
+        /** Candidates read for 声调筛选, which keeps only some of them. */
+        const val TONE_POOL = 400
         /** Where the AI 候选 sits on the bar. */
         const val AI_SLOT = 1
-        /** Two taps of the period within this make an ellipsis. */
-        const val DOUBLE_PERIOD_MS = 400L
         /** 声调筛选 in the opened candidates. */
         const val XK_BRACKETLEFT = 0x5b
         const val XK_BRACKETRIGHT = 0x5d

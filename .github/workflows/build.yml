@@ -27,7 +27,22 @@ jobs:
           path: app/src/main/jni/.cache
           key: boost-1.92.0
 
+      # a private release key, when the repository has one in its secrets (the .p12 as base64);
+      # without it the release is signed with the public key in keys/
+      - name: Release key
+        env:
+          KK_KEYSTORE_B64: ${{ secrets.KK_KEYSTORE_B64 }}
+        run: |
+          if [ -n "$KK_KEYSTORE_B64" ]; then
+            echo "$KK_KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.p12"
+            echo "KK_KEYSTORE=$RUNNER_TEMP/release.p12" >> "$GITHUB_ENV"
+          fi
+
       - name: Test and build
+        env:
+          KK_KEYSTORE_PASSWORD: ${{ secrets.KK_KEYSTORE_PASSWORD }}
+          KK_KEY_ALIAS: ${{ secrets.KK_KEY_ALIAS }}
+          KK_KEY_PASSWORD: ${{ secrets.KK_KEY_PASSWORD }}
         run: ./gradlew testDebugUnitTest assembleRelease --console=plain
 
       - name: Upload APK

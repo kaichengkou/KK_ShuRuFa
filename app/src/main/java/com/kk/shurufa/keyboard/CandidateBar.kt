@@ -29,6 +29,8 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
         fun onTool(id: String)
         fun onCandidate(index: Int)
         fun onExpand()
+        /** The candidate row was scrolled near the end of what it has: fetch more if there are. */
+        fun onMoreCandidates() {}
         fun onMathFormat(format: String)
         fun onResultChip(text: String)
         /** 大写金额: the chip offering [number] written out as [words] was tapped. */
@@ -103,7 +105,14 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
     private var message = ""
 
     /** The user's toolbar (settings → 工具栏); 快捷面板 is always last. */
-    private val tools get() = prefs.toolbar + "quick"
+    private val tools: List<String> get() {
+        // parsed again only when the setting changed (it is read on every frame of the toolbar)
+        val raw = prefs.sp.getString(Prefs.TOOLBAR_ITEMS, null)
+        if (raw != toolsFor || toolsCache == null) { toolsFor = raw; toolsCache = prefs.toolbar + "quick" }
+        return toolsCache!!
+    }
+    private var toolsFor: String? = null
+    private var toolsCache: List<String>? = null
 
     private val bg = Paint(Paint.ANTI_ALIAS_FLAG)
     private val tp = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -177,9 +186,11 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
     /** Updates the candidates. Only the first switch into this mode fades; later updates are instant. */
     fun showCandidates(pre: String, cands: List<String>, annotations: List<String> = emptyList(), caretIndex: Int = -1) {
         val entering = mode != Mode.CANDIDATES
+        // more of the same menu (fetched as the row was scrolled): the row stays where it is
+        val more = !entering && pre == preedit && cands.size > candidates.size && cands.subList(0, candidates.size) == candidates
         preedit = pre; candidates = cands; notes = annotations; caret = caretIndex
         if (entering) { fade.set(0f); fade.animateTo(1f, dur(120), Motion.ENTER) }
-        scrollX0 = 0f; scroller.forceFinished(true)
+        if (!more) { scrollX0 = 0f; scroller.forceFinished(true); moreAskedAt = -1 }
         mode = Mode.CANDIDATES
         invalidate()
     }
@@ -450,6 +461,11 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
             x += cw
         }
         contentW = x + scrollX0
+        // within a screen of the end: ask for more, once for each length of the list
+        if (composing && candidates.size != moreAskedAt && scrollX0 > contentW - 2 * width) {
+            moreAskedAt = candidates.size
+            post { listener?.onMoreCandidates() }
+        }
         tp.typeface = Ui.regular
         c.restore()
         // soft edges where the row goes on past what is shown
@@ -517,6 +533,8 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
     }
 
     private var pressedQuery = false
+    /** How many candidates there were when more were last asked for. */
+    private var moreAskedAt = -1
 
     private var edgeL: LinearGradient? = null
     private var edgeR: LinearGradient? = null

@@ -57,7 +57,9 @@ class WordPredictor(private val context: Context, val lang: String) {
         if (low.isEmpty()) return emptyList()
         val follows = followers(context)
         val score = HashMap<String, Double>()
-        w.prefix(low, 4000) { k, v ->
+        // one letter: its most common words, found once (a scan of thousands of lines on every key otherwise)
+        if (low.length == 1) for ((k, base) in topFor(w, low)) score[k] = base + bonus(k, follows)
+        else w.prefix(low, 4000) { k, v ->
             val base = v.substringBefore('\t').toIntOrNull() ?: 1
             score[k] = base + bonus(k, follows)
         }
@@ -78,6 +80,17 @@ class WordPredictor(private val context: Context, val lang: String) {
         val f = forms[word] ?: tableForm(word)
         val allCaps = typed.length >= 2 && typed.all { !it.isLetter() || it.isUpperCase() }
         return if (f != null && !allCaps) f else matchCase(word, typed)
+    }
+
+    /** The best-scored words starting with the letter [low], by letter, read once each. */
+    private val tops = HashMap<String, List<Pair<String, Int>>>()
+
+    private fun topFor(w: TsvIndex, low: String): List<Pair<String, Int>> = synchronized(tops) {
+        tops.getOrPut(low) {
+            val all = ArrayList<Pair<String, Int>>()
+            w.prefix(low, 4000) { k, v -> all += k to (v.substringBefore('\t').toIntOrNull() ?: 1) }
+            all.sortedByDescending { it.second }.take(TOP_PER_LETTER)
+        }
     }
 
     /** What may come after [context] (oldest first; empty or ending a sentence: a sentence start). */
@@ -303,6 +316,8 @@ class WordPredictor(private val context: Context, val lang: String) {
 
     companion object {
         const val MAX_WORDS = 6000
+        /** Words kept per first letter: far more than a list shows, so the context can still reorder them. */
+        private const val TOP_PER_LETTER = 400
         /** How often learned counts are halved. */
         const val AGE_MONTHS = 3
         private val live = java.util.Collections.newSetFromMap(java.util.WeakHashMap<WordPredictor, Boolean>())

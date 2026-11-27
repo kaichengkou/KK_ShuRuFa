@@ -1,6 +1,7 @@
 // JNI bridge between the Kotlin input method and librime.
-// One Rime session is kept for the whole input method; the Kotlin side calls
-// refresh() after every key and then reads the cached context through getters.
+// One Rime session is kept for the whole input method. Every call that changes it refreshes a
+// small cache (commit, preedit, input, cursor) that the getters read, and counts a generation,
+// so the Kotlin side can keep the candidates it fetched until the composition really changes.
 
 #include <jni.h>
 #include <rime_api.h>
@@ -24,20 +25,18 @@ RimeApi* api() {
 
 std::mutex g_mutex;
 RimeSessionId g_session = 0;
+// A session for candidates of some other input (query) and one for teaching (learn), kept and
+// reused: making a session builds a whole engine, its Lua filters' init included.
+RimeSessionId g_scratch = 0;
+RimeSessionId g_learn = 0;
 
 struct Cached {
   std::string preedit;
   std::string input;
   int cursor = 0;
-  std::vector<std::string> cands;
-  std::vector<std::string> comments;
-  int highlighted = 0;
-  int page = 0;
-  bool lastPage = true;
   std::string commit;
-  std::string schemaId;
-  std::string schemaName;
-  bool asciiMode = false;
+  // counts every change of the composition (see generation())
+  int generation = 0;
 } g;
 
 std::string str(JNIEnv* env, jstring s) {
@@ -94,8 +93,33 @@ RimeSessionId session() {
   return g_session;
 }
 
+// A session of our own, made once and made again only after Rime closed it.
+RimeSessionId kept(RimeSessionId& id) {
+  if (id == 0 || !api()->find_session(id)) id = api()->create_session();
+  return id;
+}
+
+// The sessions are gone (Rime finalized, or its sync closed them): ids may be reused by new ones.
+void forgetSessions() { g_session = 0; g_scratch = 0; g_learn = 0; }
+
+// The first `limit` candidates of session [s]: their texts, and their comments when asked.
+void listCandidates(RimeSessionId s, int limit, std::vector<std::string>* texts, std::vector<std::string>* comments) {
+  RimeCandidateListIterator it = {0};
+  if (!api()->candidate_list_begin(s, &it)) return;
+  int n = 0;
+  while (n < limit && api()->candidate_list_next(&it)) {
+    if (texts) texts->emplace_back(it.candidate.text ? it.candidate.text : "");
+    if (comments) comments->emplace_back(it.candidate.comment ? it.candidate.comment : "");
+    n++;
+  }
+  api()->candidate_list_end(&it);
+}
+
+// After every change: only what the keyboard reads on each key (the candidates are fetched when
+// they are asked for, as many as are asked for).
 void refreshLocked() {
   RimeSessionId s = session();
+  g.generation++;
   g.commit.clear();
   RIME_STRUCT(RimeCommit, commit);
   if (api()->get_commit(s, &commit)) {
@@ -104,34 +128,15 @@ void refreshLocked() {
   }
   g.preedit.clear();
   g.input.clear();
-  g.cands.clear();
-  g.comments.clear();
   g.cursor = 0;
-  g.highlighted = 0;
-  g.page = 0;
-  g.lastPage = true;
   RIME_STRUCT(RimeContext, ctx);
   if (api()->get_context(s, &ctx)) {
     if (ctx.composition.preedit) g.preedit = ctx.composition.preedit;
     g.cursor = ctx.composition.cursor_pos;
-    for (int i = 0; i < ctx.menu.num_candidates; i++) {
-      g.cands.emplace_back(ctx.menu.candidates[i].text ? ctx.menu.candidates[i].text : "");
-      g.comments.emplace_back(ctx.menu.candidates[i].comment ? ctx.menu.candidates[i].comment : "");
-    }
-    g.highlighted = ctx.menu.highlighted_candidate_index;
-    g.page = ctx.menu.page_no;
-    g.lastPage = ctx.menu.is_last_page;
     api()->free_context(&ctx);
   }
   const char* in = api()->get_input(s);
   if (in) g.input = in;
-  RIME_STRUCT(RimeStatus, st);
-  if (api()->get_status(s, &st)) {
-    g.schemaId = st.schema_id ? st.schema_id : "";
-    g.schemaName = st.schema_name ? st.schema_name : "";
-    g.asciiMode = st.is_ascii_mode;
-    api()->free_status(&st);
-  }
 }
 
 }  // namespace
@@ -168,33 +173,19 @@ FN(void, startup)(JNIEnv* env, jobject, jstring shared, jstring user, jboolean f
   api()->start_maintenance(fullCheck);
 }
 
-FN(jboolean, isMaintaining)(JNIEnv*, jobject) { return api()->is_maintenance_mode(); }
 FN(void, joinMaintenance)(JNIEnv*, jobject) { api()->join_maintenance_thread(); }
 
 FN(void, shutdown)(JNIEnv*, jobject) {
   std::lock_guard<std::mutex> lock(g_mutex);
   if (g_session) api()->destroy_session(g_session);
-  g_session = 0;
+  forgetSessions();
+  g.generation++;
   api()->finalize();
 }
 
 FN(jboolean, processKey)(JNIEnv*, jobject, jint keycode, jint mask) {
   std::lock_guard<std::mutex> lock(g_mutex);
   bool r = api()->process_key(session(), keycode, mask);
-  refreshLocked();
-  return r;
-}
-
-FN(jboolean, selectCandidate)(JNIEnv*, jobject, jint index) {
-  std::lock_guard<std::mutex> lock(g_mutex);
-  bool r = api()->select_candidate_on_current_page(session(), index);
-  refreshLocked();
-  return r;
-}
-
-FN(jboolean, changePage)(JNIEnv*, jobject, jboolean backward) {
-  std::lock_guard<std::mutex> lock(g_mutex);
-  bool r = api()->change_page(session(), backward);
   refreshLocked();
   return r;
 }
@@ -218,11 +209,6 @@ FN(void, setOption)(JNIEnv* env, jobject, jstring name, jboolean value) {
   refreshLocked();
 }
 
-FN(jboolean, getOption)(JNIEnv* env, jobject, jstring name) {
-  std::lock_guard<std::mutex> lock(g_mutex);
-  return api()->get_option(session(), str(env, name).c_str());
-}
-
 // Replaces the raw input of the composition (used to bring back the pinyin of a committed word).
 FN(jboolean, setInput)(JNIEnv* env, jobject, jstring input) {
   std::lock_guard<std::mutex> lock(g_mutex);
@@ -233,41 +219,44 @@ FN(jboolean, setInput)(JNIEnv* env, jobject, jstring input) {
 
 FN(jboolean, selectSchema)(JNIEnv* env, jobject, jstring id) {
   std::lock_guard<std::mutex> lock(g_mutex);
+  // the engine is built again (its Lua filters read their lists afresh): the other sessions too
+  for (RimeSessionId* other : {&g_scratch, &g_learn}) {
+    if (*other && api()->find_session(*other)) api()->destroy_session(*other);
+    *other = 0;
+  }
   bool r = api()->select_schema(session(), str(env, id).c_str());
   refreshLocked();
   return r;
 }
 
-// Up to `limit` candidates from the start of the menu, for the expanded candidate view.
+// Up to `limit` candidates from the start of the menu, texts only.
 FN(jobjectArray, candidates)(JNIEnv* env, jobject, jint limit) {
   std::lock_guard<std::mutex> lock(g_mutex);
   std::vector<std::string> v;
-  RimeCandidateListIterator it = {0};
-  if (api()->candidate_list_begin(session(), &it)) {
-    while (static_cast<int>(v.size()) < limit && api()->candidate_list_next(&it)) {
-      v.emplace_back(it.candidate.text ? it.candidate.text : "");
-    }
-    api()->candidate_list_end(&it);
-  }
+  listCandidates(session(), limit, &v, nullptr);
   return jarr(env, v);
 }
 
-// Comments for the first `limit` candidates (same order as candidates()).
-FN(jobjectArray, candidateComments)(JNIEnv* env, jobject, jint limit) {
+// Up to `limit` candidates with their comments, in one pass over the menu: the n texts, then
+// their n comments. Every candidate fetched runs through the translators and the Lua filters,
+// so the menu is walked once, not once for the texts and again for the comments.
+FN(jobjectArray, candidatesWithComments)(JNIEnv* env, jobject, jint limit) {
   std::lock_guard<std::mutex> lock(g_mutex);
-  std::vector<std::string> v;
-  RimeCandidateListIterator it = {0};
-  if (api()->candidate_list_begin(session(), &it)) {
-    while (static_cast<int>(v.size()) < limit && api()->candidate_list_next(&it)) {
-      v.emplace_back(it.candidate.comment ? it.candidate.comment : "");
-    }
-    api()->candidate_list_end(&it);
-  }
+  std::vector<std::string> v, c;
+  listCandidates(session(), limit, &v, &c);
+  v.insert(v.end(), c.begin(), c.end());
   return jarr(env, v);
 }
+
+// Changes with every change of the composition: candidates fetched at one generation are still
+// the menu's while it stays the same.
+FN(jint, generation)(JNIEnv*, jobject) { return g.generation; }
 
 // Caret inside the raw input (in letters), for editing the pinyin in place.
-FN(jint, caretPos)(JNIEnv*, jobject) { return static_cast<jint>(api()->get_caret_pos(session())); }
+FN(jint, caretPos)(JNIEnv*, jobject) {
+  std::lock_guard<std::mutex> lock(g_mutex);
+  return static_cast<jint>(api()->get_caret_pos(session()));
+}
 FN(void, setCaretPos)(JNIEnv*, jobject, jint pos) {
   std::lock_guard<std::mutex> lock(g_mutex);
   api()->set_caret_pos(session(), pos);
@@ -275,36 +264,29 @@ FN(void, setCaretPos)(JNIEnv*, jobject, jint pos) {
 }
 
 // Candidates for some input in a separate session, without touching what the user is typing.
-static RimeSessionId g_scratch = 0;
 FN(jobjectArray, query)(JNIEnv* env, jobject, jstring input, jint limit) {
   std::lock_guard<std::mutex> lock(g_mutex);
-  if (g_scratch == 0 || !api()->find_session(g_scratch)) g_scratch = api()->create_session();
+  RimeSessionId s = kept(g_scratch);
   std::vector<std::string> v;
-  api()->clear_composition(g_scratch);
-  if (api()->set_input(g_scratch, str(env, input).c_str())) {
-    RimeCandidateListIterator it = {0};
-    if (api()->candidate_list_begin(g_scratch, &it)) {
-      while (static_cast<int>(v.size()) < limit && api()->candidate_list_next(&it)) {
-        v.emplace_back(it.candidate.text ? it.candidate.text : "");
-      }
-      api()->candidate_list_end(&it);
-    }
-  }
-  api()->clear_composition(g_scratch);
+  api()->clear_composition(s);
+  if (api()->set_input(s, str(env, input).c_str())) listCandidates(s, limit, &v, nullptr);
+  api()->clear_composition(s);
   return jarr(env, v);
 }
 
 // Learning after the fact: the keyboard's session learns nothing (_kk_no_learning), and a commit
 // that stayed (not deleted right away) is taught here: [input] typed again in a session of its
 // own, with learning on, and candidates chosen until exactly [text] is committed. Nothing is
-// learned when the text cannot be made again from the input.
+// learned when the text cannot be made again from the input. The session is kept from one
+// teaching to the next (making one builds a whole engine), and the lock is held only for this.
 FN(jboolean, learn)(JNIEnv* env, jobject, jstring jinput, jstring jtext) {
-  std::lock_guard<std::mutex> lock(g_mutex);
   const std::string input = str(env, jinput), text = str(env, jtext);
   if (input.empty() || text.empty()) return false;
+  std::lock_guard<std::mutex> lock(g_mutex);
   const bool trad = api()->get_option(session(), "traditionalization");
-  RimeSessionId s = api()->create_session();
+  RimeSessionId s = kept(g_learn);
   if (!s) return false;
+  api()->clear_composition(s);
   api()->set_option(s, "_kk_no_learning", False);
   api()->set_option(s, "traditionalization", trad ? True : False);
   api()->set_option(s, "emoji", False);
@@ -336,7 +318,6 @@ FN(jboolean, learn)(JNIEnv* env, jobject, jstring jinput, jstring jtext) {
     }
   }
   api()->clear_composition(s);
-  api()->destroy_session(s);
   return ok;
 }
 
@@ -354,7 +335,8 @@ FN(jboolean, syncUserData)(JNIEnv*, jobject) {
   std::lock_guard<std::mutex> lock(g_mutex);
   bool r = api()->sync_user_data();
   api()->join_maintenance_thread();
-  g_session = 0;
+  forgetSessions();
+  g.generation++;
   return r;
 }
 
@@ -379,13 +361,6 @@ FN(jstring, commitText)(JNIEnv* env, jobject) { return jstr(env, g.commit); }
 FN(jstring, preedit)(JNIEnv* env, jobject) { return jstr(env, g.preedit); }
 FN(jstring, input)(JNIEnv* env, jobject) { return jstr(env, g.input); }
 FN(jint, cursor)(JNIEnv*, jobject) { return g.cursor; }
-FN(jobjectArray, pageCandidates)(JNIEnv* env, jobject) { return jarr(env, g.cands); }
-FN(jobjectArray, pageComments)(JNIEnv* env, jobject) { return jarr(env, g.comments); }
-FN(jint, highlighted)(JNIEnv*, jobject) { return g.highlighted; }
-FN(jboolean, isLastPage)(JNIEnv*, jobject) { return g.lastPage; }
-FN(jint, pageNo)(JNIEnv*, jobject) { return g.page; }
-FN(jstring, schemaId)(JNIEnv* env, jobject) { return jstr(env, g.schemaId); }
-FN(jstring, schemaName)(JNIEnv* env, jobject) { return jstr(env, g.schemaName); }
 
 // Traditional → Simplified with the OpenCC data Rime already ships (used for voice input,
 // whose model sometimes answers in traditional characters).
@@ -397,7 +372,8 @@ FN(jstring, t2s)(JNIEnv* env, jclass, jstring text, jstring config) {
   std::lock_guard<std::mutex> g(m);
   try {
     if (!conv || loaded != c) { conv = std::make_unique<opencc::SimpleConverter>(c); loaded = c; }
-    return env->NewStringUTF(conv->Convert(t).c_str());
+    // jstr, not NewStringUTF: emoji and the rarer characters are four UTF-8 bytes
+    return jstr(env, conv->Convert(t));
   } catch (...) {
     return text;
   }

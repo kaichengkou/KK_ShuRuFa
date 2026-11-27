@@ -92,6 +92,9 @@ class KeyboardView(context: Context, prefs: Prefs) : KbView(context, prefs) {
 
     private val handler = Handler(Looper.getMainLooper())
 
+    // 小K's pace as set now (the input method keeps it up to date while it runs)
+    init { SharkLife.tune = prefs.kayTune() }
+
     // ---- layout -------------------------------------------------------------------------
 
     /**
@@ -100,6 +103,8 @@ class KeyboardView(context: Context, prefs: Prefs) : KbView(context, prefs) {
      * slide ends.
      */
     private var ghost: android.graphics.Bitmap? = null
+    /** The last snapshot's bitmap, for the next one. */
+    private var spare: android.graphics.Bitmap? = null
     private val swap = Tween(1f)
 
     // a function key's icon plays its little motion after a tap (删除 nudges, 回车 pushes …)
@@ -115,9 +120,15 @@ class KeyboardView(context: Context, prefs: Prefs) : KbView(context, prefs) {
 
     fun setRows(newRows: List<List<Key>>, math: Boolean = false, slide: Int = 0) {
         if (slide != 0 && newRows !== rows && Motion.on(prefs) && isAttachedToWindow && width > 0 && height > 0) {
-            ghost?.recycle()
+            // the snapshot's bitmap is kept for the next swipe (the size of the whole keyboard, a few MB)
+            val old = ghost ?: spare
+            // not drawn into itself: while the snapshot is taken there is no ghost
+            ghost = null; spare = null
             ghost = runCatching {
-                android.graphics.Bitmap.createBitmap(width, height, android.graphics.Bitmap.Config.ARGB_8888).also { draw(Canvas(it)) }
+                val b = old?.takeIf { it.width == width && it.height == height && !it.isRecycled }
+                    ?: run { old?.recycle(); android.graphics.Bitmap.createBitmap(width, height, android.graphics.Bitmap.Config.ARGB_8888) }
+                b.eraseColor(0)
+                b.also { draw(Canvas(it)) }
             }.getOrNull()
             swapDir = slide
             swap.set(0f); swap.animateTo(1f, dur(Motion.PANEL), Motion.MOVE)
@@ -197,11 +208,10 @@ class KeyboardView(context: Context, prefs: Prefs) : KbView(context, prefs) {
     private var shaderFor = 0
     private val shaderMatrix = android.graphics.Matrix()
 
-    private fun surfaceShader(t: KbTheme, h: Float): android.graphics.Shader {
-        val key = t.surface * 31 + h.toInt()
+    private fun surfaceShader(t: KbTheme, h: Float, paper: Boolean): android.graphics.Shader {
+        val key = (t.surface * 31 + h.toInt()) * 2 + if (paper) 1 else 0
         surfaceShader?.let { if (shaderFor == key) return it }
         // 纸墨 is matte paper: no sheen, at most a breath of shading; the modern keys are molded
-        val paper = prefs.style == "paper"
         // at night a key catches a little light along its top, so it reads clear of the ground
         val top = if (t.dark) Colors.blend(t.surface, android.graphics.Color.WHITE, if (paper) 0.04f else 0.06f) else t.surface
         val bottom = if (paper) (if (t.dark) t.surface else Colors.blend(t.surface, t.background, 0.04f))
@@ -210,17 +220,25 @@ class KeyboardView(context: Context, prefs: Prefs) : KbView(context, prefs) {
             .also { surfaceShader = it; shaderFor = key }
     }
 
+    /** The settings the keys are drawn with, read once a frame (not once a key). */
+    private class Look {
+        var hintMode = "all"; var labelScale = 1f; var hintScale = 1f; var showAllHints = false; var saySize = 1f
+    }
+    private val look = Look()
+
     override fun onDraw(c: Canvas) {
         val t = theme
+        val paper = prefs.style == "paper"
+        look.hintMode = prefs.hintMode; look.labelScale = prefs.labelScale; look.hintScale = prefs.hintScale; look.showAllHints = prefs.showAllHints
+        look.saySize = prefs.kaySaySize
         c.drawColor(t.background)
-        if (prefs.style == "paper") Paper.grain(c, width, height, t.dark)
+        if (paper) Paper.grain(c, width, height, t.dark)
         val g = ghost
         val sp = swap.value
         val travel = dp(44f)
         if (g != null) { c.save(); c.translate(swapDir * (1f - sp) * travel, 0f) }
         val r = dp(prefs.keyRadiusDp)
         val borders = prefs.keyBorders
-        val paper = prefs.style == "paper"
         val shadowDy = dp(if (paper) 0.6f else 1.2f)
         // pressed, a key goes down onto the board: a little smaller, a little lower, its shadow gone
         val pressInset = dp(1.1f)
@@ -257,7 +275,7 @@ class KeyboardView(context: Context, prefs: Prefs) : KbView(context, prefs) {
             keyPaint.color = fill
             if (style == KeyStyle.NORMAL && pv < 0.01f && tp < 0.01f) {
                 // at rest, a solid key shows its material; pressed or melting, the plain fill
-                val sh = surfaceShader(t, rect.height())
+                val sh = surfaceShader(t, rect.height(), paper)
                 shaderMatrix.setTranslate(0f, rect.top); sh.setLocalMatrix(shaderMatrix)
                 keyPaint.shader = sh
                 c.drawRoundRect(kr, r, r, keyPaint)
@@ -289,7 +307,7 @@ class KeyboardView(context: Context, prefs: Prefs) : KbView(context, prefs) {
                 ghostPaint.alpha = (255 * (1f - sp)).toInt()
                 c.drawBitmap(g, -swapDir * sp * travel, 0f, ghostPaint)
                 animating = true
-            } else { g.recycle(); ghost = null }
+            } else { spare = g; ghost = null }
         }
         if (animating) postInvalidateOnAnimation()
     }
@@ -331,7 +349,7 @@ class KeyboardView(context: Context, prefs: Prefs) : KbView(context, prefs) {
                 }
                 k.label != null || !Icons.all.containsKey(fn) -> {
                     val tint = k.style == KeyStyle.TINT
-                    textPaint.textSize = sp(Ui.KEY_WORD * prefs.labelScale)
+                    textPaint.textSize = sp(Ui.KEY_WORD * look.labelScale)
                     textPaint.typeface = if (tint) Ui.medium else Ui.regular
                     val label = k.label ?: fn
                     fitText(label, rect.width() - dp(8f), textPaint)
@@ -343,7 +361,7 @@ class KeyboardView(context: Context, prefs: Prefs) : KbView(context, prefs) {
         }
         val label = displayLabel(k)
         val single = label.codePointCount(0, label.length) <= 1
-        val mode = prefs.hintMode
+        val mode = look.hintMode
         // 只第一排数字: a key's corner shows its digit only
         val hints = mode == "all" || (mode == "digits" && k.flicks[Dir.UP]?.label?.singleOrNull()?.isDigit() == true)
         textPaint.typeface = Ui.regular
@@ -355,7 +373,7 @@ class KeyboardView(context: Context, prefs: Prefs) : KbView(context, prefs) {
                 mathMode -> 18f
                 single -> Ui.KEY
                 else -> 16f
-            } * prefs.labelScale
+            } * look.labelScale
         )
         fitText(label, rect.width() - dp(6f), textPaint)
         if (!mathMode && single && label.isNotEmpty() && !label[0].isLetterOrDigit()) drawByBounds(c, label, cx, cy, textPaint)
@@ -364,10 +382,10 @@ class KeyboardView(context: Context, prefs: Prefs) : KbView(context, prefs) {
         if (!hints) return
         hintPaint.color = if (k.style == KeyStyle.ACTION) theme.onAccent else theme.hint
         hintPaint.alpha = a
-        hintPaint.textSize = sp(Ui.HINT * prefs.hintScale)
+        hintPaint.textSize = sp(Ui.HINT * look.hintScale)
         hintPaint.typeface = Ui.regular
         val fl = k.flicks
-        if (prefs.showAllHints && mode == "all") {
+        if (look.showAllHints && mode == "all") {
             fl[Dir.UP]?.let { drawText(c, hintLabel(it.label), cx, rect.top + hintPaint.textSize * 0.75f, hintPaint) }
             fl[Dir.DOWN]?.let { drawText(c, hintLabel(it.label), cx, rect.bottom - hintPaint.textSize * 0.75f, hintPaint) }
             fl[Dir.LEFT]?.let { drawText(c, hintLabel(it.label), rect.left + hintPaint.measureText(it.label) / 2 + dp(4f), cy, hintPaint) }
@@ -412,7 +430,7 @@ class KeyboardView(context: Context, prefs: Prefs) : KbView(context, prefs) {
      */
     private fun drawSpace(c: Canvas, rect: RectF, fixedLabel: String?, tp: Float, base: RectF = rect, moving: Boolean = false) {
         var shark = false
-        textPaint.textSize = sp(13.5f * prefs.labelScale)
+        textPaint.textSize = sp(13.5f * look.labelScale)
         textPaint.typeface = Ui.regular
         c.save()
         c.clipRect(rect)
@@ -438,7 +456,6 @@ class KeyboardView(context: Context, prefs: Prefs) : KbView(context, prefs) {
             val old = oldSpaceLabel
             val kay = fixedLabel == null && listener?.kayOnSpace() == true
             val now = Motion.now()
-            if (kay) prefs.kayTune().let { if (it != SharkLife.tune) SharkLife.tune = it }
             if (old != null && p < 1f) {
                 // the names slide past each other; 小K glides from before the one to before the other
                 val og = if (kay) sharkGeometry(rect, old, 0f) else null
@@ -477,7 +494,7 @@ class KeyboardView(context: Context, prefs: Prefs) : KbView(context, prefs) {
 
     private class SharkGeo(val size: Float, val sharkX: Float, val labelX: Float)
 
-    private fun sharkFace() = dp(17f) * prefs.labelScale
+    private fun sharkFace() = dp(17f) * look.labelScale
 
     private fun sharkGeometry(rect: RectF, label: String, off: Float): SharkGeo {
         val face = sharkFace()
@@ -519,7 +536,7 @@ class KeyboardView(context: Context, prefs: Prefs) : KbView(context, prefs) {
         val show = SharkLife.sayingShown(now)
         hintPaint.color = theme.hint
         hintPaint.typeface = Ui.regular
-        hintPaint.textSize = sp(Ui.HINT * prefs.hintScale * prefs.kaySaySize)
+        hintPaint.textSize = sp(Ui.HINT * look.hintScale * look.saySize)
         hintPaint.alpha = (sharkAlpha * 0.7f * show).toInt()
         fitText(words, rect.width() - dp(12f), hintPaint)
         drawText(c, words, sharkSubX, rect.bottom - dp(4f) - hintPaint.textSize * 0.6f, hintPaint)
@@ -894,6 +911,7 @@ class KeyboardView(context: Context, prefs: Prefs) : KbView(context, prefs) {
         layer?.visibility = GONE
         touch?.save()
         ghost?.recycle(); ghost = null
+        spare?.recycle(); spare = null
         if (mode != Mode.NONE) finish(commit = false)
         handler.removeCallbacksAndMessages(null)
     }

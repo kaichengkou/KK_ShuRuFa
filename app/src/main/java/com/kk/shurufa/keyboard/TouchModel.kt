@@ -3,6 +3,7 @@ package com.kk.shurufa.keyboard
 import android.content.SharedPreferences
 import android.graphics.RectF
 import com.kk.shurufa.ime.Background
+import java.util.Locale
 
 /**
  * 落点自适应: where this person actually touches each letter key, relative to its center. Thumbs
@@ -32,6 +33,8 @@ class TouchModel(private val store: SharedPreferences) {
         store.getString(KEY, null)?.split(';')?.forEach { item ->
             val p = item.split(',')
             if (p.size == 4) runCatching { stats[p[0]] = Stat(p[1].toFloat(), p[2].toFloat(), p[3].toInt()) }
+            // written by older versions under a locale with a decimal comma: a,0,1234,-0,0567,40
+            else if (p.size == 6) runCatching { stats[p[0]] = Stat("${p[1]}.${p[2]}".toFloat(), "${p[3]}.${p[4]}".toFloat(), p[5].toInt()) }
         }
     }
 
@@ -68,7 +71,8 @@ class TouchModel(private val store: SharedPreferences) {
     fun save() {
         if (unsaved == 0) return
         unsaved = 0
-        val text = stats.entries.joinToString(";") { (k, s) -> "$k,${"%.4f".format(s.dx)},${"%.4f".format(s.dy)},${s.n}" }
+        // Locale.ROOT: in Russian or German "%.4f" writes 0,1234, and the comma splits the record apart
+        val text = stats.entries.joinToString(";") { (k, s) -> "$k,${"%.4f".format(Locale.ROOT, s.dx)},${"%.4f".format(Locale.ROOT, s.dy)},${s.n}" }
         Background.run { store.edit().putString(KEY, text).apply() }
     }
 

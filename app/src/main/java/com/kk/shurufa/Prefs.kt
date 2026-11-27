@@ -15,7 +15,8 @@ class Prefs(context: Context) {
     /** The keyboard's own memory: never shown as settings, never rebuilds anything. */
     val state: SharedPreferences = context.applicationContext.getSharedPreferences("kk_state", Context.MODE_PRIVATE)
 
-    init { migrateState(); Backup.applyPreset(context.applicationContext, sp, state) }
+    // once a process: every Prefs is made over the same two files
+    init { if (!started) synchronized(Prefs::class.java) { if (!started) { migrateState(); Backup.applyPreset(context.applicationContext, sp, state); started = true } } }
 
     private fun b(key: String, def: Boolean) = sp.getBoolean(key, def)
     private fun i(key: String, def: Int) = sp.getInt(key, def)
@@ -37,7 +38,6 @@ class Prefs(context: Context) {
     val showHints get() = hintMode != "none"
     /** 角标: all (every key's slide characters), digits (the top row's numbers only), none. */
     val hintMode get() = s(HINT_MODE, if (b(SHOW_HINTS, true)) "all" else "none")
-    /** 候选字体: sans (黑体) or serif (宋体); the paper style defaults to 宋体. */
     /** 字体, for everything on the keyboard: sans 黑体, serif 宋体, custom a font file the user chose. */
     val font get() = s(CAND_FONT, if (style == "paper") "serif" else "sans")
     val showAllHints get() = b(SHOW_ALL_HINTS, false)
@@ -110,7 +110,6 @@ class Prefs(context: Context) {
     val toneFilter get() = b(TONE_FILTER, true)
     /** 盘古之白: a space between Chinese and Latin letters or digits. */
     val pangu get() = b(PANGU, false)
-    /** AI 候选: the AI service's reading of longer pinyin as the first candidate (sends the pinyin). */
     /**
      * AI 帮打字, one at a time: off, candidate (AI 候选 for long pinyin) or cloud (云联想 when
      * typing pauses). Before it was one setting, each had its own switch; those are read once.
@@ -130,7 +129,6 @@ class Prefs(context: Context) {
     val kayChatCap get() = sp.getInt(KAY_CHAT_CAP, 30)
     /** Whether 小K sits on the space key too. */
     val kayOnSpace get() = b(KAY_SPACE, true)
-    /** 小K's button on the toolbar: "shark", "shark_fin" or "ai" (the spark of before). */
     /** IP 属地 in the 小K panel's header. */
     val kayShowIp get() = b(KAY_SHOW_IP, true)
     /** 改写: the way last used. */
@@ -141,10 +139,11 @@ class Prefs(context: Context) {
     val kayPromptChat get() = s(KAY_PROMPT_CHAT, "")
     val kayPromptGreet get() = s(KAY_PROMPT_GREET, "")
     val kayPromptChatter get() = s(KAY_PROMPT_CHATTER, "")
-    /** 改写: the person's own ways of rewriting, one instruction a line. */
     /** The rewrites as edited in the settings, or null for the built-in ones. */
     val kayBaseActions: String? get() = if (sp.contains(KAY_BASE_ACTIONS)) sp.getString(KAY_BASE_ACTIONS, "") else null
+    /** 改写: the person's own ways of rewriting, one instruction a line. */
     val kayCustomActions get() = s(KAY_CUSTOM_ACTIONS, "").lines().map { it.trim() }.filter { it.isNotEmpty() }
+    /** 小K's button on the toolbar: "shark", "shark_fin" or "ai" (the spark of before). */
     val kayIcon get() = s(KAY_ICON, "shark").takeIf { it in setOf("shark", "shark_fin", "ai") } ?: "shark"
     /** The shark's pace: how often it acts, the share of long acts, its speed, how often it speaks and for how long, the size of its words. */
     fun kayTune() = com.kk.shurufa.keyboard.SharkLife.Tune(
@@ -268,6 +267,8 @@ class Prefs(context: Context) {
     }
 
     companion object {
+        @Volatile private var started = false
+
         /** Settings that change how the keyboard is built (size, colors, layouts); the rest apply live. */
         fun rebuildsKeyboard(key: String) = key in LOOK || key.startsWith("key_ovr_")
 

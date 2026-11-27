@@ -19,8 +19,8 @@ android {
         applicationId = "com.kk.shurufa"
         minSdk = 26
         targetSdk = 35
-        versionCode = 77
-        versionName = "0.19.4"
+        versionCode = 78
+        versionName = "0.19.5"
         ndk { abiFilters += abis }
         externalNativeBuild {
             cmake { arguments += listOf("-DANDROID_STL=c++_static", "-DCMAKE_BUILD_TYPE=Release") }
@@ -42,6 +42,16 @@ android {
             keyAlias = "kk"
             keyPassword = "kkshurufa"
         }
+        // A private release key, when the build is given one (CI secrets: KK_KEYSTORE is the path to
+        // the .p12, KK_KEYSTORE_PASSWORD, KK_KEY_ALIAS, KK_KEY_PASSWORD). The key in the repo is
+        // public: anyone can sign an APK with it that installs over this keyboard as an update.
+        val releaseStore = System.getenv("KK_KEYSTORE")?.takeIf { it.isNotBlank() && file(it).isFile }
+        if (releaseStore != null) create("release") {
+            storeFile = file(releaseStore)
+            storePassword = System.getenv("KK_KEYSTORE_PASSWORD")
+            keyAlias = System.getenv("KK_KEY_ALIAS")?.takeIf { it.isNotBlank() } ?: "kk"
+            keyPassword = System.getenv("KK_KEY_PASSWORD")?.takeIf { it.isNotBlank() } ?: System.getenv("KK_KEYSTORE_PASSWORD")
+        }
     }
 
     buildTypes {
@@ -53,7 +63,7 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
         }
     }
 

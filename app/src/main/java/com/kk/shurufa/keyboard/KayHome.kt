@@ -447,9 +447,10 @@ class KayHome(context: Context, prefs: Prefs) : KbView(context, prefs) {
             c.restore()
             tp.alpha = 255
         }
-        // alive: drawn at a steady 30 a second while the page is open (60 while something moves)
+        // alive: while something moves, every frame; at rest only its slow breathing (a couple of
+        // pixels over 2.6 s) goes on, and 15 frames a second draw that as smoothly as 30 did
         val moving = act != null || appear.running || pressT.running || posX.running || posY.running || abs(lean) > 0.3f
-        if (moving) postInvalidateOnAnimation() else invalidateIn(33L)
+        if (moving) postInvalidateOnAnimation() else invalidateIn(66L)
     }
     private var turned = false
     private var fullFor = ""; private var fullW = 0; private var fullLay: StaticLayout? = null; private var fullLineW = 0f

@@ -30,6 +30,15 @@ object Background {
 
     fun run(job: () -> Unit) = pool.execute { runCatching(job).onFailure(::report) }
 
+    /**
+     * Requests to an AI service (云联想, AI 候选, 改写, 聊天): each on a thread of the pool's, side by
+     * side (one slow answer must not hold up the next request), the threads going when idle.
+     */
+    fun ask(job: () -> Unit) = asks.execute { runCatching(job).onFailure(::report) }
+    private val asks = ThreadPoolExecutor(0, 4, 10, TimeUnit.SECONDS, java.util.concurrent.SynchronousQueue()) { r ->
+        Thread({ Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND); r.run() }, "kk-ai").apply { isDaemon = true }
+    }.apply { rejectedExecutionHandler = java.util.concurrent.RejectedExecutionHandler { r, _ -> Thread(r, "kk-ai").apply { isDaemon = true }.start() } }
+
     /** Runs [job] in the background and hands its result to [done] on the main thread. */
     fun <T> load(job: () -> T, done: (T) -> Unit) = pool.execute { deliver(job, done) }
 

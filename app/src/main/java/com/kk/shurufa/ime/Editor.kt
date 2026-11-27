@@ -53,7 +53,9 @@ class Editor(private val ime: InputMethodService, private val prefs: Prefs) {
     /** 选择模式 of the edit panel: caret moves extend the selection. */
     var selectMode = false
 
-    fun onSelection(start: Int, end: Int) { selStart = start; selEnd = end; dirty() }
+    fun onSelection(start: Int, end: Int) { selStart = start; selEnd = end; beforeCache = null; caretStale = false }
+    /** The field changed (or a key went to it) since the app last said where the caret is. */
+    private var caretStale = false
 
     /** Drops the selection to a caret at its end. */
     fun collapseSelection() { dirty(); ic?.setSelection(selEnd, selEnd) }
@@ -70,7 +72,8 @@ class Editor(private val ime: InputMethodService, private val prefs: Prefs) {
         if (n <= 0) return ""
         val c = beforeCache
         if (c != null && (n <= beforeAsked || c.length < beforeAsked)) return if (c.length <= n) c else c.substring(c.length - n)
-        val ask = maxOf(n, 64)
+        // one read serves every later one of the same key (the longest are 云联想's 80 characters)
+        val ask = maxOf(n, 128)
         val t = ic?.getTextBeforeCursor(ask, 0)?.toString() ?: return ""
         beforeCache = t; beforeAsked = ask
         return if (t.length <= n) t else t.substring(t.length - n)
@@ -80,7 +83,7 @@ class Editor(private val ime: InputMethodService, private val prefs: Prefs) {
     /** Read now, not kept: for reads in the middle of a change (what was read would be stale right after). */
     private fun raw(n: Int) = ic?.getTextBeforeCursor(n, 0)?.toString().orEmpty()
     /** The field is about to change (or did): what was read of it is read again. */
-    fun dirty() { beforeCache = null }
+    fun dirty() { beforeCache = null; caretStale = true }
     fun textAfter(n: Int) = ic?.getTextAfterCursor(n, 0)?.toString().orEmpty()
     fun selectedText(): String? = ic?.getSelectedText(0)?.toString()
 
@@ -397,8 +400,13 @@ class Editor(private val ime: InputMethodService, private val prefs: Prefs) {
      * stops there: arrow keys sent past the edge would move the focus to other parts of the app.
      * In selection mode the moving end of the selection is extended. Returns false at an edge.
      */
-    fun caretStep(code: Int): Boolean { dirty();
+    fun caretStep(code: Int): Boolean {
+        val known = !caretStale
+        dirty()
         val ic = ic ?: return false
+        // a plain caret (the common case: the space key as a trackpad) reads only what is next to
+        // it; a selection, or an editor that does not say where its caret is, reads the whole text
+        if (known && !selectMode && selStart == selEnd && selEnd >= 0) nearCaretStep(ic, code)?.let { return it }
         val et = ic.getExtractedText(ExtractedTextRequest(), 0)
         val text = et?.text?.toString()
         if (et == null || text == null) { sendKey(code, shiftMeta()); return true }
@@ -424,6 +432,49 @@ class Editor(private val ime: InputMethodService, private val prefs: Prefs) {
         if (target == caret && (selectMode || anchor == caret)) return false
         val base = et.startOffset
         if (selectMode) ic.setSelection(base + anchor, base + target) else ic.setSelection(base + target, base + target)
+        return true
+    }
+
+    /**
+     * [caretStep] for a caret without a selection, from a few characters around it (each read is a
+     * call into the app, and the whole text of a long document is a lot to send for one step).
+     * Null when the editor does not answer: then the whole text is read after all.
+     */
+    private fun nearCaretStep(ic: InputConnection, code: Int): Boolean? {
+        val caret = selEnd
+        val target = when (code) {
+            KeyEvent.KEYCODE_DPAD_LEFT -> {
+                val before = ic.getTextBeforeCursor(NEAR, 0)?.toString() ?: return null
+                if (before.isEmpty()) return false
+                val bi = BreakIterator.getCharacterInstance().apply { setText(before) }
+                val p = bi.preceding(before.length).let { if (it == BreakIterator.DONE) 0 else it }
+                caret - (before.length - p)
+            }
+            KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                val after = ic.getTextAfterCursor(NEAR, 0)?.toString() ?: return null
+                if (after.isEmpty()) return false
+                val bi = BreakIterator.getCharacterInstance().apply { setText(after) }
+                caret + bi.following(0).let { if (it == BreakIterator.DONE) after.length else it }
+            }
+            KeyEvent.KEYCODE_DPAD_UP -> {
+                // a line break above: the editor moves by line; none at all: to the start
+                val before = ic.getTextBeforeCursor(LINE_WINDOW, 0)?.toString() ?: return null
+                if (before.isEmpty()) return false
+                if ('\n' in before || before.length >= LINE_WINDOW) { sendKey(code, 0); return true }
+                caret - before.length
+            }
+            KeyEvent.KEYCODE_DPAD_DOWN -> {
+                val after = ic.getTextAfterCursor(LINE_WINDOW, 0)?.toString() ?: return null
+                if (after.isEmpty()) return false
+                if ('\n' in after || after.length >= LINE_WINDOW) { sendKey(code, 0); return true }
+                caret + after.length
+            }
+            else -> return false
+        }
+        if (target < 0 || target == caret) return null
+        ic.setSelection(target, target)
+        // the next step comes before the app reports this one
+        selStart = target; selEnd = target; caretStale = false
         return true
     }
 
@@ -470,6 +521,10 @@ class Editor(private val ime: InputMethodService, private val prefs: Prefs) {
             "《" to "》", "〈" to "〉", "「" to "」", "『" to "』", "〔" to "〕", "„" to "“", "⟨" to "⟩",
         )
         private val CLOSERS = PAIRS.values.toSet()
+        /** Characters read beside the caret for one step: more than any one grapheme (a family emoji). */
+        private const val NEAR = 16
+        /** How far a step up or down looks for a line break before it lets the editor decide. */
+        private const val LINE_WINDOW = 2000
         private val SLOT = Regex("\\{\\}|\\(\\)|\\[\\]|, |; |& |\\\\\\\\ ")
     }
 }

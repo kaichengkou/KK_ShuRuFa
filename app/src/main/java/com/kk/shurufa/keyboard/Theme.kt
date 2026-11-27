@@ -59,8 +59,8 @@ data class KbTheme(
         private fun hsl(h: Float, s: Float, l: Float): Int = androidx.core.graphics.ColorUtils.HSLToColor(floatArrayOf(h, s, l))
 
         /** The accent shown for preset [id] (the settings swatches use it too). */
-        fun accentFor(context: Context, id: String, dark: Boolean): Int {
-            if (id == "custom") return customAccent(com.kk.shurufa.Prefs(context).accentHue, dark)
+        fun accentFor(context: Context, id: String, dark: Boolean, prefs: Prefs? = null): Int {
+            if (id == "custom") return customAccent((prefs ?: Prefs(context)).accentHue, dark)
             if (id == "system" && Build.VERSION.SDK_INT >= 31) {
                 return context.getColor(if (dark) android.R.color.system_accent1_200 else android.R.color.system_accent1_600)
             }
@@ -105,7 +105,7 @@ data class KbTheme(
             val night = isDark(context, prefs)
             // 纸墨 starts in 朱砂, the color of a seal on paper, until another accent is picked
             val id = if (prefs.style == "paper" && !prefs.sp.contains(Prefs.ACCENT)) "cinnabar" else prefs.accent
-            val accent = accentFor(context, id, night)
+            val accent = accentFor(context, id, night, prefs)
             Ui.useFont(context, prefs.font)
             if (prefs.incognito) return incognito()
             val base = if (prefs.style == "paper") paper(night, accent) else plain(night, accent)

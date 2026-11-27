@@ -69,7 +69,11 @@ class Segmenter(
         when {
             silence >= commitChunks || audio.size > maxUtteranceSec * 16000 -> events += finish()
             silence >= pauseChunks && !refreshedAtPause -> { refreshedAtPause = true; sinceLast = 0; events += Event.Partial(audio.toArray()) }
-            silence == 0 && ++sinceLast >= partialEveryChunks -> { sinceLast = 0; events += Event.Partial(audio.toArray()) }
+            // each refresh recognizes the whole utterance again: as it grows the refreshes come less
+            // often (when it has grown by a fifth), so a long sentence costs about as much as it is long
+            silence == 0 && ++sinceLast >= maxOf(partialEveryChunks, audio.size / SileroVad.CHUNK / 5) -> {
+                sinceLast = 0; events += Event.Partial(audio.toArray())
+            }
         }
         return events
     }

@@ -146,7 +146,7 @@ class AiFeature(private val host: Host, private val kay: Kay) {
         val t = target() ?: return onDone(Result.failure(IllegalStateException("先在设置里添加 AI 服务")))
         val id = ++run
         SharkLife.thinking = true
-        Thread {
+        Background.ask {
             com.kk.shurufa.online.AiBudget.asked(prefs)
             val r = runCatching {
                 Llm.completeTarget(prefs, t, AiWriter.SYSTEM, AiWriter.prompt(a, src),
@@ -158,7 +158,7 @@ class AiFeature(private val host: Host, private val kay: Kay) {
                 onDone(r)
                 host.haptics.play(HapticEvent.GESTURE)
             }
-        }.apply { isDaemon = true; name = "kk-ai" }.start()
+        }
     }
 
     // ---- 聊天 ----
@@ -197,7 +197,7 @@ class AiFeature(private val host: Host, private val kay: Kay) {
         SharkLife.thinking = true
         syncChat()
         kay.talked()
-        Thread {
+        Background.ask {
             com.kk.shurufa.online.AiBudget.asked(prefs)
             val r = runCatching {
                 Llm.completeTarget(prefs, t, kay.chatSystem(), kay.chatUser(said),
@@ -215,7 +215,7 @@ class AiFeature(private val host: Host, private val kay: Kay) {
                 onDone(out)
                 host.haptics.play(HapticEvent.GESTURE)
             }
-        }.apply { isDaemon = true; name = "kk-kay" }.start()
+        }
     }
 
     /** What was said, styled: 主人's words in a softer ink, 小K's name in the accent. */
