@@ -1,0 +1,185 @@
+{
+ "ai_candidate": {
+  "b": false
+ },
+ "clip_columns": {
+  "i": 3
+ },
+ "zh_grammar": {
+  "b": true
+ },
+ "sound": {
+  "b": false
+ },
+ "theme_warmth": {
+  "i": -30
+ },
+ "ai_place": {
+  "s": "float"
+ },
+ "per_app_lang": {
+  "b": true
+ },
+ "math_format": {
+  "s": "uni"
+ },
+ "lp_hints": {
+  "b": true
+ },
+ "hap_space_type": {
+  "s": "tick"
+ },
+ "hap_option_type": {
+  "s": "tick"
+ },
+ "pangu": {
+  "b": false
+ },
+ "zh_predict": {
+  "b": true
+ },
+ "kay_icon": {
+  "s": "ai"
+ },
+ "kay_greet": {
+  "b": false
+ },
+ "key_borders": {
+  "b": true
+ },
+ "drag_cancel": {
+  "b": true
+ },
+ "ai_custom_recent": {
+  "s": "适合发朋友圈的语气"
+ },
+ "ai_assist": {
+  "s": "off"
+ },
+ "translate_target": {
+  "s": "ru"
+ },
+ "hap_letter_amp": {
+  "i": 154
+ },
+ "cloud_count": {
+  "i": 1
+ },
+ "voice_source": {
+  "s": "hf"
+ },
+ "hap_letter_type": {
+  "s": "click"
+ },
+ "zh_trad": {
+  "b": false
+ },
+ "style": {
+  "s": "paper"
+ },
+ "voice_commit_pause": {
+  "i": 2000
+ },
+ "zh_emoji": {
+  "b": true
+ },
+ "kay_rewrite": {
+  "s": "formal"
+ },
+ "voice_fillers": {
+  "b": false
+ },
+ "key_ovr_zh": {
+  "s": "{\"。\":{\"u\":\"，\",\"d\":\"\",\"l\":\"\",\"r\":\"\",\"long\":[\"……\",\"？\",\"！\",\"～\",\"——\"]},\"h\":{\"u\":\"“\",\"d\":\"\",\"l\":\"\",\"r\":\"\",\"long\":[\"『\",\"「\"]},\"j\":{\"u\":\"”\",\"d\":\"\",\"l\":\"\",\"r\":\"\",\"long\":[\"』\",\"」\"]},\"k\":{\"u\":\"*\",\"d\":\"\",\"l\":\"\",\"r\":\"\",\"long\":[\"·\",\"•\",\".\"]},\"z\":{\"u\":\"（\",\"d\":\"\",\"l\":\"\",\"r\":\"\",\"long\":[\"【\",\"[\",\"{\",\"《\"]},\"x\":{\"u\":\"）\",\"d\":\"\",\"l\":\"\",\"r\":\"\",\"long\":[\"】\",\"]\",\"}\",\"》\"]},\"c\":{\"u\":\"-\",\"d\":\"\",\"l\":\"\",\"r\":\"\",\"long\":[\"——\"]},\"m\":{\"u\":\"、\",\"d\":\"\",\"l\":\"\",\"r\":\"\",\"long\":[\"\\\\\",\"\\\/\"]},\"，\":{\"u\":\"、\",\"d\":\"\",\"l\":\"\",\"r\":\"\",\"long\":[]}}"
+ },
+ "voice_pangu": {
+  "b": true
+ },
+ "zh_correction": {
+  "b": true
+ },
+ "num_mode": {
+  "s": "simple"
+ },
+ "voice_punct": {
+  "s": "chat"
+ },
+ "ai_cand_pause": {
+  "i": 300
+ },
+ "anim_speed": {
+  "f": 0.8500000238418579
+ },
+ "theme": {
+  "s": "system"
+ },
+ "translate_wifi": {
+  "b": false
+ },
+ "touch_adapt": {
+  "b": true
+ },
+ "cand_font": {
+  "s": "sans"
+ },
+ "hap_gesture_type": {
+  "s": "double"
+ },
+ "languages": {
+  "s": "zh,ru"
+ },
+ "show_all_hints": {
+  "b": false
+ },
+ "hap_function_type": {
+  "s": "heavy"
+ },
+ "hap_popup_type": {
+  "s": "prim_click"
+ },
+ "hap_enter_type": {
+  "s": "double"
+ },
+ "translate_pause": {
+  "i": 2000
+ },
+ "typo_mark": {
+  "b": true
+ },
+ "hap_backspace_type": {
+  "s": "click"
+ },
+ "voice_lang": {
+  "s": "follow"
+ },
+ "cursor_labels": {
+  "s": "both"
+ },
+ "voice_return": {
+  "b": false
+ },
+ "cloud_predict": {
+  "b": false
+ },
+ "pinyin_mode": {
+  "b": false
+ },
+ "accent": {
+  "s": "cinnabar"
+ },
+ "voice_engine": {
+  "s": "gemini|gemini-flash-lite-latest"
+ },
+ "kay_chat_cap": {
+  "i": 100
+ },
+ "solar_terms": {
+  "b": true
+ },
+ "voice_auto_stop": {
+  "i": 5
+ },
+ "cloud_context": {
+  "i": 80
+ }
+}

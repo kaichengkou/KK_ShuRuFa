@@ -229,7 +229,9 @@ private fun SettingsApp(prefs: Prefs, start: String) {
     var page by remember { mutableStateOf(start) }
     // the home list keeps where it was while a page is open, so 返回 lands back there
     val homeList = androidx.compose.foundation.lazy.rememberLazyListState()
-    BackHandler(enabled = page != "home") { page = if (page == "dict_edit") "dict" else "home" }
+    val back = { page = if (page == "dict_edit") "dict" else "home" }
+    LeaveGuard.leave = back
+    BackHandler(enabled = page != "home") { LeaveGuard.ask?.invoke() ?: back() }
     AnimatedContent(
         targetState = page,
         transitionSpec = {
@@ -240,7 +242,7 @@ private fun SettingsApp(prefs: Prefs, start: String) {
     ) { p ->
         when (p) {
             "home" -> Home(prefs, homeList) { page = it }
-            else -> SubPage(PAGES.firstOrNull { it.id == p }?.title ?: "", { page = "home" }, page = p, prefs = prefs,
+            else -> SubPage(PAGES.firstOrNull { it.id == p }?.title ?: "", { LeaveGuard.ask?.invoke() ?: run { page = "home" } }, page = p, prefs = prefs,
                 header = if (p == "look") ({ KeyboardPreview(prefs) }) else null) {
                 when (p) {
                     "look" -> LookPage(prefs)
@@ -269,6 +271,12 @@ private fun SettingsApp(prefs: Prefs, start: String) {
 }
 
 // ---- building blocks -------------------------------------------------------------------
+
+/** A page with unsaved work holds 返回: [ask] asks first, [leave] goes back after. */
+private object LeaveGuard {
+    var ask: (() -> Unit)? = null
+    var leave: () -> Unit = {}
+}
 
 /** The settings a page's controls show, gathered as it is drawn, for its 恢复初始设定. */
 private val LocalPageKeys = androidx.compose.runtime.staticCompositionLocalOf<MutableSet<String>?> { null }
@@ -519,7 +527,7 @@ private fun Home(prefs: Prefs, list: androidx.compose.foundation.lazy.LazyListSt
             // the app's own key, as on the home screen, beside its name
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 18.dp)) {
                 Box(Modifier.size(56.dp).clip(RoundedCornerShape(17.dp))
-                    .background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(androidx.compose.ui.graphics.Color(0xFFF4E9D8), androidx.compose.ui.graphics.Color(0xFFF4E9D8)))),
+                    .background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(androidx.compose.ui.graphics.Color(0xFFC3D8E6), androidx.compose.ui.graphics.Color(0xFFC3D8E6)))),
                     contentAlignment = Alignment.Center) {
                     androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(R.drawable.ic_launcher_foreground), null, modifier = Modifier.requiredSize(84.dp))
                 }
@@ -970,7 +978,7 @@ private fun AboutPage() {
     Group("版本") {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(64.dp).clip(RoundedCornerShape(19.dp))
-                .background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(androidx.compose.ui.graphics.Color(0xFFF4E9D8), androidx.compose.ui.graphics.Color(0xFFF4E9D8)))),
+                .background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(androidx.compose.ui.graphics.Color(0xFFC3D8E6), androidx.compose.ui.graphics.Color(0xFFC3D8E6)))),
                 contentAlignment = Alignment.Center) {
                 androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(R.drawable.ic_launcher_foreground), null, modifier = Modifier.requiredSize(96.dp))
             }
@@ -1420,13 +1428,31 @@ private fun DictPage() {
     var query by remember { mutableStateOf("") }
     var editing by remember { mutableStateOf<Pair<Int, Phrase>?>(null) }
     var dirty by remember { mutableStateOf(false) }
+    var askLeave by remember { mutableStateOf(false) }
+    fun save() { writePhrases(ctx, data.first, data.second); RimeEngine.redeploy(ctx); dirty = false }
+    androidx.compose.runtime.DisposableEffect(dirty) {
+        LeaveGuard.ask = if (dirty) ({ askLeave = true }) else null
+        onDispose { LeaveGuard.ask = null }
+    }
+    if (askLeave) AlertDialog(
+        onDismissRequest = { askLeave = false },
+        title = { Text("还没保存") },
+        text = { Text("改过的词还没保存，现在离开就不算数了。") },
+        confirmButton = { TextButton(onClick = { askLeave = false; save(); LeaveGuard.ask = null; LeaveGuard.leave() }) { Text("保存并离开") } },
+        dismissButton = {
+            Row {
+                TextButton(onClick = { askLeave = false; dirty = false; LeaveGuard.ask = null; LeaveGuard.leave() }) { Text("不保存", color = MaterialTheme.colorScheme.error) }
+                TextButton(onClick = { askLeave = false }) { Text("继续改") }
+            }
+        },
+    )
     Group {
         Note("这里的词会在打对应编码时排在最前面。编码是不带声调、不加空格的拼音，比如“kkdz”可以对应你的地址。保存后会重新部署，几秒到十几秒后生效。")
         Row(verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(query, { query = it }, Modifier.weight(1f), placeholder = { Text("搜索词或编码") }, singleLine = true, shape = RoundedCornerShape(14.dp))
             IconButton(onClick = { editing = -1 to Phrase("", "", "99") }) { Icon(Icons.Filled.Add, "添加") }
         }
-        if (dirty) Button(onClick = { writePhrases(ctx, data.first, data.second); RimeEngine.redeploy(ctx); dirty = false },
+        if (dirty) Button(onClick = { save() },
             modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) { Text("保存并重新部署") }
     }
     val shown = data.second.withIndex().filter { (_, p) -> query.isBlank() || p.text.contains(query) || p.code.contains(query) }

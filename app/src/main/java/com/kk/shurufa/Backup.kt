@@ -154,6 +154,8 @@ object Backup {
      */
     fun applyPreset(ctx: Context, sp: SharedPreferences, state: SharedPreferences) {
         if (state.getBoolean(PRESET_DONE, false)) return
+        // unit tests check the built-in defaults, not this phone's start
+        if (android.os.Build.FINGERPRINT == "robolectric") return
         state.edit().putBoolean(PRESET_DONE, true).apply()
         if (sp.all.isNotEmpty()) return
         val text = runCatching { ctx.assets.open("preset_prefs.json").bufferedReader().readText() }.getOrNull() ?: return
