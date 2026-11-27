@@ -302,7 +302,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         applyRimeOptions()
         if (built) setInputView(onCreateInputView())
         currentInputEditorInfo?.let { applyPrivacy(it) }
-        if (prefs.incognito) learning.dropAll()
+        if (prefs.incognito) { learning.dropAll(); clipboard.dismissChip() }
         notice(if (prefs.incognito) "临时模式：输入的内容不学习、不记录" else "已退出临时模式")
     }
 
@@ -554,7 +554,9 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         keyboard.postDelayed({ if (SystemClock.uptimeMillis() >= spaceNoteUntil) { spaceNote = null; keyboard.invalidate() } }, ms + 20)
     }
 
-    override fun kayOnSpace() = prefs.kayOnSpace && !prefs.incognito && !editor.secret && !keyboardPhone
+    override fun kayOnSpace() = prefs.kayOnSpace && !keyboardPhone
+    /** 临时模式 or a password: 小K is there, its fins over its eyes, still and quiet. */
+    override fun kayShy() = prefs.incognito || editor.secret
 
     override fun onKayPat() {
         com.kk.shurufa.keyboard.SharkLife.pat(SystemClock.uptimeMillis())
@@ -897,7 +899,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
                 else if (cloudShown.isEmpty()) bar.showPredictions(predictions, predictionLabel)
                 else bar.showPredictions(cloudShown + predictions.filter { it !in cloudShown }, predictionLabel, cloudShown.map { "云" })
             }
-            clipboard.pendingChip() != null && letters -> clipboard.chip()?.let { (text, kind) -> bar.showClip(text, kind) }
+            clipboard.pendingChip() != null && letters && !prefs.incognito -> clipboard.chip()?.let { (text, kind) -> bar.showClip(text, kind) }
             else -> {
                 bar.showToolbar()
                 if (panel == Panel.CANDIDATES) showPanel(Panel.LETTERS)
@@ -1959,15 +1961,38 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     }
 
     override fun candidateOptions(index: Int): List<Output> = when {
+        index < 0 -> predictionOptions(-1 - index)
         !aiShown -> zhOptions(index)
         index == AI_SLOT -> emptyList()
         else -> zhOptions(if (index > AI_SLOT) index - 1 else index)
     }
 
     override fun onCandidateOption(index: Int, option: Output) = when {
+        index < 0 -> predictionOption(-1 - index, option)
         !aiShown -> zhOption(index, option)
         index == AI_SLOT -> Unit
         else -> zhOption(if (index > AI_SLOT) index - 1 else index, option)
+    }
+
+    /** An association held: put it in as it is, or never offer it again (and forget it was learned). */
+    private fun predictionOptions(i: Int): List<Output> {
+        val word = predictions.getOrNull(i) ?: return emptyList()
+        val shown = if (word.codePointCount(0, word.length) > 6) word.substring(0, word.offsetByCodePoints(0, 5)) + "…" else word
+        return listOf(Output("取消", "§cancel"), Output("上屏「$shown」", "§type"), Output("不再联想「$shown」", "§mute"))
+    }
+
+    private fun predictionOption(i: Int, option: Output) {
+        val word = predictions.getOrNull(i) ?: return
+        when (option.text) {
+            "§type" -> onCandidate(-1 - i)
+            "§mute" -> {
+                Muted.add(this, word)
+                zhMemory.forget(word)
+                predictions = predictions.filter { it != word }
+                syncBar()
+                notice("「$word」不会再出现在联想里，可以在「自定义词库」里恢复")
+            }
+        }
     }
 
     private fun zhOptions(index: Int): List<Output> {

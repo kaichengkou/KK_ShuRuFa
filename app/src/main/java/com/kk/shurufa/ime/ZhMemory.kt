@@ -85,6 +85,9 @@ class ZhMemory(context: Context) {
         Background.run { runCatching { val tmp = File(file.path + ".tmp"); tmp.writeText(lines.joinToString("\n")); tmp.renameTo(file) } }
     }
 
+    /** [word] is never to be offered again: it goes from every context it was kept under. */
+    fun forget(word: String) { synchronized(map) { map.values.forEach { it.remove(word) }; map.values.removeAll { it.isEmpty() }; dirty = true } }
+
     fun clear() { synchronized(map) { map.clear(); dirty = false }; file.delete() }
 
     private fun size() = map.values.sumOf { it.size }

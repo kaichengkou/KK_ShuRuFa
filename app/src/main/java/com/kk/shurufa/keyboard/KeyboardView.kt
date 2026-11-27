@@ -42,6 +42,8 @@ interface KeyboardListener {
     fun spaceLabel(): String
     /** Whether 小K sits on the space key, before the language. */
     fun kayOnSpace(): Boolean = false
+    /** 小K covers its eyes and keeps still (临时模式, passwords). */
+    fun kayShy(): Boolean = false
 }
 
 /**
@@ -455,7 +457,7 @@ class KeyboardView(context: Context, prefs: Prefs) : KbView(context, prefs) {
                     shark = true
                     val geo = sharkGeometry(rect, label, off)
                     // a nibble nudges the name
-                    val push = SharkLife.push(now) * Shark.cellFor(geo.size)
+                    val push = if (listener?.kayShy() == true) 0f else SharkLife.push(now) * Shark.cellFor(geo.size)
                     drawText(c, label, geo.labelX + push, cy, textPaint)
                     placeShark(c, rect, base, geo.sharkX, cx + off, textPaint.alpha, label, moving, now)
                 } else drawText(c, label, cx + off, cy, textPaint)
@@ -486,6 +488,7 @@ class KeyboardView(context: Context, prefs: Prefs) : KbView(context, prefs) {
     }
 
     /** Where 小K is drawn this frame, and whether the keyboard draws it or its own layer does. */
+    private val SHY = Shark.Pose(Shark.Face.COVER)
     private val sharkRect = RectF()
     private val sharkBase = RectF()
     private var sharkX = 0f
@@ -506,6 +509,11 @@ class KeyboardView(context: Context, prefs: Prefs) : KbView(context, prefs) {
     /** The shark and what it says under the name, at [sharkX]; the ms until its next change (0: keep going). */
     private fun drawShark(c: Canvas, now: Long): Long {
         val rect = sharkRect
+        if (listener?.kayShy() == true) {
+            // not looking: fins over its eyes, nothing moves, nothing said, nothing redrawn
+            Shark.drawCrisp(c, sharkX, rect.centerY(), sharkFace() * 0.9f, SHY, alpha = sharkAlpha)
+            return 60_000L
+        }
         val wait = Shark.drawLive(c, sharkX, rect.centerY(), sharkFace() * 0.9f, alpha = sharkAlpha, still = true)
         val words = SharkLife.saying(now) ?: return wait
         val show = SharkLife.sayingShown(now)

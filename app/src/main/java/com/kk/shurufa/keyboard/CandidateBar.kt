@@ -726,7 +726,8 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
     private val longRunnable = Runnable {
         val i = pressedCand
         if (i < 0 || dragging || i >= candCount) return@Runnable
-        val opts = listener?.candidateOptions(i).orEmpty()
+        // the associations' index is told the way their taps are: -1 for the first
+        val opts = listener?.candidateOptions(if (mode == Mode.PREDICTIONS) -1 - i else i).orEmpty()
         if (opts.isEmpty()) return@Runnable
         locateIn(overlay)
         val r = RectF(candRects[i]).apply { offset(-scrollX0 + layerOffset[0], layerOffset[1]) }
@@ -768,7 +769,7 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
                 downX = e.x; lastX = e.x; dragging = false; menuOpen = false
                 rawScroll = scrollX0
                 pressedCand = if (list && e.x < width - dp(END_DP) && !preeditRect.contains(e.x, e.y)) candidateAt(e.x, e.y) else -1
-                if (pressedCand >= 0 && mode == Mode.CANDIDATES) handler.postDelayed(longRunnable, 450)
+                if (pressedCand >= 0 && (mode == Mode.CANDIDATES || mode == Mode.PREDICTIONS)) handler.postDelayed(longRunnable, 450)
                 val hit = hits.at(e.x, e.y)
                 pressedTool = hit?.takeIf { mode == Mode.TOOLBAR && it.startsWith("tool:") }?.removePrefix("tool:")
                 patted = false
@@ -827,7 +828,7 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
                 when {
                     menuOpen -> {
                         val o = overlay
-                        val idx = pressedCand
+                        val idx = if (mode == Mode.PREDICTIONS) -1 - pressedCand else pressedCand
                         if (o == null || o.pickedByDrag()) {
                             o?.selected()?.let { listener?.onCandidateOption(idx, it) }
                             o?.hideOptions()

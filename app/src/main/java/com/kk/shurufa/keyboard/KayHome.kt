@@ -98,11 +98,40 @@ class KayHome(context: Context, prefs: Prefs) : KbView(context, prefs) {
         if (Motion.on(prefs)) { appear.set(0f); appear.animateTo(1f, dur(520), Motion.LINEAR) } else appear.set(1f)
         posX.set(0f); posY.set(0f); act = null; homeAt = 0L; facingLeft = false
         thread = emptyList(); threadAt = 0; threads = 0; joking = false; pokes = 0
-        bubble = ""
-        if (line.isNotEmpty()) postDelayed({ if (isAttachedToWindow) say(line, 4500) }, 380)
+        bubble = ""; pokeTimes.clear(); override = null
+        val opener = opener()
+        postDelayed({ if (isAttachedToWindow) say(opener, 4200) }, 380)
         quietAgain(9000)
         invalidate()
     }
+
+    /**
+     * The first thing it says: the line of the day the first time today; after that, by chance,
+     * something for the hour, its mood this time, or (back soon) that you are back.
+     */
+    private fun opener(): String {
+        val st = prefs.state
+        val today = java.time.LocalDate.now().toString()
+        val now = System.currentTimeMillis()
+        val last = st.getLong(LAST_OPEN, 0L)
+        st.edit().putLong(LAST_OPEN, now).apply()
+        if (line.isNotEmpty() && st.getString(LINE_SAID, "") != today) { st.edit().putString(LINE_SAID, today).apply(); return line }
+        mood = SharkTalk.MOODS.keys.random()
+        if (now - last < 15 * 60_000L && rnd.nextInt(10) < 6) return SharkTalk.deal(SharkTalk.AGAIN)
+        return when (rnd.nextInt(10)) {
+            in 0..3 -> SharkTalk.deal(SharkTalk.MOODS.getValue(mood))
+            in 4..7 -> SharkTalk.deal(when (java.time.LocalTime.now().hour) { in 5..10 -> SharkTalk.MORNING; in 11..13 -> SharkTalk.NOON; in 14..17 -> SharkTalk.AFTERNOON; in 18..22 -> SharkTalk.EVENING; else -> SharkTalk.NIGHT })
+            8 -> if (line.isNotEmpty()) "今天的一言：$line" else SharkTalk.deal(SharkTalk.AGAIN)
+            else -> SharkTalk.deal(SharkTalk.THREADS).first()
+        }
+    }
+    private var mood = "开心"
+
+    /** A face held for a while over what it would do (dozing, a sneeze, dizzy). */
+    private var override: Shark.Pose? = null
+    private var overrideUntil = 0L
+    private fun hold(pose: Shark.Pose, ms: Long) { override = pose; overrideUntil = Motion.now() + ms; invalidate() }
+    private var dozing = false
 
     private fun quietAgain(ms: Long) { removeCallbacks(idleTick); postDelayed(idleTick, ms) }
 
@@ -134,6 +163,8 @@ class KayHome(context: Context, prefs: Prefs) : KbView(context, prefs) {
             quietAgain(sayTime(l) + 1600L + rnd.nextInt(900))
             return
         }
+        // between threads, now and then, something of its own
+        if (!joking && thread.isNotEmpty() && rnd.nextInt(100) < 22) { chance(); thread = emptyList(); return }
         if (!joking && threads < THREADS_BEFORE_JOKES) {
             val extra = extraLines.map { listOf(it) }
             thread = SharkTalk.deal(SharkTalk.THREADS, extra); threadAt = 0; threads++
@@ -162,8 +193,67 @@ class KayHome(context: Context, prefs: Prefs) : KbView(context, prefs) {
         quietAgain(pause + sayTime(answer) + 9000L)
     }
 
+    /** Something it does by itself: a sneeze, a doze, a bubble, a stretch. */
+    private fun chance() {
+        when (rnd.nextInt(4)) {
+            0 -> {
+                val (a, b) = SharkTalk.deal(SharkTalk.SNEEZE).split('|').let { it[0] to it.getOrElse(1) { "" } }
+                hold(Shark.Pose(Shark.Face.SURPRISED, squash = true), 500); move("shake"); say(a, 900)
+                postDelayed({ if (isAttachedToWindow) say("$a\n$b", 2600, from = a.length) }, sayTime(a) + 700L)
+                quietAgain(sayTime(a) + sayTime(b) + 6000L)
+            }
+            1 -> {
+                // it nods off until poked, or wakes by itself a while later
+                dozing = true
+                hold(Shark.Pose(Shark.Face.SLEEP, extra = Shark.Extra.Z, phase = 1), 7000)
+                say(SharkTalk.deal(SharkTalk.DOZE), 5000)
+                postDelayed({ if (isAttachedToWindow && dozing) { dozing = false; override = null; move("hop"); say(SharkTalk.deal(SharkTalk.WOKE)) } }, 7000)
+                quietAgain(12000)
+            }
+            2 -> {
+                hold(Shark.Pose(Shark.Face.LOOKUP, extra = Shark.Extra.BUBBLES, phase = 3), 2200)
+                say(SharkTalk.deal(SharkTalk.BUBBLE)); quietAgain(7000)
+            }
+            else -> {
+                hold(Shark.Pose(Shark.Face.HAPPY, squash = true), 300); move("hop")
+                say(listOf("伸个懒腰～", "（活动一下鳍）", "坐久了要动一动").random()); quietAgain(7000)
+            }
+        }
+    }
+
+    /** Held: today's fortune, drawn once a day (asked again, it says what came out). */
+    private fun fortune() {
+        val st = prefs.state
+        val today = java.time.LocalDate.now().toString()
+        val had = st.getString(FORTUNE, "")!!
+        joking = false
+        if (had.substringBefore('\t') == today) {
+            val f = had.substringAfter('\t')
+            say("今天已经抽过啦：${f.substringBefore('|')}\n${f.substringAfter('|')}", 4200); move("wiggle")
+            quietAgain(8000); return
+        }
+        val f = SharkTalk.deal(SharkTalk.FORTUNES)
+        st.edit().putString(FORTUNE, "$today\t$f").apply()
+        say(SharkTalk.DRAWING, 1200); move("dance")
+        postDelayed({ if (isAttachedToWindow) { say("今日运势：${f.substringBefore('|')}\n${f.substringAfter('|')}", 5200); move("hop") } }, 1500)
+        quietAgain(10000)
+    }
+    private val pokeTimes = ArrayDeque<Long>()
+
     /** Poked: something to do, and an answer that knows how often it was poked. */
     private fun poke() {
+        // woken from a doze
+        if (dozing) { dozing = false; override = null; move("hop"); say(SharkTalk.deal(SharkTalk.WOKE)); onPoke?.invoke(); quietAgain(6500); return }
+        // poked fast, again and again: dizzy
+        val t = Motion.now()
+        pokeTimes.addLast(t); while (pokeTimes.isNotEmpty() && t - pokeTimes.first() > 2200) pokeTimes.removeFirst()
+        if (pokeTimes.size >= 4) {
+            pokeTimes.clear(); pokes++
+            hold(Shark.Pose(Shark.Face.SURPRISED, extra = Shark.Extra.BANG), 1600); move("dizzy")
+            say(SharkTalk.deal(SharkTalk.DIZZY), 2600); onPoke?.invoke(); quietAgain(6500); return
+        }
+        // a rare line, now and then
+        if (rnd.nextInt(100) < 4) { pokes++; move("dance"); say(SharkTalk.deal(SharkTalk.RARE), 3000); onPoke?.invoke(); quietAgain(6500); return }
         val inThread = threadAt in 1 until thread.size
         pokes++
         joking = false
@@ -183,7 +273,7 @@ class KayHome(context: Context, prefs: Prefs) : KbView(context, prefs) {
         if (!Motion.on(prefs)) return
         val now = Motion.now()
         act = kind; actAt = now
-        actMs = when (kind) { "wiggle" -> 760L; "hop" -> 640L; "turn" -> 620L; "shake" -> 640L; "dance" -> 1200L; "home" -> 820L; else -> 820L }
+        actMs = when (kind) { "wiggle" -> 760L; "hop" -> 640L; "turn" -> 620L; "shake" -> 640L; "dance" -> 1200L; "home" -> 820L; "dizzy" -> 1500L; else -> 820L }
         when (kind) {
             "roam" -> {
                 // somewhere else in its corner, facing where it goes, back home in a while
@@ -298,6 +388,7 @@ class KayHome(context: Context, prefs: Prefs) : KbView(context, prefs) {
                 "shake" -> { x += dp(7f) * sin(2 * PI.toFloat() * 3.5f * p) * (1 - p); rot = -4f * sin(2 * PI.toFloat() * 3.5f * p) * (1 - p) }
                 "dance" -> { hop((p * 2f) % 1f, dp(12f)); rot = 9f * sin(2 * PI.toFloat() * 2 * p) }
                 "roam", "home" -> y -= dp(6f) * sin(PI.toFloat() * p)
+                "dizzy" -> { rot = 18f * sin(2 * PI.toFloat() * 3 * p) * (1 - p * 0.6f); x += dp(5f) * sin(2 * PI.toFloat() * 1.5f * p) }
             }
             if (p >= 1f) { act = null; turned = false }
         }
@@ -309,7 +400,9 @@ class KayHome(context: Context, prefs: Prefs) : KbView(context, prefs) {
         rot += lean
         val (pose0, _) = SharkLife.frame(now, java.time.LocalTime.now().hour, still = true)
         val typing = bubble.isNotEmpty() && now < bubbleAt + (bubble.length - bubbleFrom) * CHAR_MS
-        var pose = pose0.copy(flip = pose0.flip xor facingLeft)
+        val held = override?.takeIf { now < overrideUntil }
+        if (held == null) override = null
+        var pose = (held ?: pose0).copy(flip = (held ?: pose0).flip xor facingLeft)
         // talking, the mouth opens and closes; a card pressed, it looks over there
         if (typing && pose.face == Shark.Face.CALM) pose = pose.copy(face = if ((now / 150) % 2 == 0L) Shark.Face.HAPPY else Shark.Face.CALM)
         if (pressed != null && pressed != "poke" && pose.look == 0) pose = pose.copy(look = if (facingLeft) -1 else 1)
@@ -368,6 +461,7 @@ class KayHome(context: Context, prefs: Prefs) : KbView(context, prefs) {
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 pressed = hits.at(e.x, e.y)
+                if (pressed == "poke") postDelayed(longPress, 520)
                 if (pressed != null) {
                     onFeedback?.invoke()
                     if (pressed != "poke" && pressed != "all") { pressT.set(0f); pressT.animateTo(1f, dur(90), Motion.ENTER) }
@@ -375,7 +469,9 @@ class KayHome(context: Context, prefs: Prefs) : KbView(context, prefs) {
                 invalidate()
             }
             MotionEvent.ACTION_UP -> {
+                removeCallbacks(longPress)
                 val p = pressed
+                if (longFired) { longFired = false; pressed = null; invalidate(); return true }
                 if (p != null && hits.at(e.x, e.y) == p) {
                     when {
                         p == "poke" -> poke()
@@ -387,14 +483,19 @@ class KayHome(context: Context, prefs: Prefs) : KbView(context, prefs) {
                 postDelayed({ pressed = null; invalidate() }, dur(160))
                 invalidate()
             }
-            MotionEvent.ACTION_CANCEL -> { pressed = null; invalidate() }
+            MotionEvent.ACTION_CANCEL -> { removeCallbacks(longPress); pressed = null; invalidate() }
         }
         return true
     }
+    private var longFired = false
+    private val longPress = Runnable { if (pressed == "poke") { longFired = true; onPoke?.invoke(); fortune() } }
 
     private companion object {
         /** A character of a bubble comes out every this many ms. */
         const val CHAR_MS = 55L
         const val THREADS_BEFORE_JOKES = 3
+        const val LAST_OPEN = "kay_home_last_open"
+        const val LINE_SAID = "kay_home_line_said"
+        const val FORTUNE = "kay_fortune"
     }
 }
