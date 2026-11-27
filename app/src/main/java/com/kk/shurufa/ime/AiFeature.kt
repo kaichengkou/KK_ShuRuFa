@@ -202,7 +202,7 @@ class AiFeature(private val host: Host, private val kay: Kay) {
             val r = runCatching {
                 Llm.completeTarget(prefs, t, kay.chatSystem(), kay.chatUser(said),
                     onText = { s -> handler.post { if (id == run) { pendingAnswer = s.trim(); syncChat(); onText(pendingAnswer) } } },
-                    cancelled = { id != run })
+                    cancelled = { id != run }, search = true)
             }
             handler.post {
                 if (id != run) return@post

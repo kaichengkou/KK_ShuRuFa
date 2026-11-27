@@ -346,6 +346,7 @@ class Prefs(context: Context) {
         const val KAY_SPACE = "kay_space"
         const val KAY_ICON = "kay_icon"
         const val KAY_REWRITE = "kay_rewrite"
+        const val KAY_INSTRUCTIONS = "kay_instructions"
         const val KAY_CHATTER = "kay_chatter"
         const val KAY_CHATTER_FOR = "kay_chatter_for"
         const val KAY_CHATTER_ASKED = "kay_chatter_asked"

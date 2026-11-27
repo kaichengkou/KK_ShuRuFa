@@ -170,7 +170,8 @@ class TranslateStrip(context: Context, prefs: Prefs) : KbView(context, prefs) {
         // is left, shortened if it must be
         val hy = cardT + dp(8f); val hh = dp(30f)
         r.set(cardR - dp(6f) - hh - dp(6f), hy, cardR - dp(6f), hy + hh)
-        drawChip(c, r, "", ChipStyle.GHOST, pressed = pressed == "close", icon = "close")
+        // 收起 (a chevron down): not a second ✕ beside the text line's
+        drawChip(c, r, "", ChipStyle.GHOST, pressed = pressed == "close", icon = "chevron")
         hits.add("close", r, slop = dp(4f))
         val engineLabel = fit(engineName, (cardR - cardL) * 0.28f, Ui.SMALL)
         val ew = chipWidth(engineLabel, chevron = true, textSp = Ui.SMALL)
@@ -251,7 +252,13 @@ class TranslateStrip(context: Context, prefs: Prefs) : KbView(context, prefs) {
         }
         if (clearW > 0f) {
             r.set(innerR - (if (tagW > 0f) tagW + dp(8f) else 0f) - clearW, innerT + (inputH - dp(28f)) / 2, innerR - (if (tagW > 0f) tagW + dp(8f) else 0f), innerT + (inputH + dp(28f)) / 2)
-            drawChip(c, r, "", ChipStyle.GHOST, pressed = pressed == "clear", icon = "close")
+            // the text line's own clear: a small filled disc with a cross, as search boxes have
+            val cx = r.centerX(); val cy = r.centerY(); val rad = dp(9f)
+            bg.color = Colors.fade(t.hint, if (pressed == "clear") 0.55f else 0.32f)
+            c.drawCircle(cx, cy, rad, bg)
+            xPaint.color = t.surface; xPaint.strokeWidth = dp(1.6f)
+            val d = dp(3.6f)
+            c.drawLine(cx - d, cy - d, cx + d, cy + d, xPaint); c.drawLine(cx - d, cy + d, cx + d, cy - d, xPaint)
             hits.add("clear", r, slop = dp(6f))
         }
         if (source.isEmpty() && !sourceIsSelection && insertable.isNotEmpty()) {
@@ -279,6 +286,7 @@ class TranslateStrip(context: Context, prefs: Prefs) : KbView(context, prefs) {
         }
     }
 
+    private val xPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND }
     private val srcBox = RectF()
     private val srcOrigin = android.graphics.PointF()
     private val tagPaint = TextPaint(Paint.ANTI_ALIAS_FLAG)

@@ -150,7 +150,8 @@ class TranslateFeature(private val host: Host, private val service: TranslateSer
         "translate" -> TranslateService.LANGS.map { (id, name) -> PickList.Item("to:$id", "译成 $name") } +
             (listOf("auto" to "自动识别") + TranslateService.LANGS).map { (id, name) -> PickList.Item("from:$id", "原文：$name", if (id == from) "当前" else "") }
         "rewrite" -> AiWriter.ACTIONS.filter { it.group == "改写" }.map { PickList.Item("act:${it.id}", it.title) } +
-            PickList.Item("custom", "✎ 我来说怎么改") + PickList.Item("copy", "复制结果")
+            PickList.Item("custom", "✎ 我来说怎么改") +
+            recentInstructions().map { PickList.Item("ins:$it", "↻ $it", "说过的") } + PickList.Item("copy", "复制结果")
         else -> listOf(PickList.Item("line", "一言", "今天那句"), PickList.Item("all", "看全部对话"), PickList.Item("copy", "复制回答"), PickList.Item("clear", "清空对话"))
     }
 
@@ -161,13 +162,14 @@ class TranslateFeature(private val host: Host, private val service: TranslateSer
             id.startsWith("from:") -> { from = id.removePrefix("from:"); resultFor = ""; sync() }
             id.startsWith("act:") -> {
                 prefs.put(Prefs.KAY_REWRITE, id.removePrefix("act:"))
-                if (custom) { custom = false; host.queryCaret = -1; host.query.setLength(0); host.query.append(fromField) }
+                if (custom) { custom = false; result = ""; host.queryCaret = -1; host.query.setLength(0); host.query.append(customText) }
                 host.haptics.play(HapticEvent.OPTION); rewriteFor = ""; sync()
             }
-            id == "custom" -> {
-                // the text stays the field's; what is typed now says how to change it
-                if (!custom) { custom = true; if (fromField.isEmpty()) fromField = host.query.toString(); host.queryCaret = -1; host.query.setLength(0) }
-                result = ""; rewriteBase = null; status = ""; sync(); host.syncBar()
+            id == "custom" -> { if (enterCustom()) { sync(); host.syncBar() } }
+            id.startsWith("ins:") -> if (enterCustom()) {
+                // an instruction said before: it runs at once
+                host.queryCaret = -1; host.query.setLength(0); host.query.append(id.removePrefix("ins:"))
+                rewrite()
             }
             id == "line" -> { ai.recallLine(); answer = ai.lastAnswer(); sync() }
             id == "copy" -> button("copy")
@@ -183,8 +185,35 @@ class TranslateFeature(private val host: Host, private val service: TranslateSer
 
     // ---- what the strip shows ----
 
-    /** 改写 by instruction: the query is the instruction, [fromField] the text. */
+    /**
+     * 我来说怎么改: the query is the instruction, [customText] the text it works on — what was in
+     * the text line when it was chosen, or else the field's text. Once there is an answer, a new
+     * instruction works on the answer (再短一点, 语气再软些); 替换 puts the last one in.
+     */
     private var custom = false
+    private var customText = ""
+    /** The instruction the answer is for: ↵ on it again puts the answer in; a changed one runs. */
+    private var customSaid = ""
+
+    private fun enterCustom(): Boolean {
+        if (custom) return true
+        val q = host.query.toString()
+        val field = host.editor.allText() ?: (host.editor.textBefore(4000) + host.editor.textAfter(4000))
+        val text = if (q.isNotBlank()) q else field
+        if (text.isBlank()) { status = "先在输入行放上要改的文字（点「一键插入」），再选「我来说怎么改」"; sync(); return false }
+        // from the field (or 一键插入 from it): 替换 puts the answer there; typed here: 上屏
+        if (q.isBlank()) fromField = field
+        customText = text; customSaid = ""
+        custom = true; result = ""; rewriteBase = null; status = ""
+        host.queryCaret = -1; host.query.setLength(0)
+        return true
+    }
+
+    private fun recentInstructions(): List<String> = (prefs.state.getString(Prefs.KAY_INSTRUCTIONS, "") ?: "").split('\n').filter { it.isNotBlank() }
+    private fun rememberInstruction(i: String) {
+        val l = (listOf(i) + recentInstructions().filter { it != i }).take(6)
+        prefs.state.edit().putString(Prefs.KAY_INSTRUCTIONS, l.joinToString("\n")).apply()
+    }
     private var rewriteBase: String? = null
     private var answer = ""
     private var status = ""
@@ -239,8 +268,8 @@ class TranslateFeature(private val host: Host, private val service: TranslateSer
                 st.sourceIsSelection = fromSelection && !custom
                 st.source = q
                 if (custom) {
-                    st.placeholder = "说说要怎么改，比如「语气软一点」"
-                    st.sourceTag = if (fromField.isNotBlank()) "改${if (fromSelection) "选中" else "全文"} ${fromField.length} 字" else ""
+                    st.placeholder = if (result.isEmpty()) "说说要怎么改，比如「语气软一点」" else "还想怎么改？比如「再短一点」"
+                    st.sourceTag = if (result.isEmpty()) "改 ${customText.length} 字" else "改上一版"
                     st.insertable = ""
                 } else {
                     st.placeholder = "要改的文字"; st.sourceTag = ""
@@ -249,7 +278,7 @@ class TranslateFeature(private val host: Host, private val service: TranslateSer
                 st.busyText = "${if (custom) "改写" else a.title}中…"
                 st.resultHint = when {
                     aiTarget == null -> "先在设置里添加 AI 服务"
-                    custom -> "说完按回车，就按这句话改"
+                    custom -> "要改：" + customText.replace('\n', ' ').let { if (it.length > 18) it.take(18) + "…" else it } + "　说完按回车"
                     else -> "改好的文字会显示在这里"
                 }
                 // like 翻译: the text as it is now is rewritten once typing pauses
@@ -302,7 +331,10 @@ class TranslateFeature(private val host: Host, private val service: TranslateSer
     /** ↵: what the strip is for. */
     fun enter() = when (mode) {
         "translate" -> commit()
-        "rewrite" -> if (result.isEmpty() && !rewriting) { failedFor = ""; handler.removeCallbacks(rewriteRun); rewrite() } else if (result.isNotEmpty() && !rewriting && (custom || rewriteFor == rewriteKey(host.query.toString()))) button("apply") else { handler.removeCallbacks(rewriteRun); rewrite() }
+        "rewrite" -> if (custom) {
+            // the same instruction again: its answer goes in; a new one runs (on the answer, if there is one)
+            if (result.isNotEmpty() && !rewriting && host.query.toString().trim() == customSaid) button("apply") else rewrite()
+        } else if (result.isEmpty() && !rewriting) { failedFor = ""; handler.removeCallbacks(rewriteRun); rewrite() } else if (result.isNotEmpty() && !rewriting && (custom || rewriteFor == rewriteKey(host.query.toString()))) button("apply") else { handler.removeCallbacks(rewriteRun); rewrite() }
         else -> send()
     }
 
@@ -337,11 +369,12 @@ class TranslateFeature(private val host: Host, private val service: TranslateSer
     private fun rewrite() {
         val q = host.query.toString()
         if (host.sink != Sink.TRANSLATE || mode != "rewrite") return
-        val src = if (custom) fromField else q
+        val src = if (custom) result.ifEmpty { customText } else q
         if (src.isBlank()) { status = "没有要改的文字：在上面打字，或点「一键插入」"; sync(); return }
         if (custom && q.isBlank()) { status = "先说说要怎么改"; sync(); return }
-        val a = if (custom) AiWriter.custom(q) else rewriteAction()
-        val k = if (custom) "custom|$q" else rewriteKey(q)
+        val a = if (custom) AiWriter.custom(q.trim()) else rewriteAction()
+        val k = if (custom) "custom|$q|${src.hashCode()}" else rewriteKey(q)
+        if (custom) { customSaid = q.trim(); rememberInstruction(q.trim()) }
         rewriting = true; status = ""; result = ""; rewriteBase = if (a.diff) src else null
         rewriteFor = k
         sync()

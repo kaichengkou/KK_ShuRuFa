@@ -141,15 +141,16 @@ object Llm {
         }.trim()
     }
 
-    fun completeTarget(prefs: Prefs, target: String, system: String, user: String, onText: (String) -> Unit = {}, cancelled: () -> Boolean = { false }): String =
-        complete(prefs, targetId(target), system, user, onText, cancelled, targetModel(prefs, target))
+    /** [search]: the service may look things up on the web first (Gemini's Google Search; others answer from what they know). */
+    fun completeTarget(prefs: Prefs, target: String, system: String, user: String, onText: (String) -> Unit = {}, cancelled: () -> Boolean = { false }, search: Boolean = false): String =
+        complete(prefs, targetId(target), system, user, onText, cancelled, targetModel(prefs, target), search)
 
     /**
      * Runs one request, calling [onText] with the text so far as it streams. Blocking; call
      * it off the main thread. Errors are thrown as [IllegalStateException] with a message for
      * the user. [cancelled] is polled while streaming.
      */
-    fun complete(prefs: Prefs, id: String, system: String, user: String, onText: (String) -> Unit = {}, cancelled: () -> Boolean = { false }, model: String? = null): String {
+    fun complete(prefs: Prefs, id: String, system: String, user: String, onText: (String) -> Unit = {}, cancelled: () -> Boolean = { false }, model: String? = null, search: Boolean = false): String {
         if (!configured(prefs, id)) error("还没有设置 ${provider(id).title} 的 API Key")
         val m0 = model?.takeIf { it.isNotBlank() } ?: model(prefs, id)
         // a busy free tier (503, 429) is common: wait and try again, then a lighter Gemini model
@@ -163,7 +164,7 @@ object Llm {
                     return when (protocol(prefs, id)) {
                         // Claude itself, or a service that speaks the Anthropic format at its own address
                         "claude" -> claude(key(prefs, id), m, system, user, { streamed = true; onText(it) }, cancelled, if (id == "claude") null else base(prefs, id))
-                        "gemini" -> gemini(base(prefs, id), key(prefs, id), m, system, user, { streamed = true; onText(it) }, cancelled)
+                        "gemini" -> gemini(base(prefs, id), key(prefs, id), m, system, user, { streamed = true; onText(it) }, cancelled, search)
                         else -> openAi(base(prefs, id), key(prefs, id), m, system, user, { streamed = true; onText(it) }, cancelled)
                     }.trim().also { if (m != m0) remember(prefs, id, model, m0, m, last) }
                 } catch (e: HttpError) {
@@ -259,6 +260,7 @@ object Llm {
     }
 
     private val noSystem = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    private val noTools = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
     private val NOT_TEXT = listOf("tts", "image", "banana", "lyria", "robotics", "computer-use", "customtools", "deep-research", "antigravity", "embedding", "aqa", "veo", "imagen")
 
@@ -475,16 +477,26 @@ object Llm {
 
     // ---- Gemini ----
 
-    private fun gemini(base: String, key: String, model: String, system: String, user: String, onText: (String) -> Unit, cancelled: () -> Boolean): String {
+    private class NoTools : RuntimeException()
+
+    private fun gemini(base: String, key: String, model: String, system: String, user: String, onText: (String) -> Unit, cancelled: () -> Boolean, search: Boolean = false): String =
+        try { geminiRun(base, key, model, system, user, onText, cancelled, search) } catch (e: NoTools) { geminiRun(base, key, model, system, user, onText, cancelled, false) }
+
+    private fun geminiRun(base: String, key: String, model: String, system: String, user: String, onText: (String) -> Unit, cancelled: () -> Boolean, search: Boolean): String {
         // some models (Gemma, the transcribe model) refuse a system instruction: put it in the message instead
+        val tools = search && model !in noTools
         fun body(fold: Boolean) = JSONObject().apply {
             if (!fold) put("systemInstruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", system))))
+            // 帮忙查: Google Search, where the model can use it
+            if (tools) put("tools", JSONArray().put(JSONObject().put("google_search", JSONObject())))
             put("contents", JSONArray().put(JSONObject().put("role", "user").put("parts", JSONArray().put(JSONObject().put("text", if (fold) "$system\n\n$user" else user)))))
         }
         val url = "$base/models/$model:streamGenerateContent?alt=sse"
         val c = withThinking(model) { cfg ->
             if (model in noSystem) post(url, mapOf("x-goog-api-key" to key), body(true).put("generationConfig", cfg))
             else try { post(url, mapOf("x-goog-api-key" to key), body(false).put("generationConfig", cfg)) } catch (e: HttpError) {
+                // a model without search: asked again without it, and not offered it again
+                if (tools && e.code == 400 && (e.detail.contains("tool", true) || e.detail.contains("search", true))) { noTools += model; throw NoTools() }
                 if (e.code != 400 || !e.detail.contains("instruction", true)) throw e
                 noSystem += model
                 post(url, mapOf("x-goog-api-key" to key), body(true).put("generationConfig", cfg))
