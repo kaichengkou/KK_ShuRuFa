@@ -142,6 +142,8 @@ class Prefs(context: Context) {
     val kayPromptGreet get() = s(KAY_PROMPT_GREET, "")
     val kayPromptChatter get() = s(KAY_PROMPT_CHATTER, "")
     /** 改写: the person's own ways of rewriting, one instruction a line. */
+    /** The rewrites as edited in the settings, or null for the built-in ones. */
+    val kayBaseActions: String? get() = if (sp.contains(KAY_BASE_ACTIONS)) sp.getString(KAY_BASE_ACTIONS, "") else null
     val kayCustomActions get() = s(KAY_CUSTOM_ACTIONS, "").lines().map { it.trim() }.filter { it.isNotEmpty() }
     val kayIcon get() = s(KAY_ICON, "shark").takeIf { it in setOf("shark", "shark_fin", "ai") } ?: "shark"
     /** The shark's pace: how often it acts, the share of long acts, its speed, how often it speaks and for how long, the size of its words. */
@@ -358,6 +360,7 @@ class Prefs(context: Context) {
         const val KAY_PROMPT_GREET = "kay_prompt_greet"
         const val KAY_PROMPT_CHATTER = "kay_prompt_chatter"
         const val KAY_CUSTOM_ACTIONS = "kay_custom_actions"
+        const val KAY_BASE_ACTIONS = "kay_base_actions"
         const val KAY_REWRITE = "kay_rewrite"
         const val KAY_INSTRUCTIONS = "kay_instructions"
         const val KAY_CHATTER = "kay_chatter"

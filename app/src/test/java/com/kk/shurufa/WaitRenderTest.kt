@@ -103,7 +103,7 @@ class WaitRenderTest {
         save(st, 136, "translate_done")
         fun P(a: String, b: String, c: String = "") = com.kk.shurufa.keyboard.PickList.Item(a, b, c)
         st.modeLabel = "改写"; st.optLabel = "润色"
-        st.optItems = listOf(P("polish", "润色"), P("short", "精简"), P("formal", "正式"), P("casual", "口语"), P("ins:更像我说话", "更像我说话", "我的"), P("say", "✎ 我来说"), P("copy", "复制结果"))
+        st.optItems = listOf(P("polish", "润色"), P("formal", "正式"), P("ins:更像我说话", "更像我说话", "我的"), P("ins:加个表情", "加个表情", "我的"), P("custom", "✎ 我来说"))
         st.optCurrent = "formal"
         st.open("opt")
         save(st, 136, "rewrite_options")

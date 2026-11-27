@@ -23,6 +23,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -518,9 +519,9 @@ private fun Home(prefs: Prefs, list: androidx.compose.foundation.lazy.LazyListSt
             // the app's own key, as on the home screen, beside its name
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 18.dp)) {
                 Box(Modifier.size(56.dp).clip(RoundedCornerShape(17.dp))
-                    .background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(androidx.compose.ui.graphics.Color(0xFF16374F), androidx.compose.ui.graphics.Color(0xFF0A1C2B)))),
+                    .background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(androidx.compose.ui.graphics.Color(0xFFF4E9D8), androidx.compose.ui.graphics.Color(0xFFF4E9D8)))),
                     contentAlignment = Alignment.Center) {
-                    androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(R.drawable.ic_launcher_foreground), null, modifier = Modifier.size(84.dp))
+                    androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(R.drawable.ic_launcher_foreground), null, modifier = Modifier.requiredSize(84.dp))
                 }
                 Spacer(Modifier.width(16.dp))
                 Column {
@@ -969,9 +970,9 @@ private fun AboutPage() {
     Group("版本") {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(64.dp).clip(RoundedCornerShape(19.dp))
-                .background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(androidx.compose.ui.graphics.Color(0xFF16374F), androidx.compose.ui.graphics.Color(0xFF0A1C2B)))),
+                .background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(androidx.compose.ui.graphics.Color(0xFFF4E9D8), androidx.compose.ui.graphics.Color(0xFFF4E9D8)))),
                 contentAlignment = Alignment.Center) {
-                androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(R.drawable.ic_launcher_foreground), null, modifier = Modifier.size(96.dp))
+                androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(R.drawable.ic_launcher_foreground), null, modifier = Modifier.requiredSize(96.dp))
             }
             Spacer(Modifier.width(16.dp))
             Column {
@@ -1815,12 +1816,25 @@ private fun OnlinePage(prefs: Prefs, openServices: () -> Unit) {
         Choice(prefs, Prefs.AI_THINKING, "模型想多久再回答", listOf("off" to "不思考", "low" to "浅", "medium" to "中", "high" to "深"))
         Note("默认不思考：回答最快、最省额度。有的模型必须思考，就用它允许的最浅一档。调深一些，聊天里的难题、长文改写会更周到，但要多等几秒。对所有 AI 服务都有效。")
     }
+    Group("改写的选项") {
+        LocalPageKeys.current?.add(Prefs.KAY_BASE_ACTIONS)
+        var base by remember { mutableStateOf(prefs.kayBaseActions ?: com.kk.shurufa.online.AiWriter.baseText) }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("名称：要怎么改", Modifier.weight(1f), fontWeight = FontWeight.Medium)
+            if (prefs.kayBaseActions != null) TextButton(onClick = {
+                prefs.sp.edit().remove(Prefs.KAY_BASE_ACTIONS).apply(); base = com.kk.shurufa.online.AiWriter.baseText
+            }) { Text("恢复自带") }
+        }
+        OutlinedTextField(base, { v -> base = v; prefs.put(Prefs.KAY_BASE_ACTIONS, v) }, modifier = Modifier.fillMaxWidth(), minLines = 4, maxLines = 14,
+            shape = RoundedCornerShape(14.dp), textStyle = MaterialTheme.typography.bodySmall)
+        Note("一行一个，冒号前是条子上显示的名字，冒号后告诉 AI 怎么改。可以改、删、调顺序，也可以加新的。")
+    }
     Group("我自己的改法") {
         LocalPageKeys.current?.add(Prefs.KAY_CUSTOM_ACTIONS)
         var text by remember { mutableStateOf(prefs.sp.getString(Prefs.KAY_CUSTOM_ACTIONS, "") ?: "") }
         OutlinedTextField(text, { v -> text = v; prefs.put(Prefs.KAY_CUSTOM_ACTIONS, v) }, modifier = Modifier.fillMaxWidth(), minLines = 3,
             shape = RoundedCornerShape(14.dp), placeholder = { Text("一行一条，比如：\n改成朋友圈文案\n翻成东北话\n语气软一点，加个表情") })
-        Note("每一行是一种改法，会和润色、纠错排在一起。在上方条里点「✎ 我来说」直接打一句新的，也会记到这里，一直用到你换掉。")
+        Note("每一行是一种改法，排在上面那些后面。在上方条里点「✎ 我来说」直接打一句新的，也会记到这里，一直用到你换掉；条子上点它后面的 ✕ 就删掉。")
     }
     PromptGroups(prefs)
     Group("AI 帮打字") {

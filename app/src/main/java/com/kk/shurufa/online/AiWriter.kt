@@ -28,6 +28,30 @@ object AiWriter {
         Action("to_zh", "中文", "翻译", "Translate the text into natural, idiomatic Simplified Chinese.", false),
     )
 
+    /**
+     * The rewrites on the strip, as the settings show them: one per line, "名称：要怎么改". A line
+     * left as it came uses the built-in (English) instruction of that action.
+     */
+    val BASE_DEFAULT = listOf(
+        "polish" to "润色：读起来更通顺自然，改掉别扭的用词和节奏，意思、语气和长短基本不变",
+        "fix" to "纠错：只改错字（包括拼音打出的同音错字）、语法和标点，本来对的地方一个字都不动",
+        "formal" to "正式：改成礼貌、正式的书面语，适合工作消息、邮件和正式请求，每个要点都保留",
+        "casual" to "口语：改成跟朋友说话那样，轻松、自然、亲切，每个要点都保留",
+        "shorter" to "精简：更短更清楚，去掉重复和废话，重要的点都留着",
+        "longer" to "扩写：写得更完整饱满，补上自然的衔接和解释，但不添新的事实",
+    )
+    val baseText get() = BASE_DEFAULT.joinToString("\n") { it.second }
+
+    /** The rewrites from [text] (the settings' lines; null: as they came). */
+    fun base(text: String?): List<Action> = (text ?: baseText).lines().map { it.trim() }.filter { it.isNotEmpty() }.map { line ->
+        BASE_DEFAULT.firstOrNull { it.second == line }?.let { d -> ACTIONS.first { it.id == d.first } } ?: run {
+            val i = line.indexOfFirst { it == '：' || it == ':' }
+            val title = (if (i > 0) line.substring(0, i) else line).trim()
+            val ins = (if (i > 0) line.substring(i + 1) else "").trim()
+            Action("b:$title", title, "改写", ins.ifEmpty { title }, true)
+        }
+    }.distinctBy { it.id }
+
     /** 输入指令: what the user typed becomes the instruction. */
     fun custom(instruction: String) = Action("custom", "指令", "指令", instruction, true)
 

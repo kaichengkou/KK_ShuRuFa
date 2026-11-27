@@ -237,12 +237,20 @@ class TranslateStrip(context: Context, prefs: Prefs) : KbView(context, prefs) {
         val y = top + (h - ch) / 2
         c.save(); c.clipRect(chipRow)
         for (item in list.items) {
-            val label = item.name
+            val mine = item.sub == "我的"
+            // one of 我的 makes room for its ✕ at the end
+            val label = if (mine) item.name + "　" else item.name
             val w = chipWidth(label, textSp = Ui.SMALL + 1f)
             r.set(x - chipScroll, y, x - chipScroll + w, y + ch)
             if (r.right > chipRow.left && r.left < chipRow.right) {
                 drawChip(c, r, label, if (item.id == list.current || item.sub == "当前") ChipStyle.ACTIVE else ChipStyle.SOFT, pressed = pressed == "pick:${item.id}", textSp = Ui.SMALL + 1f)
                 hits.add("pick:${item.id}", maxOf(r.left, chipRow.left), r.top, minOf(r.right, chipRow.right), r.bottom)
+                if (mine) {
+                    val cx = r.right - dp(15f); val cy = r.centerY(); val d = dp(3.4f)
+                    xPaint.color = if (pressed == "del:${item.id}") theme.accent else theme.hint; xPaint.strokeWidth = dp(1.5f)
+                    c.drawLine(cx - d, cy - d, cx + d, cy + d, xPaint); c.drawLine(cx - d, cy + d, cx + d, cy - d, xPaint)
+                    if (r.right - dp(30f) > chipRow.left) hits.add("del:${item.id}", r.right - dp(30f), r.top, minOf(r.right, chipRow.right), r.bottom)
+                }
             }
             x += w + gap
         }
@@ -369,6 +377,7 @@ class TranslateStrip(context: Context, prefs: Prefs) : KbView(context, prefs) {
                 MotionEvent.ACTION_UP -> {
                     val p = pressed
                     if (!chipDrag && p != null && p.startsWith("pick:")) { val w = picking!!; picking = null; onPick?.invoke(w, p.removePrefix("pick:")) }
+                    else if (!chipDrag && p != null && p.startsWith("del:")) onPick?.invoke(picking!!, p)   // the row stays open
                     chipDown = false; pressed = null; refresh()
                 }
                 MotionEvent.ACTION_CANCEL -> { chipDown = false; pressed = null }
@@ -421,7 +430,7 @@ class TranslateStrip(context: Context, prefs: Prefs) : KbView(context, prefs) {
         val list = if (picking == "mode") modes else opts
         var x = 0f
         for (item in list.items) {
-            val w = chipWidth(item.name, textSp = Ui.SMALL + 1f)
+            val w = chipWidth(if (item.sub == "我的") item.name + "　" else item.name, textSp = Ui.SMALL + 1f)
             if (item.id == list.current || item.sub == "当前") { chipScroll = (x - dp(40f)).coerceAtLeast(0f); return }
             x += w + dp(6f)
         }

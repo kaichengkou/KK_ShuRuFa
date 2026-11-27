@@ -150,9 +150,9 @@ class TranslateFeature(private val host: Host, private val service: TranslateSer
     private fun optItems(): List<PickList.Item> = when (mode) {
         "translate" -> TranslateService.LANGS.map { (id, name) -> PickList.Item("to:$id", "译成 $name") } +
             (listOf("auto" to "自动识别") + TranslateService.LANGS).map { (id, name) -> PickList.Item("from:$id", "原文：$name", if (id == from) "当前" else "") }
-        "rewrite" -> AiWriter.ACTIONS.filter { it.group == "改写" }.map { PickList.Item("act:${it.id}", it.title) } +
+        "rewrite" -> AiWriter.base(prefs.kayBaseActions).map { PickList.Item("act:${it.id}", it.title) } +
             prefs.kayCustomActions.map { PickList.Item("ins:$it", it, "我的") } +
-            PickList.Item("custom", "✎ 我来说") + PickList.Item("copy", "复制结果")
+            PickList.Item("custom", "✎ 我来说")
         else -> listOf(PickList.Item("line", "一言", "今天那句"), PickList.Item("all", "看全部对话"), PickList.Item("copy", "复制回答"), PickList.Item("clear", "清空对话"))
     }
 
@@ -171,6 +171,13 @@ class TranslateFeature(private val host: Host, private val service: TranslateSer
                 prefs.put(Prefs.KAY_REWRITE, id)
                 if (custom) leaveSay()
                 host.haptics.play(HapticEvent.OPTION); rewriteFor = ""; sync()
+            }
+            id.startsWith("del:ins:") -> {
+                // ✕ on one of 我的: it is gone; the strip goes back to the first rewrite if it was the one in use
+                val said = id.removePrefix("del:ins:")
+                prefs.put(Prefs.KAY_CUSTOM_ACTIONS, prefs.kayCustomActions.filter { it != said }.joinToString("\n"))
+                if (prefs.kayRewrite == "ins:$said") { prefs.put(Prefs.KAY_REWRITE, AiWriter.base(prefs.kayBaseActions).firstOrNull()?.id ?: "polish"); rewriteFor = "" }
+                host.haptics.play(HapticEvent.OPTION); sync()
             }
             id == "line" -> { ai.recallLine(); answer = ai.lastAnswer(); sync() }
             id == "copy" -> button("copy")
@@ -228,7 +235,8 @@ class TranslateFeature(private val host: Host, private val service: TranslateSer
     private fun rewriteAction(): AiWriter.Action {
         val id = prefs.kayRewrite
         if (id.startsWith("ins:")) return AiWriter.custom(id.removePrefix("ins:")).let { AiWriter.Action("custom", id.removePrefix("ins:"), "改写", it.instruction, true) }
-        return AiWriter.ACTIONS.firstOrNull { it.id == id && it.group == "改写" } ?: AiWriter.ACTIONS.first()
+        val base = AiWriter.base(prefs.kayBaseActions)
+        return base.firstOrNull { it.id == id } ?: base.firstOrNull() ?: AiWriter.ACTIONS.first()
     }
 
     /** Updates the strip; a changed text is translated after a short pause in typing. */
