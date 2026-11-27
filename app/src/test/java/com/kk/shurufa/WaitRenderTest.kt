@@ -101,6 +101,12 @@ class WaitRenderTest {
         save(st, 136, "translate_empty")
         st.source = "See you tomorrow at the station"; st.result = "Увидимся завтра на вокзале"; st.action = "commit" to "替换"; st.insertable = ""; st.refresh()
         save(st, 136, "translate_done")
+        fun P(a: String, b: String, c: String = "") = com.kk.shurufa.keyboard.PickList.Item(a, b, c)
+        st.modeLabel = "改写"; st.optLabel = "润色"
+        st.optItems = listOf(P("polish", "润色"), P("short", "精简"), P("formal", "正式"), P("casual", "口语"), P("ins:更像我说话", "更像我说话", "我的"), P("say", "✎ 我来说"), P("copy", "复制结果"))
+        st.optCurrent = "formal"
+        st.open("opt")
+        save(st, 136, "rewrite_options")
     }
 
     @Test fun incognitoKeyboard() {

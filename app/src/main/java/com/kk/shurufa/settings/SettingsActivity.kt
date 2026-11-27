@@ -188,7 +188,7 @@ private val SECTIONS = listOf(
     "外观与手感" to listOf("look", "motion", "haptics", "gestures"),
     "输入" to listOf("languages", "chinese", "dict", "packs", "keys"),
     "工具" to listOf("toolbar", "symbols", "clipboard", "voice", "stats"),
-    "小K 与 AI" to listOf("online", "ai"),
+    "小鲨鱼与 AI" to listOf("online", "ai"),
     "高级" to listOf("backup", "files", "about"),
 )
 
@@ -216,7 +216,7 @@ private val PAGES = listOf(
     PageInfo("toolbar", "工具栏", "选择和排列键盘上方的按钮"),
     PageInfo("voice", "语音输入", "本地识别模型、识别语言、系统识别"),
     PageInfo("ai", "AI 服务", "填 Key、选模型、今天的用量"),
-    PageInfo("online", "小K", "名字、每日一句、聊天、帮写、帮打字、翻译"),
+    PageInfo("online", "小鲨鱼", "名字、每日一句、聊天、改写、提示词、思考深度"),
     PageInfo("backup", "备份与恢复", "设置、学到的词和自定义词库，换手机不丢"),
     PageInfo("files", "布局文件", "导出和重新加载 YAML 布局"),
     PageInfo("stats", "打字数据", "每天的字数、时段、常用词云"),
@@ -518,7 +518,7 @@ private fun Home(prefs: Prefs, list: androidx.compose.foundation.lazy.LazyListSt
             // the app's own key, as on the home screen, beside its name
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 18.dp)) {
                 Box(Modifier.size(56.dp).clip(RoundedCornerShape(17.dp))
-                    .background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(androidx.compose.ui.graphics.Color(0xFFF2F8FC), androidx.compose.ui.graphics.Color(0xFFCFE4F1)))),
+                    .background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(androidx.compose.ui.graphics.Color(0xFF16374F), androidx.compose.ui.graphics.Color(0xFF0A1C2B)))),
                     contentAlignment = Alignment.Center) {
                     androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(R.drawable.ic_launcher_foreground), null, modifier = Modifier.size(84.dp))
                 }
@@ -969,7 +969,7 @@ private fun AboutPage() {
     Group("版本") {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(64.dp).clip(RoundedCornerShape(19.dp))
-                .background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(androidx.compose.ui.graphics.Color(0xFFF2F8FC), androidx.compose.ui.graphics.Color(0xFFCFE4F1)))),
+                .background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(androidx.compose.ui.graphics.Color(0xFF16374F), androidx.compose.ui.graphics.Color(0xFF0A1C2B)))),
                 contentAlignment = Alignment.Center) {
                 androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(R.drawable.ic_launcher_foreground), null, modifier = Modifier.size(96.dp))
             }
@@ -1721,7 +1721,7 @@ private fun AiServicesPage(prefs: Prefs) {
 private fun KayGroups(prefs: Prefs) {
     val ctx = LocalContext.current
     val kay = remember { com.kk.shurufa.ime.Kay(ctx, prefs) }
-    Group("小K") {
+    Group("小鲨鱼") {
         LocalPageKeys.current?.add(Prefs.KAY_NAME)
         var name by remember { mutableStateOf(prefs.kayName) }
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1756,8 +1756,32 @@ private fun KayGroups(prefs: Prefs) {
         }
     }
     Group("聊天") {
-        Toggle(prefs, Prefs.KAY_SHOW_IP, "显示 IP 属地", "在小K面板顶部，用小字显示你现在的网络出口在哪个国家或地区；绿点表示 Gemini 在那里能用，黄点表示不能。打开面板时查一次（最多每 5 分钟一次，只问 Cloudflare，不带任何输入内容），点一下重新查", true)
+        Toggle(prefs, Prefs.KAY_SHOW_IP, "显示 IP 属地", "在小鲨鱼页面顶部，用小字显示你现在的网络出口在哪个国家或地区；绿点表示 Gemini 在那里能用，黄点表示不能。打开面板时查一次（最多每 5 分钟一次，只问 Cloudflare，不带任何输入内容），点一下重新查", true)
         IntSlider(prefs, Prefs.KAY_CHAT_CAP, "每天最多聊", 30, 5..100, " 句", "聊天会把你说的话发给 AI 服务；到了上限它就去睡了。聊过的话不保存，键盘关掉就忘了")
+    }
+}
+
+/** 提示词: what 小鲨鱼 is told, in the person's own words if they want (blank: the built-in ones). */
+@Composable
+private fun PromptGroups(prefs: Prefs) {
+    val name = prefs.kayName
+    Group("提示词") {
+        Note("小鲨鱼跟 AI 说的「人设和规矩」。留空就用自带的；写了就用你的。可以用 {名字} 和 {天数}，会换成它的名字和出生天数。")
+        for ((key, title, def) in listOf(
+            Triple(Prefs.KAY_PROMPT_CHAT, "聊天", com.kk.shurufa.ime.KayLines.chatSystem(name, 1)),
+            Triple(Prefs.KAY_PROMPT_GREET, "每日一言", com.kk.shurufa.ime.KayLines.greetSystem(name)),
+            Triple(Prefs.KAY_PROMPT_CHATTER, "主页碎碎念", com.kk.shurufa.ime.KayLines.chatterSystem(name)))) {
+            LocalPageKeys.current?.add(key)
+            var text by remember { mutableStateOf(prefs.sp.getString(key, "") ?: "") }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(title, Modifier.weight(1f), fontWeight = FontWeight.Medium)
+                if (text.isBlank()) TextButton(onClick = { text = def; prefs.put(key, def) }) { Text("在自带的上改") }
+                else TextButton(onClick = { text = ""; prefs.put(key, "") }) { Text("恢复自带") }
+            }
+            OutlinedTextField(text, { v -> text = v; prefs.put(key, v) }, modifier = Modifier.fillMaxWidth(), minLines = 3, maxLines = 12,
+                shape = RoundedCornerShape(14.dp), textStyle = MaterialTheme.typography.bodySmall,
+                placeholder = { Text("（用自带的）", style = MaterialTheme.typography.bodySmall) })
+        }
     }
 }
 
@@ -1785,8 +1809,20 @@ private fun OnlinePage(prefs: Prefs, openServices: () -> Unit) {
             PickRow("使用", cur?.let { com.kk.shurufa.online.Llm.targetLabel(prefs, it) } ?: "未选择") { pickAi = true }
             if (pickAi) PickerDialog("帮写使用", targets, cur, onPick = { prefs.put(Prefs.AI_PROVIDER, it); tick++ }, onClose = { pickAi = false })
         }
-        Note("点工具栏上的小K，切到「改写」「翻译」：润色、纠错、正式、口语、精简、扩写，翻译成英文 / 俄语 / 中文，以及“输入指令”——用键盘打出想怎么改，回车执行。面板右上角可以临时换模型。")
+        Note("点工具栏上的小鲨鱼，选「改写」：润色、纠错、正式、口语、精简、扩写，加上你自己的改法。上方条的模型按钮可以临时换模型。")
     }
+    Group("思考深度") {
+        Choice(prefs, Prefs.AI_THINKING, "模型想多久再回答", listOf("off" to "不思考", "low" to "浅", "medium" to "中", "high" to "深"))
+        Note("默认不思考：回答最快、最省额度。有的模型必须思考，就用它允许的最浅一档。调深一些，聊天里的难题、长文改写会更周到，但要多等几秒。对所有 AI 服务都有效。")
+    }
+    Group("我自己的改法") {
+        LocalPageKeys.current?.add(Prefs.KAY_CUSTOM_ACTIONS)
+        var text by remember { mutableStateOf(prefs.sp.getString(Prefs.KAY_CUSTOM_ACTIONS, "") ?: "") }
+        OutlinedTextField(text, { v -> text = v; prefs.put(Prefs.KAY_CUSTOM_ACTIONS, v) }, modifier = Modifier.fillMaxWidth(), minLines = 3,
+            shape = RoundedCornerShape(14.dp), placeholder = { Text("一行一条，比如：\n改成朋友圈文案\n翻成东北话\n语气软一点，加个表情") })
+        Note("每一行是一种改法，会和润色、纠错排在一起。在上方条里点「✎ 我来说」直接打一句新的，也会记到这里，一直用到你换掉。")
+    }
+    PromptGroups(prefs)
     Group("AI 帮打字") {
         LocalPageKeys.current?.add(Prefs.AI_ASSIST)
         var mode by remember { mutableStateOf(prefs.aiAssist) }

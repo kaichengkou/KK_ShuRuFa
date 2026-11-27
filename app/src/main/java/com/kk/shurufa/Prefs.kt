@@ -135,6 +135,14 @@ class Prefs(context: Context) {
     val kayShowIp get() = b(KAY_SHOW_IP, true)
     /** 改写: the way last used. */
     val kayRewrite get() = s(KAY_REWRITE, "polish")
+    /** 思考深度: "off" (the default: as little as each model allows), "low", "medium", "high". */
+    val aiThinking get() = s(AI_THINKING, "off")
+    /** 小鲨鱼's own words for the AI, when the person wrote them (blank: the built-in ones). */
+    val kayPromptChat get() = s(KAY_PROMPT_CHAT, "")
+    val kayPromptGreet get() = s(KAY_PROMPT_GREET, "")
+    val kayPromptChatter get() = s(KAY_PROMPT_CHATTER, "")
+    /** 改写: the person's own ways of rewriting, one instruction a line. */
+    val kayCustomActions get() = s(KAY_CUSTOM_ACTIONS, "").lines().map { it.trim() }.filter { it.isNotEmpty() }
     val kayIcon get() = s(KAY_ICON, "shark").takeIf { it in setOf("shark", "shark_fin", "ai") } ?: "shark"
     /** The shark's pace: how often it acts, the share of long acts, its speed, how often it speaks and for how long, the size of its words. */
     fun kayTune() = com.kk.shurufa.keyboard.SharkLife.Tune(
@@ -345,6 +353,11 @@ class Prefs(context: Context) {
         const val KAY_CHAT_CAP = "kay_chat_cap"
         const val KAY_SPACE = "kay_space"
         const val KAY_ICON = "kay_icon"
+        const val AI_THINKING = "ai_thinking"
+        const val KAY_PROMPT_CHAT = "kay_prompt_chat"
+        const val KAY_PROMPT_GREET = "kay_prompt_greet"
+        const val KAY_PROMPT_CHATTER = "kay_prompt_chatter"
+        const val KAY_CUSTOM_ACTIONS = "kay_custom_actions"
         const val KAY_REWRITE = "kay_rewrite"
         const val KAY_INSTRUCTIONS = "kay_instructions"
         const val KAY_CHATTER = "kay_chatter"

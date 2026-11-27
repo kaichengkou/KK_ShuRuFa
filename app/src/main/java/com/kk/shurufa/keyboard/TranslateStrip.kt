@@ -145,7 +145,7 @@ class TranslateStrip(context: Context, prefs: Prefs) : KbView(context, prefs) {
     private var held = 0f
 
     private fun needFor(w: Int): Float {
-        when (picking) { "engine" -> return dp(250f); "mode" -> return headH + dp(40f) * 3 + dp(16f); "opt" -> return dp(280f) }
+        if (picking == "engine") return dp(250f)
         if (source.isEmpty() && result.isEmpty()) held = 0f
         body.textSize = sp(Ui.BODY)
         val res = answerText()
@@ -202,8 +202,7 @@ class TranslateStrip(context: Context, prefs: Prefs) : KbView(context, prefs) {
         val innerL = cardL + dp(14f); val innerR = cardR - dp(14f)
         val innerT = hy + hh + dp(4f); val innerB = cardB - dp(8f)
         val listArea = r.apply { set(cardL + dp(4f), hy + hh + dp(2f), cardR - dp(4f), cardB - dp(4f)) }
-        val list = when (picking) { "engine" -> pick; "mode" -> modes; "opt" -> opts; else -> null }
-        if (list != null) { if (list.draw(c, listArea, t, rad)) postInvalidateOnAnimation(); return }
+        if (picking == "engine") { if (pick.draw(c, listArea, t, rad)) postInvalidateOnAnimation(); return }
         // the content, crossfading in when what it does changed
         val k = swapT.value
         val save = if (k < 1f) c.saveLayerAlpha(card.left, innerT, card.right, card.bottom, (255 * k).toInt()) else c.save()
@@ -218,6 +217,45 @@ class TranslateStrip(context: Context, prefs: Prefs) : KbView(context, prefs) {
         body.textSize = sp(Ui.BODY)
         // the text line: two lines at most, its end in view
         val inputH = inputH
+        if (picking == "mode" || picking == "opt") {
+            // the choices, in one row where the text line was, sliding sideways; the strip keeps its height
+            drawChoices(c, innerL, innerT, innerR, inputH, if (picking == "mode") modes else opts)
+        } else drawText(c, innerL, innerT, innerR, inputH, btnH)
+        bg.color = t.divider
+        c.drawRect(innerL, innerT + inputH, innerR, innerT + inputH + dp(0.8f), bg)
+        drawAnswer(c, innerL, innerT, innerR, innerB, inputH, btnH)
+    }
+
+    private val chipRow = RectF()
+    private var chipScroll = 0f
+    private var chipMax = 0f
+
+    private fun drawChoices(c: Canvas, l: Float, top: Float, right: Float, h: Float, list: PickList) {
+        chipRow.set(l - dp(4f), top, right + dp(4f), top + h)
+        val ch = dp(30f); val gap = dp(6f)
+        var x = l
+        val y = top + (h - ch) / 2
+        c.save(); c.clipRect(chipRow)
+        for (item in list.items) {
+            val label = item.name
+            val w = chipWidth(label, textSp = Ui.SMALL + 1f)
+            r.set(x - chipScroll, y, x - chipScroll + w, y + ch)
+            if (r.right > chipRow.left && r.left < chipRow.right) {
+                drawChip(c, r, label, if (item.id == list.current || item.sub == "当前") ChipStyle.ACTIVE else ChipStyle.SOFT, pressed = pressed == "pick:${item.id}", textSp = Ui.SMALL + 1f)
+                hits.add("pick:${item.id}", maxOf(r.left, chipRow.left), r.top, minOf(r.right, chipRow.right), r.bottom)
+            }
+            x += w + gap
+        }
+        c.restore()
+        chipMax = maxOf(0f, x - gap - right)
+        chipScroll = chipScroll.coerceIn(0f, chipMax)
+        // a soft edge where more lies beyond
+        if (chipScroll < chipMax - 1f) { bg.shader = android.graphics.LinearGradient(right - dp(24f), 0f, right + dp(4f), 0f, Colors.alpha(theme.surface, 0), theme.surface, android.graphics.Shader.TileMode.CLAMP); c.drawRect(right - dp(24f), top, right + dp(4f), top + h, bg); bg.shader = null }
+        if (chipScroll > 1f) { bg.shader = android.graphics.LinearGradient(l - dp(4f), 0f, l + dp(20f), 0f, theme.surface, Colors.alpha(theme.surface, 0), android.graphics.Shader.TileMode.CLAMP); c.drawRect(l - dp(4f), top, l + dp(20f), top + h, bg); bg.shader = null }
+    }
+
+    private fun drawText(c: Canvas, innerL: Float, innerT: Float, innerR: Float, inputH: Float, btnH: Float) {
+        val t = theme
         val clearW = if (source.isNotEmpty() && !sourceIsSelection) dp(28f) else 0f
         val tagW = when {
             source.isEmpty() && !sourceIsSelection && insertable.isNotEmpty() -> chipWidth("一键插入", icon = "clipboard", textSp = Ui.SMALL + 1f)
@@ -267,8 +305,10 @@ class TranslateStrip(context: Context, prefs: Prefs) : KbView(context, prefs) {
             drawChip(c, r, "一键插入", ChipStyle.SOFT, pressed = pressed == "insert", icon = "clipboard", textSp = Ui.SMALL + 1f)
             hits.add("insert", r, slop = dp(6f))
         } else if (sourceTag.isNotEmpty()) drawTag(c, sourceTag, innerR, innerT + inputH / 2)
-        bg.color = t.divider
-        c.drawRect(innerL, innerT + inputH, innerR, innerT + inputH + dp(0.8f), bg)
+    }
+
+    private fun drawAnswer(c: Canvas, innerL: Float, innerT: Float, innerR: Float, innerB: Float, inputH: Float, btnH: Float) {
+        val t = theme
         // the answer beside its one button, as many lines as it needs (up to a few)
         val resT = innerT + inputH + dp(1f)
         val res = answerText()
@@ -318,7 +358,25 @@ class TranslateStrip(context: Context, prefs: Prefs) : KbView(context, prefs) {
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(e: MotionEvent): Boolean {
-        val list = when (picking) { "engine" -> pick; "mode" -> modes; "opt" -> opts; else -> null }
+        // the row of choices: slid sideways with the finger, a tap picks
+        if ((picking == "mode" || picking == "opt") && (chipDown || (e.actionMasked == MotionEvent.ACTION_DOWN && chipRow.contains(e.x, e.y)))) {
+            when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> { chipDown = true; chipDrag = false; chipX = e.x; pressed = hits.at(e.x, e.y); onFeedback?.invoke() }
+                MotionEvent.ACTION_MOVE -> {
+                    if (!chipDrag && kotlin.math.abs(e.x - chipX) > dp(8f)) { chipDrag = true; pressed = null }
+                    if (chipDrag) { chipScroll = (chipScroll - (e.x - chipX)).coerceIn(0f, chipMax); chipX = e.x }
+                }
+                MotionEvent.ACTION_UP -> {
+                    val p = pressed
+                    if (!chipDrag && p != null && p.startsWith("pick:")) { val w = picking!!; picking = null; onPick?.invoke(w, p.removePrefix("pick:")) }
+                    chipDown = false; pressed = null; refresh()
+                }
+                MotionEvent.ACTION_CANCEL -> { chipDown = false; pressed = null }
+            }
+            invalidate()
+            return true
+        }
+        val list = if (picking == "engine") pick else null
         if (list != null && (list.busy || (e.actionMasked == MotionEvent.ACTION_DOWN && list.contains(e.x, e.y)))) {
             if (e.actionMasked == MotionEvent.ACTION_DOWN) onFeedback?.invoke()
             list.onTouch(e)?.let { id -> val w = picking!!; picking = null; onPick?.invoke(w, id); refresh() }
@@ -334,7 +392,7 @@ class TranslateStrip(context: Context, prefs: Prefs) : KbView(context, prefs) {
             MotionEvent.ACTION_UP -> {
                 when (val p = pressed) {
                     null -> if (picking != null) picking = null
-                    "mode", "opt" -> { picking = if (picking == p) null else p; if (p == "opt" && picking != null) opts.reveal() }
+                    "mode", "opt" -> { picking = if (picking == p) null else p; if (picking != null) revealChoice() }
                     "swap" -> { picking = null; onSwap?.invoke() }
                     "engine" -> { picking = if (picking == "engine") null else "engine"; if (picking != null) pick.reveal(); onEngine?.invoke() }
                     "close" -> onClose?.invoke()
@@ -352,6 +410,22 @@ class TranslateStrip(context: Context, prefs: Prefs) : KbView(context, prefs) {
             MotionEvent.ACTION_CANCEL -> { pressed = null; invalidate() }
         }
         return true
+    }
+
+    private var chipDown = false
+    private var chipDrag = false
+    private var chipX = 0f
+
+    /** The row opens with the current choice in view. */
+    private fun revealChoice() {
+        val list = if (picking == "mode") modes else opts
+        var x = 0f
+        for (item in list.items) {
+            val w = chipWidth(item.name, textSp = Ui.SMALL + 1f)
+            if (item.id == list.current || item.sub == "当前") { chipScroll = (x - dp(40f)).coerceAtLeast(0f); return }
+            x += w + dp(6f)
+        }
+        chipScroll = 0f
     }
 
     /** The list a test or the host opens by hand. */

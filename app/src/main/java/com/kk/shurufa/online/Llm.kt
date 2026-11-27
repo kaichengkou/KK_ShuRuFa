@@ -129,6 +129,7 @@ object Llm {
     fun completeQuick(prefs: Prefs, target: String, system: String, user: String, cancelled: () -> Boolean = { false }): String {
         val id = targetId(target); val m = targetModel(prefs, target)
         if (!configured(prefs, id)) error("还没有设置 ${provider(id).title} 的 API Key")
+        thinking = prefs.aiThinking
         return when (protocol(prefs, id)) {
             "claude" -> try {
                 claude(key(prefs, id), m, system, user, {}, cancelled, if (id == "claude") null else base(prefs, id))
@@ -137,7 +138,7 @@ object Llm {
                 if (e.message?.contains("频繁") == true) throw HttpError(429, e.message.orEmpty()) else throw e
             }
             "gemini" -> gemini(base(prefs, id), key(prefs, id), m, system, user, {}, cancelled)
-            else -> openAi(base(prefs, id), key(prefs, id), m, system, user, {}, cancelled)
+            else -> openAi(base(prefs, id), key(prefs, id), m, system, user, {}, cancelled, id)
         }.trim()
     }
 
@@ -165,7 +166,7 @@ object Llm {
                         // Claude itself, or a service that speaks the Anthropic format at its own address
                         "claude" -> claude(key(prefs, id), m, system, user, { streamed = true; onText(it) }, cancelled, if (id == "claude") null else base(prefs, id))
                         "gemini" -> gemini(base(prefs, id), key(prefs, id), m, system, user, { streamed = true; onText(it) }, cancelled, search)
-                        else -> openAi(base(prefs, id), key(prefs, id), m, system, user, { streamed = true; onText(it) }, cancelled)
+                        else -> openAi(base(prefs, id), key(prefs, id), m, system, user, { streamed = true; onText(it) }, cancelled, id)
                     }.trim().also { if (m != m0) remember(prefs, id, model, m0, m, last) }
                 } catch (e: HttpError) {
                     last = e
@@ -192,18 +193,52 @@ object Llm {
      * one-line rewrite: 6 s instead of 0.9). Ask for the least each model accepts; models
      * that refuse a level say so with a 400, and the answer is remembered per model.
      */
-    private val LEVELS = listOf("minimal", "low", null)
+    /**
+     * 思考深度 (a setting, "off" by default): how much the models may think before they answer.
+     * Off asks each model for the least it accepts. Gemini: thinkingLevel (Gemini 3) or
+     * thinkingBudget (2.5); each model's accepted form is remembered after a 400.
+     */
+    @Volatile var thinking = "off"
+    private fun geminiLevels(): List<JSONObject?> {
+        fun lv(l: String) = JSONObject().put("thinkingLevel", l)
+        fun bd(b: Int) = JSONObject().put("thinkingBudget", b)
+        return when (thinking) {
+            "low" -> listOf(lv("low"), bd(1024), null)
+            "medium" -> listOf(lv("medium"), lv("high"), bd(4096), null)
+            "high" -> listOf(lv("high"), bd(16384), null)
+            else -> listOf(lv("minimal"), bd(0), lv("low"), bd(128), null)
+        }
+    }
     private val levelFor = java.util.concurrent.ConcurrentHashMap<String, Int>()
     private fun <T> withThinking(model: String, call: (JSONObject) -> T): T {
-        var i = levelFor[model] ?: 0
+        val levels = geminiLevels()
+        val key = "$thinking|$model"
+        var i = (levelFor[key] ?: 0).coerceAtMost(levels.lastIndex)
         while (true) {
-            val cfg = JSONObject().apply { LEVELS[i]?.let { put("thinkingConfig", JSONObject().put("thinkingLevel", it)) } }
-            try { return call(cfg).also { levelFor[model] = i } } catch (e: HttpError) {
-                if (e.code == 400 && e.detail.contains("thinking", true) && i < LEVELS.lastIndex) { i++; continue }
+            val cfg = JSONObject().apply { levels[i]?.let { put("thinkingConfig", it) } }
+            try { return call(cfg).also { levelFor[key] = i } } catch (e: HttpError) {
+                if (e.code == 400 && (e.detail.contains("thinking", true) || e.detail.contains("budget", true)) && i < levels.lastIndex) { i++; continue }
                 throw e
             }
         }
     }
+
+    /** OpenAI-format models that take a reasoning setting: what to send for [thinking] (null: nothing). */
+    private fun openAiThinking(id: String, model: String, body: JSONObject) {
+        val m = model.lowercase()
+        val off = thinking == "off"
+        when {
+            m.startsWith("gpt-5") || m.startsWith("o1") || m.startsWith("o3") || m.startsWith("o4") ->
+                body.put("reasoning_effort", if (off) (if (m.startsWith("gpt-5")) "minimal" else "low") else thinking)
+            id == "qwen" || m.startsWith("qwen3") -> {
+                body.put("enable_thinking", !off)
+                if (!off) body.put("thinking_budget", when (thinking) { "low" -> 1024; "medium" -> 4096; else -> 16384 })
+            }
+            id == "glm" || id == "doubao" || m.startsWith("glm-4.5") || m.startsWith("glm-4.6") || m.startsWith("glm-5") ->
+                body.put("thinking", JSONObject().put("type", if (off) "disabled" else "enabled"))
+        }
+    }
+    private val noReasoning = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
     /** An HTTP failure, with the service's own explanation. */
     class HttpError(val code: Int, val detail: String) : Exception("HTTP $code: $detail") {
@@ -376,7 +411,8 @@ object Llm {
         if (baseUrl == null) {
             // Claude: short rewrites and translations are quick at low effort, and if a safety
             // classifier declines, the API retries on a suitable model by itself
-            b.outputConfig(BetaOutputConfig.builder().effort(BetaOutputConfig.Effort.LOW).build())
+            val effort = when (thinking) { "medium" -> BetaOutputConfig.Effort.MEDIUM; "high" -> BetaOutputConfig.Effort.HIGH; else -> BetaOutputConfig.Effort.LOW }
+            b.outputConfig(BetaOutputConfig.builder().effort(effort).build())
                 .addBeta("server-side-fallback-2026-07-01")
                 .putAdditionalBodyProperty("fallbacks", JsonValue.from("default"))
         }
@@ -458,14 +494,21 @@ object Llm {
 
     // ---- OpenAI, DeepSeek and compatible services: Chat Completions ----
 
-    private fun openAi(base: String, key: String, model: String, system: String, user: String, onText: (String) -> Unit, cancelled: () -> Boolean): String {
-        val body = JSONObject()
+    private fun openAi(base: String, key: String, model: String, system: String, user: String, onText: (String) -> Unit, cancelled: () -> Boolean, id: String = ""): String {
+        fun body(reason: Boolean) = JSONObject()
             .put("model", model)
             .put("stream", true)
             .put("messages", JSONArray()
                 .put(JSONObject().put("role", "system").put("content", system))
                 .put(JSONObject().put("role", "user").put("content", user)))
-        val c = post("$base/chat/completions", mapOf("Authorization" to "Bearer $key"), body)
+            .also { if (reason) openAiThinking(id, model, it) }
+        val reason = model !in noReasoning
+        val c = try { post("$base/chat/completions", mapOf("Authorization" to "Bearer $key"), body(reason)) } catch (e: HttpError) {
+            // a model that does not take the reasoning setting: without it, and remembered
+            if (!reason || e.code != 400) throw e
+            noReasoning += model
+            post("$base/chat/completions", mapOf("Authorization" to "Bearer $key"), body(false))
+        }
         val sb = StringBuilder()
         sse(c, cancelled) { d ->
             val choice = runCatching { JSONObject(d).getJSONArray("choices").optJSONObject(0) }.getOrNull() ?: return@sse

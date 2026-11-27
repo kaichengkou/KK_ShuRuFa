@@ -89,7 +89,7 @@ class Kay(private val context: Context, private val prefs: Prefs) {
         val recent = listOfNotNull(st.getString(Prefs.KAY_LINE, null))
         Background.download({
             com.kk.shurufa.online.AiBudget.asked(prefs)
-            Llm.completeQuick(prefs, target, KayLines.greetSystem(name), KayLines.greetUser(facts, recent))
+            Llm.completeQuick(prefs, target, own(prefs.kayPromptGreet) ?: KayLines.greetSystem(name), KayLines.greetUser(facts, recent))
         }) { raw ->
             val line = KayLines.cleanLine(raw) ?: return@download
             st.edit().putString(Prefs.KAY_LINE_FOR, tomorrow.toString()).putString(Prefs.KAY_LINE, line).apply()
@@ -119,7 +119,7 @@ class Kay(private val context: Context, private val prefs: Prefs) {
         val facts = KayLines.facts(LocalDate.now(), age(), 0)
         Background.download({
             com.kk.shurufa.online.AiBudget.asked(prefs)
-            Llm.completeQuick(prefs, target, KayLines.chatterSystem(name), KayLines.greetUser(facts, emptyList()))
+            Llm.completeQuick(prefs, target, own(prefs.kayPromptChatter) ?: KayLines.chatterSystem(name), KayLines.greetUser(facts, emptyList()))
         }) { raw ->
             val lines = raw.lines().map { it.replace(Regex("^\\s*[-•*]?\\s*\\d*[.、)）]?\\s*"), "") }.map { KayLines.cleanLine(it) }.filterNotNull().filter { it.length <= 24 }.distinct().take(24)
             if (lines.size >= 5) { st.edit().putString(Prefs.KAY_CHATTER_FOR, today).putString(Prefs.KAY_CHATTER, lines.joinToString("\n")).apply(); done() }
@@ -149,7 +149,10 @@ class Kay(private val context: Context, private val prefs: Prefs) {
         return s.substringBefore('|') to (s.substringAfter('|', "0").toIntOrNull() ?: 0)
     }
 
-    fun chatSystem() = KayLines.chatSystem(name, age())
+    fun chatSystem() = own(prefs.kayPromptChat) ?: KayLines.chatSystem(name, age())
+
+    /** The person's own prompt, its {名字} and {天数} filled in; null when they wrote none. */
+    private fun own(p: String): String? = p.takeIf { it.isNotBlank() }?.replace("{名字}", name)?.replace("{天数}", age().toString())
 
     /** The conversation so far and [said], as the request's text. */
     fun chatUser(said: String): String = buildString {

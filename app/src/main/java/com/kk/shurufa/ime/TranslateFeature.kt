@@ -119,6 +119,7 @@ class TranslateFeature(private val host: Host, private val service: TranslateSer
     /** ✕ in the text line: the text, the answer and where they came from go; the strip stays open. */
     private fun clear() {
         service.cancel(); ai.cancel(); handler.removeCallbacks(run); handler.removeCallbacks(rewriteRun)
+        if (custom) { leaveSay(); sync(); host.syncBar(); return }
         host.queryCaret = -1; host.query.setLength(0)
         result = ""; resultFor = ""; answer = ""; status = ""; rewriteBase = null; rewriteFor = ""; failedFor = ""
         fromField = ""; fromSelection = false; rewriting = false
@@ -150,8 +151,8 @@ class TranslateFeature(private val host: Host, private val service: TranslateSer
         "translate" -> TranslateService.LANGS.map { (id, name) -> PickList.Item("to:$id", "译成 $name") } +
             (listOf("auto" to "自动识别") + TranslateService.LANGS).map { (id, name) -> PickList.Item("from:$id", "原文：$name", if (id == from) "当前" else "") }
         "rewrite" -> AiWriter.ACTIONS.filter { it.group == "改写" }.map { PickList.Item("act:${it.id}", it.title) } +
-            PickList.Item("custom", "✎ 我来说怎么改") +
-            recentInstructions().map { PickList.Item("ins:$it", "↻ $it", "说过的") } + PickList.Item("copy", "复制结果")
+            prefs.kayCustomActions.map { PickList.Item("ins:$it", it, "我的") } +
+            PickList.Item("custom", "✎ 我来说") + PickList.Item("copy", "复制结果")
         else -> listOf(PickList.Item("line", "一言", "今天那句"), PickList.Item("all", "看全部对话"), PickList.Item("copy", "复制回答"), PickList.Item("clear", "清空对话"))
     }
 
@@ -162,14 +163,14 @@ class TranslateFeature(private val host: Host, private val service: TranslateSer
             id.startsWith("from:") -> { from = id.removePrefix("from:"); resultFor = ""; sync() }
             id.startsWith("act:") -> {
                 prefs.put(Prefs.KAY_REWRITE, id.removePrefix("act:"))
-                if (custom) { custom = false; result = ""; host.queryCaret = -1; host.query.setLength(0); host.query.append(customText) }
+                if (custom) leaveSay()
                 host.haptics.play(HapticEvent.OPTION); rewriteFor = ""; sync()
             }
-            id == "custom" -> { if (enterCustom()) { sync(); host.syncBar() } }
-            id.startsWith("ins:") -> if (enterCustom()) {
-                // an instruction said before: it runs at once
-                host.queryCaret = -1; host.query.setLength(0); host.query.append(id.removePrefix("ins:"))
-                rewrite()
+            id == "custom" -> { enterSay(); sync(); host.syncBar() }
+            id.startsWith("ins:") -> {
+                prefs.put(Prefs.KAY_REWRITE, id)
+                if (custom) leaveSay()
+                host.haptics.play(HapticEvent.OPTION); rewriteFor = ""; sync()
             }
             id == "line" -> { ai.recallLine(); answer = ai.lastAnswer(); sync() }
             id == "copy" -> button("copy")
@@ -186,40 +187,49 @@ class TranslateFeature(private val host: Host, private val service: TranslateSer
     // ---- what the strip shows ----
 
     /**
-     * 我来说怎么改: the query is the instruction, [customText] the text it works on — what was in
-     * the text line when it was chosen, or else the field's text. Once there is an answer, a new
-     * instruction works on the answer (再短一点, 语气再软些); 替换 puts the last one in.
+     * ✎ 我来说: the keyboard types a new way of rewriting into the text line (the text waits
+     * aside); ↵ makes it the way the strip rewrites from now on, until another is picked, and
+     * keeps it among 我自己的改法 (settings). ✕ goes back without it.
      */
     private var custom = false
     private var customText = ""
-    /** The instruction the answer is for: ↵ on it again puts the answer in; a changed one runs. */
-    private var customSaid = ""
 
-    private fun enterCustom(): Boolean {
-        if (custom) return true
-        val q = host.query.toString()
-        val field = host.editor.allText() ?: (host.editor.textBefore(4000) + host.editor.textAfter(4000))
-        val text = if (q.isNotBlank()) q else field
-        if (text.isBlank()) { status = "先在输入行放上要改的文字（点「一键插入」），再选「我来说怎么改」"; sync(); return false }
-        // from the field (or 一键插入 from it): 替换 puts the answer there; typed here: 上屏
-        if (q.isBlank()) fromField = field
-        customText = text; customSaid = ""
-        custom = true; result = ""; rewriteBase = null; status = ""
+    private fun enterSay() {
+        if (custom) return
+        customText = host.query.toString()
+        custom = true; status = ""
         host.queryCaret = -1; host.query.setLength(0)
-        return true
     }
 
-    private fun recentInstructions(): List<String> = (prefs.state.getString(Prefs.KAY_INSTRUCTIONS, "") ?: "").split('\n').filter { it.isNotBlank() }
-    private fun rememberInstruction(i: String) {
-        val l = (listOf(i) + recentInstructions().filter { it != i }).take(6)
-        prefs.state.edit().putString(Prefs.KAY_INSTRUCTIONS, l.joinToString("\n")).apply()
+    /** Back to the text, as it was. */
+    private fun leaveSay() {
+        custom = false
+        host.queryCaret = -1; host.query.setLength(0); host.query.append(customText)
+        result = ""; rewriteFor = ""
     }
+
+    /** ↵ on a new way: it is the way from now on, and is kept. */
+    private fun confirmSay() {
+        val said = host.query.toString().trim()
+        if (said.isEmpty()) { leaveSay(); sync(); return }
+        val mine = prefs.kayCustomActions.filter { it != said }
+        prefs.put(Prefs.KAY_CUSTOM_ACTIONS, (listOf(said) + mine).take(20).joinToString("\n"))
+        prefs.put(Prefs.KAY_REWRITE, "ins:$said")
+        leaveSay()
+        host.haptics.play(HapticEvent.OPTION)
+        sync(); host.syncBar()
+    }
+
     private var rewriteBase: String? = null
     private var answer = ""
     private var status = ""
     private var rewriting = false
 
-    private fun rewriteAction() = AiWriter.ACTIONS.firstOrNull { it.id == prefs.kayRewrite && it.group == "改写" } ?: AiWriter.ACTIONS.first()
+    private fun rewriteAction(): AiWriter.Action {
+        val id = prefs.kayRewrite
+        if (id.startsWith("ins:")) return AiWriter.custom(id.removePrefix("ins:")).let { AiWriter.Action("custom", id.removePrefix("ins:"), "改写", it.instruction, true) }
+        return AiWriter.ACTIONS.firstOrNull { it.id == id && it.group == "改写" } ?: AiWriter.ACTIONS.first()
+    }
 
     /** Updates the strip; a changed text is translated after a short pause in typing. */
     fun sync() {
@@ -261,15 +271,15 @@ class TranslateFeature(private val host: Host, private val service: TranslateSer
             "rewrite" -> {
                 val a = rewriteAction()
                 st.modeLabel = "改写"
-                st.optLabel = if (custom) "我来说" else a.title
+                st.optLabel = if (custom) "✎ 我来说" else a.title.let { if (it.length > 8) it.take(8) + "…" else it }
                 st.showSwap = false
-                st.optCurrent = if (custom) "custom" else "act:${a.id}"
+                st.optCurrent = if (custom) "custom" else if (prefs.kayRewrite.startsWith("ins:")) prefs.kayRewrite else "act:${a.id}"
                 aiHeader(st, aiTarget)
                 st.sourceIsSelection = fromSelection && !custom
                 st.source = q
                 if (custom) {
-                    st.placeholder = if (result.isEmpty()) "说说要怎么改，比如「语气软一点」" else "还想怎么改？比如「再短一点」"
-                    st.sourceTag = if (result.isEmpty()) "改 ${customText.length} 字" else "改上一版"
+                    st.placeholder = "说一句新的改法，比如「语气软一点」"
+                    st.sourceTag = ""
                     st.insertable = ""
                 } else {
                     st.placeholder = "要改的文字"; st.sourceTag = ""
@@ -278,7 +288,7 @@ class TranslateFeature(private val host: Host, private val service: TranslateSer
                 st.busyText = "${if (custom) "改写" else a.title}中…"
                 st.resultHint = when {
                     aiTarget == null -> "先在设置里添加 AI 服务"
-                    custom -> "要改：" + customText.replace('\n', ' ').let { if (it.length > 18) it.take(18) + "…" else it } + "　说完按回车"
+                    custom -> "回车确定，之后一直按这句改"
                     else -> "改好的文字会显示在这里"
                 }
                 // like 翻译: the text as it is now is rewritten once typing pauses
@@ -292,12 +302,13 @@ class TranslateFeature(private val host: Host, private val service: TranslateSer
                     else { result = ""; status = ""; handler.postDelayed(rewriteRun, if (q == fromField) 150L else prefs.translatePauseMs.toLong()) }
                 }
                 if (q.isBlank() && !custom) { result = ""; status = "" }
-                st.result = if (custom || rewriteFor == k) result else ""
+                st.result = if (!custom && rewriteFor == k) result else ""
                 st.busy = rewriting || (!custom && q.isNotBlank() && aiTarget != null && rewriteFor != k && failedFor != k)
                 st.status = status
                 st.action = when {
                     aiTarget == null -> "setup" to "去设置"
-                    result.isNotEmpty() && (custom || fresh) && !rewriting -> "apply" to if (fromSelection || fromField.isNotEmpty()) "替换" else "上屏"
+                    custom -> null
+                    result.isNotEmpty() && fresh && !rewriting -> "apply" to if (fromSelection || fromField.isNotEmpty()) "替换" else "上屏"
                     else -> null
                 }
             }
@@ -331,10 +342,10 @@ class TranslateFeature(private val host: Host, private val service: TranslateSer
     /** ↵: what the strip is for. */
     fun enter() = when (mode) {
         "translate" -> commit()
-        "rewrite" -> if (custom) {
-            // the same instruction again: its answer goes in; a new one runs (on the answer, if there is one)
-            if (result.isNotEmpty() && !rewriting && host.query.toString().trim() == customSaid) button("apply") else rewrite()
-        } else if (result.isEmpty() && !rewriting) { failedFor = ""; handler.removeCallbacks(rewriteRun); rewrite() } else if (result.isNotEmpty() && !rewriting && (custom || rewriteFor == rewriteKey(host.query.toString()))) button("apply") else { handler.removeCallbacks(rewriteRun); rewrite() }
+        "rewrite" -> if (custom) confirmSay()
+            else if (result.isEmpty() && !rewriting) { failedFor = ""; handler.removeCallbacks(rewriteRun); rewrite() }
+            else if (result.isNotEmpty() && !rewriting && rewriteFor == rewriteKey(host.query.toString())) button("apply")
+            else { handler.removeCallbacks(rewriteRun); rewrite() }
         else -> send()
     }
 
@@ -364,17 +375,16 @@ class TranslateFeature(private val host: Host, private val service: TranslateSer
     /** What the answer (or the request on its way) is for: the way and the text. */
     private var rewriteFor = ""
     private var failedFor = ""
-    private fun rewriteKey(q: String) = "${prefs.aiProvider}|${rewriteAction().id}|$q"
+    private fun rewriteKey(q: String) = "${prefs.aiProvider}|${prefs.kayRewrite}|$q"
 
     private fun rewrite() {
         val q = host.query.toString()
         if (host.sink != Sink.TRANSLATE || mode != "rewrite") return
-        val src = if (custom) result.ifEmpty { customText } else q
+        if (custom) return
+        val src = q
         if (src.isBlank()) { status = "没有要改的文字：在上面打字，或点「一键插入」"; sync(); return }
-        if (custom && q.isBlank()) { status = "先说说要怎么改"; sync(); return }
-        val a = if (custom) AiWriter.custom(q.trim()) else rewriteAction()
-        val k = if (custom) "custom|$q|${src.hashCode()}" else rewriteKey(q)
-        if (custom) { customSaid = q.trim(); rememberInstruction(q.trim()) }
+        val a = rewriteAction()
+        val k = rewriteKey(q)
         rewriting = true; status = ""; result = ""; rewriteBase = if (a.diff) src else null
         rewriteFor = k
         sync()
@@ -383,7 +393,7 @@ class TranslateFeature(private val host: Host, private val service: TranslateSer
             onDone = { r ->
                 if (rewriteFor != k) return@rewrite
                 rewriting = false
-                r.onSuccess { result = it; if (!custom) rewriteCache[k] = it }.onFailure { result = ""; status = it.message ?: "出错了"; failedFor = k; rewriteFor = "" }
+                r.onSuccess { result = it; rewriteCache[k] = it }.onFailure { result = ""; status = it.message ?: "出错了"; failedFor = k; rewriteFor = "" }
                 if (mode == "rewrite") sync()
             })
     }
