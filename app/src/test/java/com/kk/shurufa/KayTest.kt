@@ -263,8 +263,15 @@ class KayTest {
         ime.openStrip("rewrite"); idle()
         assertEquals("LETTERS", panel())
         assertEquals("rewrite", feature().mode)
+        // it opens empty; 一键插入 brings in what is in the field
+        assertEquals("", ime.query.toString())
+        feature().strip.onInsert?.invoke(); idle()
         assertEquals("今天天气真好我门去公园吧，顺便买点水果", ime.query.toString())
         shot("kay_flow_2_rewrite")
+        // ✕ empties it, and back again
+        feature().strip.onClear?.invoke(); idle()
+        assertEquals("", ime.query.toString())
+        feature().strip.onInsert?.invoke(); idle()
         // its list, open
         val strip = feature().strip
         strip.open("opt"); idle()

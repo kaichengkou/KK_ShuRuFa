@@ -72,6 +72,20 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     override var panel = Panel.LETTERS
         private set
     override val query = StringBuilder()
+    override var queryCaret = -1
+    /** Puts [s] into the query where its caret is. */
+    private fun queryType(s: String) {
+        val c = if (queryCaret in 0 until query.length) queryCaret else -1
+        if (c < 0) query.append(s) else { query.insert(c, s); queryCaret = c + s.length }
+    }
+    /** Backspace in the query: the character before its caret. */
+    private fun queryBack() {
+        val c = if (queryCaret in 0..query.length) queryCaret else query.length
+        if (c == 0) return
+        val from = query.offsetByCodePoints(c, -1)
+        query.delete(from, c)
+        if (queryCaret >= 0) queryCaret = from
+    }
     override var sink: Sink? = null
         private set
 
@@ -1228,7 +1242,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         val commit = RimeBridge.commitText()
         if (commit.isNotEmpty() && sink != null) {
             zh.reset()
-            query.append(commit)
+            queryType(commit)
         } else if (commit.isNotEmpty()) {
             val syl = zh.syllables()
             var out = if (prefs.pinyinMode && commit.any { isCjk(it) }) zh.tones.convert(commit, syl) else commit
@@ -1349,7 +1363,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
             // a query: Chinese letters still go through Rime, whose words then join the query
             if (isZh && isMain && t.length == 1 && t[0] in 'a'..'z' && rimeKey(t[0].code)) return
             finishComposing()
-            query.append(if (isMain && key.isLetter && shift > 0) t.uppercase() else t)
+            queryType(if (isMain && key.isLetter && shift > 0) t.uppercase() else t)
             syncBar()
             return
         }
@@ -1472,7 +1486,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
                 predictions = emptyList()
                 when {
                     composing -> rimeKey(RimeBridge.XK_BackSpace)
-                    sink != null -> { if (query.isNotEmpty()) query.setLength(query.offsetByCodePoints(query.length, -1)); syncBar() }
+                    sink != null -> { queryBack(); syncBar() }
                     revertCorrection() -> {}
                     else -> {
                         halfAfterDigit?.let { (half, full) -> if (editor.textBefore(half.length) == half) { halfUndone = full; halfUndoneAt = SystemClock.uptimeMillis() } }
@@ -1483,7 +1497,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
             }
             "space" -> {
                 if (composing) { rimeKey(RimeBridge.XK_space); return }
-                if (sink != null) { query.append(' '); syncBar(); return }
+                if (sink != null) { queryType(" "); syncBar(); return }
                 predictions = emptyList()
                 val fix = autocorrect()
                 learnWordBefore()
@@ -2087,7 +2101,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         finishComposing()
         val selection = if (sink == Sink.TRANSLATE) editor.selectedText()?.takeIf { it.isNotBlank() } else null
         if (this.sink != null) dropSink()
-        query.setLength(0)
+        query.setLength(0); queryCaret = -1
         query.append(selection ?: initial)
         haptics.play(HapticEvent.FUNCTION)
         showPanel(Panel.LETTERS)
@@ -2115,7 +2129,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         sink = null
         if (composing) RimeBridge.clearComposition()
         zh.reset()
-        query.setLength(0)
+        query.setLength(0); queryCaret = -1
         if (s == Sink.TRANSLATE) translate.onClosed()
     }
 

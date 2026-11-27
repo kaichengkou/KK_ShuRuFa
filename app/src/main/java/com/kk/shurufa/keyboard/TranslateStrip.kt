@@ -34,6 +34,12 @@ class TranslateStrip(context: Context, prefs: Prefs) : KbView(context, prefs) {
     /** 一键插入: fills the empty box with [insertable] (what was copied, or what is in the field). */
     var onInsert: (() -> Unit)? = null
     var insertable = ""
+    /** ✕ in the text line: empties it. */
+    var onClear: (() -> Unit)? = null
+    /** The text was tapped at [offset]: the caret goes there. */
+    var onCaret: ((offset: Int) -> Unit)? = null
+    /** Where the caret is in [source] (-1: at its end). */
+    var caret = -1
 
     /** "translate", "rewrite" or "chat". */
     var mode = "translate"
@@ -89,7 +95,7 @@ class TranslateStrip(context: Context, prefs: Prefs) : KbView(context, prefs) {
 
     /** What it does changed: the content crossfades into the new one. */
     fun switched() {
-        picking = null
+        picking = null; held = 0f; lastAnswer = ""
         if (Motion.on(prefs)) { swapT.set(0f); swapT.animateTo(1f, dur(240), Motion.ENTER) } else swapT.set(1f)
         refresh()
     }
@@ -130,16 +136,23 @@ class TranslateStrip(context: Context, prefs: Prefs) : KbView(context, prefs) {
         return (w - 2 * dp(Ui.EDGE) - dp(28f) - bw).toInt().coerceAtLeast(1)
     }
 
-    private fun answerText() = when { result.isNotEmpty() -> result; busy -> busyText; status.isNotEmpty() -> status; else -> resultHint }
+    /** The last answer shown: while a new one is on its way it stays, faded, rather than blinking away. */
+    private var lastAnswer = ""
+    private fun answerText() = when { result.isNotEmpty() -> result.also { lastAnswer = it }; busy && lastAnswer.isNotEmpty() -> lastAnswer; busy -> busyText; status.isNotEmpty() -> status; else -> resultHint.also { lastAnswer = "" } }
 
     /** The header, the text line, and the answer's lines (two at least, up to a few). */
+    /** The tallest the text has needed since it was last emptied: typing does not make it jump up and down. */
+    private var held = 0f
+
     private fun needFor(w: Int): Float {
         when (picking) { "engine" -> return dp(250f); "mode" -> return headH + dp(40f) * 3 + dp(16f); "opt" -> return dp(280f) }
+        if (source.isEmpty() && result.isEmpty()) held = 0f
         body.textSize = sp(Ui.BODY)
         val res = answerText()
         val lines = StaticLayout.Builder.obtain(res, 0, res.length, body, textW(w)).setMaxLines(MAX_LINES).setLineSpacing(0f, 1.05f).build().lineCount
         val need = headH + inputH + dp(1f) + lines.coerceAtLeast(2) * body.fontSpacing * 1.05f + dp(18f) + dp(4f)
-        return maxOf(baseH, need)
+        held = maxOf(held, need)
+        return maxOf(baseH, held)
     }
 
     override fun onDraw(c: Canvas) {
@@ -204,30 +217,42 @@ class TranslateStrip(context: Context, prefs: Prefs) : KbView(context, prefs) {
         body.textSize = sp(Ui.BODY)
         // the text line: two lines at most, its end in view
         val inputH = inputH
+        val clearW = if (source.isNotEmpty() && !sourceIsSelection) dp(28f) else 0f
         val tagW = when {
             source.isEmpty() && !sourceIsSelection && insertable.isNotEmpty() -> chipWidth("一键插入", icon = "clipboard", textSp = Ui.SMALL + 1f)
             sourceTag.isNotEmpty() -> tagWidth(sourceTag)
             else -> 0f
         }
-        val srcW = (innerR - innerL - (if (tagW > 0f) tagW + dp(8f) else 0f) - dp(6f)).toInt().coerceAtLeast(1)
+        val srcW = (innerR - innerL - (if (tagW > 0f) tagW + dp(8f) else 0f) - clearW - dp(6f)).toInt().coerceAtLeast(1)
         val src = source.ifEmpty { placeholder }
-        val sl = srcLayout ?: layout(src, srcW, if (source.isEmpty()) t.hint else t.inkSoft, TextUtils.TruncateAt.START, 2).also { srcLayout = it }
-        val srcTop = innerT + (inputH - sl.height) / 2
+        // the whole text, laid out once; two lines of it in view, the caret's among them
+        val sl = srcLayout ?: StaticLayout.Builder.obtain(src, 0, src.length, body.apply { color = if (source.isEmpty()) t.hint else t.inkSoft; typeface = Ui.regular }, srcW)
+            .setAlignment(Layout.Alignment.ALIGN_NORMAL).setLineSpacing(0f, 1.05f).build().also { srcLayout = it }
+        val at = if (source.isEmpty()) 0 else if (caret in 0..source.length) caret else source.length
+        val caretLine = sl.getLineForOffset(at)
+        val firstLine = (caretLine - 1).coerceIn(0, maxOf(0, sl.lineCount - 2))
+        val shownH = (sl.getLineBottom(minOf(sl.lineCount - 1, firstLine + 1)) - sl.getLineTop(firstLine)).toFloat()
+        val srcTop = innerT + (inputH - shownH) / 2 - sl.getLineTop(firstLine)
         // the placeholder sits just after the caret, not under it
         val srcX = innerL + if (source.isEmpty() && !sourceIsSelection) dp(5f) else 0f
-        c.save(); c.translate(srcX, srcTop); sl.draw(c); c.restore()
+        srcBox.set(innerL, innerT, innerL + srcW + dp(6f), innerT + inputH); srcOrigin.set(srcX, srcTop)
+        c.save(); c.clipRect(innerL - dp(2f), innerT + dp(2f), innerL + srcW + dp(8f), innerT + inputH - dp(2f)); c.translate(srcX, srcTop); sl.draw(c); c.restore()
         if (!sourceIsSelection) {
-            // a caret after the typed text, blinking at half a second
+            // a caret where typing goes, blinking at half a second
             val since = SystemClock.uptimeMillis() - caretSince
             val on = (since / 530) % 2 == 0L
             postInvalidateDelayed(530 - since % 530)
             if (on) {
-                val line = sl.lineCount - 1
-                val cx = innerL + (if (source.isEmpty()) 0f else sl.getLineRight(line) + dp(1.5f))
-                val top = srcTop + sl.getLineTop(line)
+                val cx = innerL + (if (source.isEmpty()) 0f else sl.getPrimaryHorizontal(at) + if (at == source.length) dp(1.5f) else 0f)
                 bg.color = t.accent
-                c.drawRect(cx, top + dp(2f), cx + dp(1.6f), srcTop + sl.getLineBottom(line) - dp(2f), bg)
+                c.drawRect(cx, srcTop + sl.getLineTop(caretLine) + dp(2f), cx + dp(1.6f), srcTop + sl.getLineBottom(caretLine) - dp(2f), bg)
             }
+            if (!source.isEmpty()) hits.add("src", srcBox)
+        }
+        if (clearW > 0f) {
+            r.set(innerR - (if (tagW > 0f) tagW + dp(8f) else 0f) - clearW, innerT + (inputH - dp(28f)) / 2, innerR - (if (tagW > 0f) tagW + dp(8f) else 0f), innerT + (inputH + dp(28f)) / 2)
+            drawChip(c, r, "", ChipStyle.GHOST, pressed = pressed == "clear", icon = "close")
+            hits.add("clear", r, slop = dp(6f))
         }
         if (source.isEmpty() && !sourceIsSelection && insertable.isNotEmpty()) {
             // 一键插入: the box is empty, and there is something to work on at hand
@@ -241,7 +266,8 @@ class TranslateStrip(context: Context, prefs: Prefs) : KbView(context, prefs) {
         val resT = innerT + inputH + dp(1f)
         val res = answerText()
         val has = result.isNotEmpty()
-        val rl = resLayout ?: layout(res, textW(width), if (has) t.ink else t.hint, TextUtils.TruncateAt.END, MAX_LINES, medium = has && mode == "translate", marked = has).also { resLayout = it }
+        val stale = !has && busy && res == lastAnswer && lastAnswer.isNotEmpty()
+        val rl = resLayout ?: layout(res, textW(width), if (has) t.ink else t.hint, TextUtils.TruncateAt.END, MAX_LINES, medium = (has || stale) && mode == "translate", marked = has).also { resLayout = it }
         val room = innerB - resT
         c.save(); c.clipRect(innerL, resT, innerR, innerB); c.translate(innerL, resT + ((room - rl.height) / 2).coerceAtLeast(dp(6f))); rl.draw(c); c.restore()
         action?.let { (id, label) ->
@@ -253,6 +279,8 @@ class TranslateStrip(context: Context, prefs: Prefs) : KbView(context, prefs) {
         }
     }
 
+    private val srcBox = RectF()
+    private val srcOrigin = android.graphics.PointF()
     private val tagPaint = TextPaint(Paint.ANTI_ALIAS_FLAG)
     private fun tagWidth(s: String): Float { tagPaint.textSize = sp(Ui.SMALL - 1f); return tagPaint.measureText(s) + dp(14f) }
     private fun drawTag(c: Canvas, s: String, right: Float, cy: Float) {
@@ -303,6 +331,12 @@ class TranslateStrip(context: Context, prefs: Prefs) : KbView(context, prefs) {
                     "engine" -> { picking = if (picking == "engine") null else "engine"; if (picking != null) pick.reveal(); onEngine?.invoke() }
                     "close" -> onClose?.invoke()
                     "insert" -> onInsert?.invoke()
+                    "clear" -> onClear?.invoke()
+                    "src" -> srcLayout?.let { l ->
+                        // the caret goes where the text was tapped
+                        val line = l.getLineForVertical((e.y - srcOrigin.y).toInt())
+                        onCaret?.invoke(l.getOffsetForHorizontal(line, e.x - srcOrigin.x).coerceIn(0, source.length))
+                    }
                     else -> if (p.startsWith("b:")) onButton?.invoke(p.removePrefix("b:"))
                 }
                 pressed = null; refresh()

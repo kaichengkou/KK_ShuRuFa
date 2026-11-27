@@ -84,6 +84,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material.icons.outlined.Animation
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Apps
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Key
@@ -188,7 +189,7 @@ private val SECTIONS = listOf(
     "输入" to listOf("languages", "chinese", "dict", "packs", "keys"),
     "工具" to listOf("toolbar", "symbols", "clipboard", "voice", "stats"),
     "小K 与 AI" to listOf("online", "ai"),
-    "高级" to listOf("backup", "files"),
+    "高级" to listOf("backup", "files", "about"),
 )
 
 private val PAGE_ICONS: Map<String, ImageVector> = mapOf(
@@ -197,7 +198,7 @@ private val PAGE_ICONS: Map<String, ImageVector> = mapOf(
     "dict" to Icons.AutoMirrored.Outlined.MenuBook, "packs" to Icons.AutoMirrored.Outlined.LibraryBooks,
     "keys" to Icons.Outlined.Keyboard, "toolbar" to Icons.Outlined.Apps, "symbols" to Icons.Outlined.Functions,
     "clipboard" to Icons.Outlined.ContentPaste, "voice" to Icons.Outlined.Mic, "ai" to Icons.Outlined.Key, "online" to Icons.Outlined.AutoAwesome,
-    "files" to Icons.Outlined.Code, "stats" to Icons.Outlined.Insights, "backup" to Icons.Outlined.Backup,
+    "files" to Icons.Outlined.Code, "stats" to Icons.Outlined.Insights, "backup" to Icons.Outlined.Backup, "about" to Icons.Outlined.Info,
 )
 
 private val PAGES = listOf(
@@ -219,6 +220,7 @@ private val PAGES = listOf(
     PageInfo("backup", "备份与恢复", "设置、学到的词和自定义词库，换手机不丢"),
     PageInfo("files", "布局文件", "导出和重新加载 YAML 布局"),
     PageInfo("stats", "打字数据", "每天的字数、时段、常用词云"),
+    PageInfo("about", "关于与更新", "版本、检查更新、隐私、开源许可"),
 )
 
 @Composable
@@ -258,6 +260,7 @@ private fun SettingsApp(prefs: Prefs, start: String) {
                     "files" -> FilesPage()
                     "backup" -> BackupPage()
                     "stats" -> StatsPage(prefs)
+                    "about" -> AboutPage()
                 }
             }
         }
@@ -270,7 +273,7 @@ private fun SettingsApp(prefs: Prefs, start: String) {
 private val LocalPageKeys = androidx.compose.runtime.staticCompositionLocalOf<MutableSet<String>?> { null }
 
 /** Pages whose contents are the user's own data, not settings: nothing there to restore. */
-private val NO_RESET = setOf("dict", "stats", "files", "dict_edit", "backup")
+private val NO_RESET = setOf("dict", "stats", "files", "dict_edit", "backup", "about")
 
 /** Settings a page changes without the shared controls (and so are not gathered). */
 private fun extraKeys(page: String, prefs: Prefs): List<String> = when (page) {
@@ -515,7 +518,7 @@ private fun Home(prefs: Prefs, list: androidx.compose.foundation.lazy.LazyListSt
             // the app's own key, as on the home screen, beside its name
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 18.dp)) {
                 Box(Modifier.size(56.dp).clip(RoundedCornerShape(17.dp))
-                    .background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(androidx.compose.ui.graphics.Color(0xFF14818B), androidx.compose.ui.graphics.Color(0xFF0B5A61)))),
+                    .background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(androidx.compose.ui.graphics.Color(0xFFF2F8FC), androidx.compose.ui.graphics.Color(0xFFCFE4F1)))),
                     contentAlignment = Alignment.Center) {
                     androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(R.drawable.ic_launcher_foreground), null, modifier = Modifier.size(84.dp))
                 }
@@ -526,6 +529,7 @@ private fun Home(prefs: Prefs, list: androidx.compose.foundation.lazy.LazyListSt
                 }
             }
         }
+        item { UpdateBanner { open("about") } }
         item { key(tick) { StatsSummary { open("stats") } } }
         item { Setup(tick) }
         item { RimeStatus() }
@@ -920,6 +924,74 @@ private fun ClipboardPage(prefs: Prefs) {
     }
     Group {
         Note("标记为敏感内容的复制（比如密码管理器）不会被记录。")
+    }
+}
+
+/** A newer version is out (checked at most once a day): a card on the home page. */
+@Composable
+private fun UpdateBanner(open: () -> Unit) {
+    val ctx = LocalContext.current
+    var r by remember { mutableStateOf(com.kk.shurufa.online.Updates.cached(ctx)) }
+    LaunchedEffect(Unit) { com.kk.shurufa.online.Updates.checkDaily(ctx) { r = it ?: r } }
+    val rel = r ?: return
+    androidx.compose.material3.Card(Modifier.fillMaxWidth().padding(bottom = 12.dp).clickable { open() }, colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
+        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Outlined.Info, null, tint = MaterialTheme.colorScheme.primary)
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text("有新版本 ${rel.version}", fontWeight = FontWeight.Medium)
+                Text("点这里看看更新了什么", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null)
+        }
+    }
+}
+
+/** 关于与更新: the version, 检查更新, what the keyboard sends where, and whose work it is built on. */
+@Composable
+private fun AboutPage() {
+    val ctx = LocalContext.current
+    var state by remember { mutableStateOf("") }
+    var rel by remember { mutableStateOf<com.kk.shurufa.online.Updates.Release?>(null) }
+    var busy by remember { mutableStateOf(false) }
+    val main = remember { android.os.Handler(android.os.Looper.getMainLooper()) }
+    fun check() {
+        busy = true; state = "正在检查…"
+        Thread {
+            val r = com.kk.shurufa.online.Updates.latest()
+            main.post {
+                busy = false
+                r.fold({ x -> rel = x; state = if (x.newer) "有新版本 ${x.version}" else "已经是最新版本（${x.version}）" }, { state = it.message ?: "检查失败" })
+            }
+        }.start()
+    }
+    LaunchedEffect(Unit) { check() }
+    Group("版本") {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(64.dp).clip(RoundedCornerShape(19.dp))
+                .background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(androidx.compose.ui.graphics.Color(0xFFF2F8FC), androidx.compose.ui.graphics.Color(0xFFCFE4F1)))),
+                contentAlignment = Alignment.Center) {
+                androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(R.drawable.ic_launcher_foreground), null, modifier = Modifier.size(96.dp))
+            }
+            Spacer(Modifier.width(16.dp))
+            Column {
+                Text("KK输入法", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                Text("版本 ${BuildConfig.VERSION_NAME}（${BuildConfig.VERSION_CODE}）", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        if (state.isNotEmpty()) Note(state)
+        rel?.takeIf { it.newer }?.let { x ->
+            if (x.notes.isNotEmpty()) Note(x.notes.take(600))
+            FilledTonalButton(onClick = { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(x.apk ?: x.page)).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }) { Text(if (x.apk != null) "下载 ${x.version}" else "去下载页") }
+        }
+        TextButton(enabled = !busy, onClick = { check() }) { Text("检查更新") }
+        Note("检查更新只会访问 GitHub 上这个项目的发布页，不带任何你的信息。打开设置时每天最多自动查一次。")
+    }
+    Group("隐私") {
+        Note("打字、联想、纠错、学习、语音识别都在手机本地完成，学到的东西只存在本机。只有你自己打开并填了 Key 的 AI 功能（改写、翻译、聊天、云联想、AI 候选、AI 写一言）会把相关文字发给你选的服务；密码框、地址栏和临时模式里什么都不发。")
+    }
+    Group("开源许可") {
+        Note("中文引擎 librime、librime-lua（BSD-3-Clause）与 librime-octagram（GPL-3.0）；雾凇拼音 rime-ice（GPL-3.0）；OpenCC（Apache-2.0）；pinyin-data（MIT）；chinese-poetry（MIT）；FrequencyWords（CC-BY-SA-4.0）与 Tatoeba（CC-BY 2.0 FR）；SenseVoice、whisper.cpp、Silero VAD、ONNX Runtime；Unicode Emoji；ML Kit 翻译。")
     }
 }
 

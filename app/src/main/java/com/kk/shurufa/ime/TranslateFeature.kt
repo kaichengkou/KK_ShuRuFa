@@ -48,19 +48,21 @@ class TranslateFeature(private val host: Host, private val service: TranslateSer
             onFeedback = { host.haptics.play(HapticEvent.FUNCTION) }
             onClose = { host.closeSink() }
             onButton = { b -> button(b) }
+            onClear = { clear() }
+            onCaret = { off -> host.queryCaret = if (off >= host.query.length) -1 else off; sync() }
             onInsert = {
                 val (t, field) = insertable()
                 if (t.isNotEmpty()) {
                     // taken from the field: the answer will replace it there
                     fromField = field
-                    host.query.setLength(0); host.query.append(t); sync()
+                    host.queryCaret = -1; host.query.setLength(0); host.query.append(t); sync()
                 }
             }
             onSwap = {
                 val src = if (from == "auto") TranslateService.guess(host.query.toString()) else from
                 from = to; to = src
                 // the previous result becomes the text to translate back
-                if (result.isNotEmpty() && !fromSelection) { host.query.setLength(0); host.query.append(result) }
+                if (result.isNotEmpty() && !fromSelection) { host.queryCaret = -1; host.query.setLength(0); host.query.append(result) }
                 resultFor = ""; sync()
             }
             onPick = { which, value -> if (which == "engine") pickEngine(value) else pickMenu(value) }
@@ -78,18 +80,14 @@ class TranslateFeature(private val host: Host, private val service: TranslateSer
         mode = nextMode
         nextMode = "translate"
         // what is said to 小K starts empty
-        val selection = if (mode == "chat") { host.query.setLength(0); null } else selection
+        val selection = if (mode == "chat") { host.queryCaret = -1; host.query.setLength(0); null } else selection
         to = prefs.translateTarget
         from = "auto"
         fromSelection = selection != null
         fromField = ""
         custom = false
         result = ""; resultFor = ""; rewriteBase = null; answer = ""; status = ""
-        if (mode == "rewrite" && selection == null) {
-            // 改写 works on what is in the field: it comes in at once
-            val all = host.editor.allText() ?: (host.editor.textBefore(4000) + host.editor.textAfter(4000))
-            if (all.isNotBlank()) { fromField = all; host.query.setLength(0); host.query.append(all) }
-        }
+        // each time it opens it starts empty: what is in the field (or was copied) is a tap away, 一键插入
         strip.visibility = View.VISIBLE
         if (Motion.on(prefs)) {
             strip.animate().cancel()
@@ -118,17 +116,25 @@ class TranslateFeature(private val host: Host, private val service: TranslateSer
         } else strip.visibility = View.GONE
     }
 
+    /** ✕ in the text line: the text, the answer and where they came from go; the strip stays open. */
+    private fun clear() {
+        service.cancel(); ai.cancel(); handler.removeCallbacks(run); handler.removeCallbacks(rewriteRun)
+        host.queryCaret = -1; host.query.setLength(0)
+        result = ""; resultFor = ""; answer = ""; status = ""; rewriteBase = null; rewriteFor = ""; failedFor = ""
+        fromField = ""; fromSelection = false; rewriting = false
+        if (custom) custom = false
+        strip.result = ""; strip.status = ""; strip.busy = false
+        host.haptics.play(HapticEvent.OPTION)
+        sync(); host.syncBar()
+    }
+
     /** Another way, from the strip's list: the text stays, the answer goes. */
     private fun switchTo(m: String) {
         if (m == mode) return
         service.cancel(); ai.cancel(); handler.removeCallbacks(run); handler.removeCallbacks(rewriteRun)
         mode = m; custom = false; rewriting = false; rewriteFor = ""
         result = ""; resultFor = ""; answer = ""; status = ""; rewriteBase = null
-        if (m == "rewrite" && host.query.isBlank()) {
-            val all = host.editor.allText() ?: host.editor.textBefore(4000)
-            if (all.isNotBlank()) { fromField = all; host.query.append(all) }
-        }
-        if (m == "chat") { host.query.setLength(0); fromField = "" }
+        if (m == "chat") { host.queryCaret = -1; host.query.setLength(0); fromField = "" }
         strip.switched()
         host.haptics.play(HapticEvent.OPTION)
         sync()
@@ -155,12 +161,12 @@ class TranslateFeature(private val host: Host, private val service: TranslateSer
             id.startsWith("from:") -> { from = id.removePrefix("from:"); resultFor = ""; sync() }
             id.startsWith("act:") -> {
                 prefs.put(Prefs.KAY_REWRITE, id.removePrefix("act:"))
-                if (custom) { custom = false; host.query.setLength(0); host.query.append(fromField) }
+                if (custom) { custom = false; host.queryCaret = -1; host.query.setLength(0); host.query.append(fromField) }
                 host.haptics.play(HapticEvent.OPTION); rewriteFor = ""; sync()
             }
             id == "custom" -> {
                 // the text stays the field's; what is typed now says how to change it
-                if (!custom) { custom = true; if (fromField.isEmpty()) fromField = host.query.toString(); host.query.setLength(0) }
+                if (!custom) { custom = true; if (fromField.isEmpty()) fromField = host.query.toString(); host.queryCaret = -1; host.query.setLength(0) }
                 result = ""; rewriteBase = null; status = ""; sync(); host.syncBar()
             }
             id == "line" -> { ai.recallLine(); answer = ai.lastAnswer(); sync() }
@@ -192,6 +198,7 @@ class TranslateFeature(private val host: Host, private val service: TranslateSer
         val q = host.query.toString()
         val st = strip
         st.mode = mode
+        st.caret = host.queryCaret
         st.modeItems = modeItems()
         st.optItems = optItems()
         val aiTarget = Llm.resolve(prefs, prefs.aiProvider)
@@ -368,7 +375,7 @@ class TranslateFeature(private val host: Host, private val service: TranslateSer
     private fun send() {
         val said = host.query.toString().trim()
         if (said.isEmpty() || ai.chatBusy) return
-        host.query.setLength(0)
+        host.queryCaret = -1; host.query.setLength(0)
         status = ""; answer = ""
         ai.chat(said,
             onText = { s -> if (mode == "chat") { answer = s; strip.result = s; strip.busy = false; strip.refresh() } },
@@ -422,6 +429,11 @@ class TranslateFeature(private val host: Host, private val service: TranslateSer
      * else what is already written in the field.
      */
     private fun insertable(): Pair<String, String> {
+        if (mode == "rewrite") {
+            // 改写: what is written in the field comes first
+            val all = host.editor.allText() ?: (host.editor.textBefore(4000) + host.editor.textAfter(4000))
+            if (all.isNotBlank()) return all to all
+        }
         val cm = host.context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
         val clip = runCatching { cm.primaryClip?.getItemAt(0)?.coerceToText(host.context)?.toString() }.getOrNull()?.trim().orEmpty()
         if (clip.isNotEmpty() && clip.length <= 2000) return clip to ""

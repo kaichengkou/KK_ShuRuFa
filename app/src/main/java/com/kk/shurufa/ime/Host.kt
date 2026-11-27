@@ -37,6 +37,8 @@ interface Host {
     val panel: Panel
     /** The query typed while a [Sink] is open. */
     val query: StringBuilder
+    /** Where in [query] typing goes (-1: at its end). */
+    var queryCaret: Int
     val sink: Sink?
     /** The keyboard's current language is Chinese (Rime). */
     val isZh: Boolean
