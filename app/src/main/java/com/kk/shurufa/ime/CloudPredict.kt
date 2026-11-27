@@ -55,7 +55,7 @@ class CloudPredict(private val prefs: Prefs, private val onReady: () -> Unit) {
             "You are the next-phrase suggester of a phone keyboard. Given the text the user has typed so far " +
                 "(it may end mid-sentence), suggest $n different short continuations they are likely to type next: " +
                 "each 1 to 6 words (Chinese: 2 to 8 characters), natural for a chat message, in the same language " +
-                "as the end of the text, written as the user (first person). Do not repeat the " +
+                "as the end of the text, written as the user (first person; the user is a man, so gendered forms such as Russian past tense are masculine). Do not repeat the " +
                 "text. One per line, nothing else."
 
         /** Up to three clean lines: no numbering, quotes or repeats of the text, of a sensible length. */

@@ -53,7 +53,17 @@ class Editor(private val ime: InputMethodService, private val prefs: Prefs) {
     /** 选择模式 of the edit panel: caret moves extend the selection. */
     var selectMode = false
 
-    fun onSelection(start: Int, end: Int) { selStart = start; selEnd = end; beforeCache = null; caretStale = false }
+    fun onSelection(start: Int, end: Int) {
+        // steps of the space-key trackpad come faster than the app reports them: the report of an
+        // earlier step must not take the caret back from where the later ones already put it
+        if (stepsAhead.isNotEmpty()) {
+            if (start == end && end == stepsAhead.first()) { stepsAhead.removeFirst(); if (stepsAhead.isNotEmpty()) return }
+            else stepsAhead.clear()
+        }
+        selStart = start; selEnd = end; beforeCache = null; caretStale = false
+    }
+    /** Where [nearCaretStep] put the caret, in order, not yet reported back by the app. */
+    private val stepsAhead = ArrayDeque<Int>()
     /** The field changed (or a key went to it) since the app last said where the caret is. */
     private var caretStale = false
 
@@ -475,6 +485,7 @@ class Editor(private val ime: InputMethodService, private val prefs: Prefs) {
         ic.setSelection(target, target)
         // the next step comes before the app reports this one
         selStart = target; selEnd = target; caretStale = false
+        if (stepsAhead.size < 64) stepsAhead.addLast(target) else stepsAhead.clear()
         return true
     }
 
