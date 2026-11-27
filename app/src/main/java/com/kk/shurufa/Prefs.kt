@@ -15,7 +15,7 @@ class Prefs(context: Context) {
     /** The keyboard's own memory: never shown as settings, never rebuilds anything. */
     val state: SharedPreferences = context.applicationContext.getSharedPreferences("kk_state", Context.MODE_PRIVATE)
 
-    init { migrateState() }
+    init { migrateState(); Backup.applyPreset(context.applicationContext, sp, state) }
 
     private fun b(key: String, def: Boolean) = sp.getBoolean(key, def)
     private fun i(key: String, def: Int) = sp.getInt(key, def)

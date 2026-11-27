@@ -130,8 +130,18 @@ object RimeEngine {
             |    - derive/^([jqxy])v/$1u/
             |  engine/filters/@before 0: lua_filter@*kk_typo_mark
             |  engine/filters/+:
+            |    - lua_filter@*kk_split
             |    - lua_filter@*kk_emoji_order
             |    - lua_filter@*kk_muted
+            |  # 日期、时间这类功能联想（rq sj xq dt ts nl…）不进候选：工具栏的快捷插入里有
+            |  date_translator/date: ""
+            |  date_translator/time: ""
+            |  date_translator/week: ""
+            |  date_translator/datetime: ""
+            |  date_translator/timestamp: ""
+            |  date_translator/datezh: ""
+            |  date_translator/dateen: ""
+            |  lunar: ""
             |""".trimMargin() + extra + if (prefs.packPoetry) """
             |  # 扩展词库：古诗文
             |  schema/dependencies/+:

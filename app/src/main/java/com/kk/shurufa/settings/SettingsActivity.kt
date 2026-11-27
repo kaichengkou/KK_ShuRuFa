@@ -958,6 +958,15 @@ private fun BackupPage() {
         Note("存成一个 .zip 文件：所有设置、最近用过的符号和表情、点按落点、雾凇学到的词和顺序、自定义词库、导入的词库、俄语学到的词、打字数据和剪贴板收藏。不含 API Key（换手机后要重新填）、剪贴板历史和下载的模型。")
         FilledTonalButton(enabled = !busy, onClick = { save.launch("KK输入法备份-$stamp.zip") }) { Text("备份到文件…") }
     }
+    val saveSettings = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        val r = runCatching { ctx.contentResolver.openOutputStream(uri)?.use { com.kk.shurufa.Backup.exportSettings(ctx, it) } ?: error("写不进这个位置") }
+        status = r.fold({ n -> "已导出 $n 项设置" }, { "导出失败：${it.message}" })
+    }
+    Group("导出设置") {
+        Note("只导出设置本身，存成一个 .json 文件：不含学到的词、剪贴板、打字数据，也不含任何 AI 服务的 Key、地址和模型。可以拿来做别的手机上的初始设置。")
+        FilledTonalButton(enabled = !busy, onClick = { saveSettings.launch("KK输入法设置-$stamp.json") }) { Text("导出设置…") }
+    }
     Group("恢复") {
         Note("从备份文件恢复。设置会被备份里的覆盖；学到的词、自定义词和收藏是合并进来的，这台手机上已经学到的不会丢。恢复后输入法会重新启动并重新部署词库（约一分钟）。")
         FilledTonalButton(enabled = !busy, onClick = { open.launch(arrayOf("application/zip", "application/octet-stream")) }) { Text("从文件恢复…") }

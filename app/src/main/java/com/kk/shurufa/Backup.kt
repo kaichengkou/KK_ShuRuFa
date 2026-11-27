@@ -138,6 +138,32 @@ object Backup {
 
     private const val IMAGE_MARK = "\u0001img:"
 
+    /**
+     * 导出设置: the settings alone (no learned words, no API services at all), as the JSON a
+     * preset is made of. Returns how many were written.
+     */
+    fun exportSettings(ctx: Context, out: OutputStream): Int {
+        val o = toJson(Prefs(ctx).sp) { !isService(it) }
+        out.write(o.toString(1).toByteArray())
+        return o.length()
+    }
+
+    /**
+     * 预设: on a phone the keyboard has never run on, the settings in assets/preset_prefs.json
+     * (made with [exportSettings]) are where it starts. Once only; nothing is changed after.
+     */
+    fun applyPreset(ctx: Context, sp: SharedPreferences, state: SharedPreferences) {
+        if (state.getBoolean(PRESET_DONE, false)) return
+        state.edit().putBoolean(PRESET_DONE, true).apply()
+        if (sp.all.isNotEmpty()) return
+        val text = runCatching { ctx.assets.open("preset_prefs.json").bufferedReader().readText() }.getOrNull() ?: return
+        runCatching { fromJson(sp, JSONObject(text)) { !isService(it) } }
+    }
+    private const val PRESET_DONE = "preset_done"
+
+    /** Everything about AI services: keys, addresses, models, which one is used. */
+    private fun isService(key: String) = isSecret(key) || key.startsWith("llm_") || key in setOf(Prefs.AI_PROVIDER, Prefs.QUICK_TARGET, Prefs.TRANSLATE_ENGINE)
+
     /** API keys never leave the phone in a backup. */
     private fun isSecret(key: String) = key == Prefs.AI_KEY || (key.startsWith("llm_") && key.endsWith("_key"))
 
