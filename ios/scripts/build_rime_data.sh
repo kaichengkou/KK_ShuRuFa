@@ -6,8 +6,9 @@
 # platforms type alike. The dictionary sources are dropped after compiling: the keyboard never
 # compiles (a keyboard extension has a few dozen MB of memory), it only reads build/.
 set -eu
-DEPLOY=$1
-OUT=$2
+DEPLOY=$(cd "$(dirname "$1")" && pwd)/$(basename "$1")
+mkdir -p "$2"
+OUT=$(cd "$2" && pwd)
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 ICE="$ROOT/rime-data/rime-ice"
 SHARED="$OUT/RimeShared"
