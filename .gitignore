@@ -8,3 +8,5 @@ app/src/main/jni/.cache/
 app/src/main/jni/librime/plugins/librime-lua
 app/src/main/jni/librime/plugins/librime-octagram
 *.jks
+ios/build/
+ios/*.xcodeproj

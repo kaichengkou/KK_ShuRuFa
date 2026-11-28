@@ -1,0 +1,5 @@
+module RimeKit {
+  header "kk_rime.h"
+  link "c++"
+  export *
+}
