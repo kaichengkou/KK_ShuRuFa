@@ -17,6 +17,7 @@ cmake --build "$BUILD/host" --target kk_rime_deploy -j "$JOBS"
 
 for PLATFORM in iphoneos iphonesimulator; do
   OUT="$BUILD/cmake-$PLATFORM"
+  # executables would be app bundles on iOS (CMake then wants a bundle destination): none are built
   # LUA_USE_IOS: Lua's os.execute uses system(), which iOS does not have
   cmake -S "$JNI" -B "$OUT" $COMMON \
     -DCMAKE_SYSTEM_NAME=iOS \
@@ -24,6 +25,7 @@ for PLATFORM in iphoneos iphonesimulator; do
     -DCMAKE_OSX_ARCHITECTURES=arm64 \
     -DCMAKE_OSX_DEPLOYMENT_TARGET=16.0 \
     -DCMAKE_C_FLAGS="-DLUA_USE_IOS" \
+    -DCMAKE_MACOSX_BUNDLE=OFF -DENABLE_TOOLS=OFF \
     -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED=NO
   cmake --build "$OUT" --target kk_rime_ios -j "$JOBS"
   mkdir -p "$BUILD/rimekit/$PLATFORM"
