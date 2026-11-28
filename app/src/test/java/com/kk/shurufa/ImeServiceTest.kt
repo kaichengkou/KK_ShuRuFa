@@ -76,7 +76,7 @@ class ImeServiceTest {
             ime.onStartInputView(EditorInfo().apply { inputType = type; packageName = "test.app" }, false); idle()
             return ime.panel
         }
-        fun ops() = (KkImeService::class.java.getDeclaredMethod("getNumOps").apply { isAccessible = true }.invoke(ime) as List<*>)
+        fun ops() = (KkImeService::class.java.getDeclaredField("numbers").apply { isAccessible = true }.get(ime) as com.kk.shurufa.ime.NumbersFeature).ops
         assertEquals(Panel.NUM, open(InputType.TYPE_CLASS_PHONE))
         assertEquals(listOf("+", "-", " ", "*", "#", "(", ")", ",", ";"), ops())
         shot(view, "field_phone")
@@ -211,7 +211,8 @@ class ImeServiceTest {
             assertEquals(1, content.childCount)
         }
         shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(800))
-        val ghost = KkImeService::class.java.getDeclaredField("ghost").apply { isAccessible = true }.get(ime)
+        val motion = KkImeService::class.java.getDeclaredField("motion").apply { isAccessible = true }.get(ime)
+        val ghost = motion.javaClass.getDeclaredField("ghost").apply { isAccessible = true }.get(motion)
         assertNull("the faded panel is gone once its fade ends", ghost)
         assertEquals(Panel.EMOJI, ime.panel)
         assertEquals(1f, content.getChildAt(0).alpha)

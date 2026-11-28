@@ -1,8 +1,5 @@
 package com.kk.shurufa.ime
 
-import android.animation.Animator
-import android.animation.AnimatorListenerAdapter
-import android.animation.ValueAnimator
 import android.content.ComponentCallbacks2
 import android.content.Context
 import android.content.Intent
@@ -26,29 +23,21 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import com.kk.shurufa.Prefs
 import com.kk.shurufa.keyboard.CandidateBar
-import com.kk.shurufa.keyboard.Dir
 import com.kk.shurufa.keyboard.EditPanel
-import com.kk.shurufa.keyboard.FamilyRows
-import com.kk.shurufa.keyboard.GridPanel
 import com.kk.shurufa.keyboard.KbTheme
 import com.kk.shurufa.keyboard.Key
 import com.kk.shurufa.keyboard.KeyboardLayout
 import com.kk.shurufa.keyboard.KeyboardListener
 import com.kk.shurufa.keyboard.KeyboardView
 import com.kk.shurufa.keyboard.LayoutRepo
-import com.kk.shurufa.keyboard.MathLayout
 import com.kk.shurufa.keyboard.MathPanel
-import com.kk.shurufa.keyboard.Motion
-import com.kk.shurufa.keyboard.NumPadView
 import com.kk.shurufa.keyboard.Output
 import com.kk.shurufa.keyboard.PopupOverlay
 import com.kk.shurufa.keyboard.QuickPanel
 import com.kk.shurufa.keyboard.SheetHandle
-import com.kk.shurufa.keyboard.SymbolCategory
 import com.kk.shurufa.keyboard.FloatPills
 import com.kk.shurufa.keyboard.FrameRate
 import com.kk.shurufa.keyboard.SharkLife
-import com.kk.shurufa.keyboard.TabStrip
 import com.kk.shurufa.keyboard.TouchModel
 import com.kk.shurufa.online.AiBudget
 import com.kk.shurufa.online.Llm
@@ -62,7 +51,9 @@ import kotlin.math.abs
 /**
  * The input method. It owns the window, decides which panel fills the area under the bar and
  * what the bar shows, routes keys (Chinese through Rime, the rest straight to the field), and
- * hosts the tools — emoji, clipboard, translation, AI, voice — each kept in a class of its own.
+ * hosts the tools — emoji, clipboard, translation, AI, voice, symbols, numbers — each kept in a
+ * class of its own. The opened candidates are [CandidatePanel], how panels change places is
+ * [PanelMotion], what a field is [Fields], what the letter keys carry [LetterKeys].
  * Everything written into the field goes through [Editor].
  */
 class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.Listener {
@@ -106,6 +97,8 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     private lateinit var translate: TranslateFeature
     private lateinit var ai: AiFeature
     private lateinit var voice: VoiceFeature
+    private lateinit var symbols: SymbolsFeature
+    private lateinit var numbers: NumbersFeature
     private val handler = Handler(Looper.getMainLooper())
 
     // views of the current input view
@@ -114,18 +107,9 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     private lateinit var bar: CandidateBar
     private lateinit var content: FrameLayout
     private lateinit var keyboard: KeyboardView
-    private lateinit var candPanel: LinearLayout
-    private lateinit var candGrid: GridPanel
-    private lateinit var candHandle: SheetHandle
-    private lateinit var toneTabs: TabStrip
-    private lateinit var syllableTabs: TabStrip
-    private lateinit var symbolPanel: LinearLayout
-    private lateinit var symRail: GridPanel
-    private lateinit var symCells: GridPanel
-    private lateinit var symBottom: KeyboardView
+    private lateinit var candidates: CandidatePanel
+    private lateinit var symbolPanel: View
     private lateinit var editPanel: EditPanel
-    private lateinit var mathPanel: MathPanel
-    private lateinit var numPad: NumPadView
     private lateinit var quickPanel: QuickPanel
     private lateinit var clipPanel: View
     private lateinit var emojiPanel: View
@@ -134,9 +118,8 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     private val built get() = ::root.isInitialized
 
     private var navInset = 0
-    /** Height told to the app (from the bottom); -1 means the column's current height. */
-    private var reportH = -1
-    private var heightAnim: ValueAnimator? = null
+    /** Panels fading and rising in, and the area easing between their heights. */
+    private lateinit var motion: PanelMotion
     /** 临时拉高: the clipboard and the candidate grid can take more of the screen. */
     private var tall = false
 
@@ -148,20 +131,13 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     private var lastSpaceAt = 0L
 
     private val layouts = HashMap<String, KeyboardLayout>()
-    private var math: MathLayout? = null
-    private var mathTab = "basic"
-    private var symbols: List<SymbolCategory> = emptyList()
-    private var symCat = ""
-    private var symLock = false
-    private var symItems: List<Output> = emptyList()
-    private val recentSymbols = mutableListOf<String>()
-    private var lastSymbolsAt = 0L
+    private val letterKeys by lazy { LetterKeys(prefs) }
 
     /** 拼音编辑: the bar shows the typed letters large, with a caret that can be placed precisely. */
     private var pinyinEdit = false
     private var predictions: List<String> = emptyList()
-    /** 俄语联想, one per language that has word tables. */
-    private val wordPredictors = HashMap<String, WordPredictor>()
+    /** 俄语联想's word tables. */
+    private val wordTables = WordPredictors(this)
     /** Word suggestions make sense in this field (not passwords, addresses, numbers). */
     private var wordsHere = true
     /** What is typed here may be learned from. */
@@ -221,6 +197,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         super.onCreate()
         FrameRate.window = window.window
         haptics = Haptics(this, prefs)
+        motion = PanelMotion(prefs) { resources.displayMetrics.density }
         repo = LayoutRepo(this, overrides = { KeyOverrides.load(prefs, it) })
         zhMemory = ZhMemory(this).also { if (prefs.zhPredictLearn) it.load() }
         predictor = Predictor(this, zhMemory)
@@ -228,7 +205,8 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         zh = ZhComposer(this, prefs).also { it.preload() }
         if (prefs.zhPredict) predictor.load()
         if (prefs.packPoetry) predictor.loadPoetry()
-        recentSymbols += prefs.state.getString(Prefs.RECENT_SYMBOLS, "")!!.split('\u0001').filter { it.isNotEmpty() }
+        symbols = SymbolsFeature(this)
+        numbers = NumbersFeature(this) { bar }
         emoji = EmojiFeature(this).also { it.load(); it.maybeUpdate() }
         clipboard = ClipboardFeature(this).also { it.register() }
         translate = TranslateFeature(this, translateService)
@@ -267,7 +245,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
             if (sink != Sink.TRANSLATE) translateService.trimMemory()
             // next come the word tables (the Russian ones are about 6 MB): those of languages not
             // in use now are let go, what they learned saved; they load again on first use
-            wordPredictors.keys.filter { it != curLang }.forEach { l -> wordPredictors.remove(l)?.save() }
+            wordTables.trim(keep = curLang)
         }
     }
 
@@ -280,7 +258,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         // 小K's pace: read here when it changes, not on every frame it is drawn
         if (key.startsWith("kay_")) SharkLife.tune = prefs.kayTune()
         if (Prefs.rebuildsKeyboard(key)) {
-            layouts.clear(); math = null
+            layouts.clear(); numbers.math = null
             if (built) setInputView(onCreateInputView())
             return
         }
@@ -310,7 +288,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
      * What may be learned and recorded in this field: never from passwords, addresses or fields
      * that ask not to be learned from, and nothing at all in 临时模式.
      */
-    private fun applyPrivacy(info: EditorInfo, kind: String? = fieldKind(info)) {
+    private fun applyPrivacy(info: EditorInfo, kind: String? = Fields.kind(info)) {
         val cls = info.inputType and InputType.TYPE_MASK_CLASS
         plainField = kind == null
         val isPassword = kind == "password"
@@ -347,7 +325,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     override fun onCreateInputView(): View {
         // a rebuilt view starts without a query: the strip it typed into is replaced
         if (sink != null) dropSink()
-        ghost = null
+        motion.forgetGhost()
         kbTheme = KbTheme.resolve(this, prefs)
         loadData()
         // The input window keeps one tall, mostly transparent size. Panels then change height inside
@@ -370,13 +348,14 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
             if (h != null) when (phase) { 0 -> h.begin(rawY); 1 -> h.drag(rawY); else -> h.end(v) }
         }
         content = FrameLayout(this)
+        motion.content = content
         keyboard = newKeyboard().also { it.touch = if (prefs.touchAdapt) touchModel else null }
         keyboard.learnTaps = tapLearn
-        buildCandidatePanel()
-        buildSymbolPanel()
+        candidates = CandidatePanel(this, toneFilter, newHandle(),
+            pick = { i -> pickZh(i) }, options = { i -> zhOptions(i) }, onOption = { i, o -> zhOption(i, o) }, onTone = { t -> onToneFilter(t) })
+        symbolPanel = symbols.build()
         buildEditPanel()
-        buildMathPanel()
-        buildNumPad()
+        numbers.build()
         voicePanel = voice.build()
         aiPanel = ai.build()
         clipPanel = clipboard.build { newHandle() }
@@ -429,8 +408,8 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         val shown = column.height
         // while a panel is dragged taller it covers the app; once it rests, the app makes room once,
         // so what is pasted is not hidden behind it
-        var reported = if (reportH > 0) reportH else shown
-        val sheet = if (panel == Panel.CLIPBOARD) clipboard.handle else if (panel == Panel.CANDIDATES) candHandle else null
+        var reported = if (motion.reportH > 0) motion.reportH else shown
+        val sheet = if (panel == Panel.CLIPBOARD) clipboard.handle else if (panel == Panel.CANDIDATES) candidates.handle else null
         if (sheet != null && sheet.moving) reported = minOf(reported, baseH + barH + navInset)
         val top = bottom - reported
         outInsets.contentTopInsets = top
@@ -468,8 +447,8 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
 
     private fun loadData() {
         try {
-            math = repo.math()
-            symbols = repo.symbols()
+            numbers.math = repo.math()
+            symbols.categories = repo.symbols()
         } catch (e: Exception) {
             pendingNotice = "布局文件有错误：${e.message}"
         }
@@ -487,25 +466,6 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     override val isZh: Boolean get() = layout(curLang).engine == "rime"
     private val composing get() = isZh && RimeEngine.ready && RimeBridge.input().isNotEmpty()
 
-    /**
-     * "password", "address" (a mail or web address, an account name) or null, by what the field
-     * says it is, and, for fields that do not say (login pages often don't), by its hint
-     * ("邮箱或手机号", "Email or phone", "Пароль") and by the app (Google's own account screens).
-     */
-    private fun fieldKind(info: EditorInfo): String? {
-        val cls = info.inputType and InputType.TYPE_MASK_CLASS
-        if (cls != InputType.TYPE_CLASS_TEXT) return null
-        val variation = info.inputType and InputType.TYPE_MASK_VARIATION
-        if (variation in PASSWORDS) return "password"
-        if (variation in ADDRESSES) return "address"
-        if (variation != InputType.TYPE_TEXT_VARIATION_NORMAL && variation != InputType.TYPE_TEXT_VARIATION_WEB_EDIT_TEXT) return null
-        val words = listOfNotNull(info.hintText, info.label).joinToString(" ").lowercase()
-        if (PASSWORD_WORDS.any { it in words }) return "password"
-        if (ACCOUNT_WORDS.any { it in words }) return "address"
-        if (info.packageName in ACCOUNT_APPS) return "address"
-        return null
-    }
-
     /** Passwords, web and mail addresses are written in Latin letters: English if it is there, else the first such language. */
     private fun latinLanguage(): String = prefs.languages.firstOrNull { it == "en" }
         ?: prefs.languages.firstOrNull { layout(it).engine != "rime" && it != "ru" } ?: "en"
@@ -520,9 +480,8 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         predictions = emptyList()
         editor.reset()
         val cls = info.inputType and InputType.TYPE_MASK_CLASS
-        val variation = info.inputType and InputType.TYPE_MASK_VARIATION
         if (prefs.perAppLanguage && !restarting) prefs.appLanguage(info.packageName ?: "")?.takeIf { it in prefs.languages }?.let { lang = it }
-        val kind = fieldKind(info)
+        val kind = Fields.kind(info)
         val isPassword = kind == "password"
         val isAddress = kind == "address"
         if ((isPassword || isAddress) && (isZh || curLang == "ru")) tempLang = latinLanguage()
@@ -530,16 +489,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         applyPrivacy(info, kind)
         autoSpaced = false
         // the field says what goes in it: numbers get the number pad, with the marks that field takes
-        fieldOps = when (cls) {
-            InputType.TYPE_CLASS_PHONE -> PHONE_OPS
-            InputType.TYPE_CLASS_DATETIME -> DATE_OPS
-            InputType.TYPE_CLASS_NUMBER -> buildList {
-                if (info.inputType and InputType.TYPE_NUMBER_FLAG_SIGNED != 0) add("-")
-                if (info.inputType and InputType.TYPE_NUMBER_FLAG_DECIMAL != 0) { add("."); add(",") }
-                if (variation != InputType.TYPE_NUMBER_VARIATION_PASSWORD) addAll(listOf("-", "/", ":", " ").filter { it !in this })
-            }.ifEmpty { listOf(" ") }
-            else -> null
-        }
+        numbers.fieldOps = Fields.numberOps(info)
         panel = when {
             cls == InputType.TYPE_CLASS_PHONE -> Panel.NUM
             (cls == InputType.TYPE_CLASS_NUMBER || cls == InputType.TYPE_CLASS_DATETIME) && prefs.numberFieldMath -> Panel.NUM
@@ -621,7 +571,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         super.onWindowHidden()
         FrameRate.idle()
         stopBackgroundWork()
-        wordPredictors.values.forEach { it.save() }
+        wordTables.saveAll()
         zhMemory.save()
         Background.run { TypingStats.get(this).save() }
     }
@@ -665,40 +615,8 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
 
     // ---- panels -------------------------------------------------------------------------
 
-    private var lettersKey = ""
-    private var lettersCache: List<List<Key>> = emptyList()
-
     /** The letter rows with the switches that change them applied; the same list while nothing changed. */
-    private fun lettersRows(): List<List<Key>> {
-        val key = "$curLang|${prefs.stressMode}|${prefs.topRowScripts}|${prefs.numberRow}|${System.identityHashCode(layout(curLang))}"
-        if (key != lettersKey) { lettersCache = buildLettersRows(); lettersKey = key }
-        return lettersCache
-    }
-
-    private fun buildLettersRows(): List<List<Key>> {
-        var base = layout(curLang).rows
-        if (curLang == "ru" && prefs.stressMode) {
-            // 重音模式: every Russian vowel flicks up to its stressed form
-            base = base.map { row ->
-                row.map { k ->
-                    val ch = k.main?.text
-                    if (ch != null && ch.length == 1 && ch[0] in VOWELS) k.copy(flicks = k.flicks + (Dir.UP to Output.of(ch + "́")))
-                    else k
-                }
-            }
-        }
-        if (prefs.topRowScripts && base.isNotEmpty()) {
-            // 第一排左右滑: superscript and subscript digits
-            val sup = "¹²³⁴⁵⁶⁷⁸⁹⁰"; val sub = "₁₂₃₄₅₆₇₈₉₀"
-            base = listOf(base[0].mapIndexed { i, k ->
-                if (i < 10 && k.main != null) k.copy(flicks = k.flicks + mapOf(Dir.LEFT to Output.of(sup[i].toString()), Dir.RIGHT to Output.of(sub[i].toString())))
-                else k
-            }) + base.drop(1)
-        }
-        if (!prefs.numberRow || base.isEmpty()) return base
-        val digits = (1..10).map { Key(main = Output.of((it % 10).toString())) }
-        return listOf(digits) + base
-    }
+    private fun lettersRows(): List<List<Key>> = letterKeys.rows(curLang, layout(curLang))
 
     private fun kbHeight(rows: Int): Int {
         val keyH = dp(prefs.keyHeightDp.toFloat())
@@ -743,17 +661,16 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         val oldTotal = (if (bar.visibility == View.VISIBLE) bar.height else 0) + content.height
         // the panel that leaves fades out where it is while the new one fades in over it
         val leaving = content.getChildAt(0)
-        clearGhost()
-        if (from != p && leaving != null) fadeOut(leaving)
+        motion.clearGhost()
+        if (from != p && leaving != null) motion.fadeOut(leaving)
         content.removeAllViews()
-        heightAnim?.cancel()
-        reportH = -1
+        motion.stopHeight()
         val base = baseH
         val tallH = tallH()
         val canTall = p == Panel.CLIPBOARD || p == Panel.CANDIDATES
         // 记住符号: back to the symbols only if they were the last panel of the family used
-        if (from == Panel.SYMBOLS && p != Panel.SYMBOLS) lastSymbolsAt = if (inFamily(p)) 0L else SystemClock.uptimeMillis()
-        for (h in listOf(clipboard.handle, candHandle)) { h.low = base; h.high = tallH; h.current = if (tall) tallH else base }
+        if (from == Panel.SYMBOLS && p != Panel.SYMBOLS) symbols.lastUsedAt = if (inFamily(p)) 0L else SystemClock.uptimeMillis()
+        for (h in listOf(clipboard.handle, candidates.handle)) { h.low = base; h.high = tallH; h.current = if (tall) tallH else base }
         // the symbol panel hides the toolbar and uses its height itself
         val noBar = p == Panel.SYMBOLS
         bar.visibility = if (noBar) View.GONE else View.VISIBLE
@@ -771,92 +688,30 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
             Panel.LETTERS -> { keyboardPhone = false; keyboard.setRows(lettersRows()); content.addView(keyboard, fixed) }
             Panel.PHONE -> { keyboardPhone = true; keyboard.setRows(layout("phone").rows); content.addView(keyboard, fixed) }
             Panel.MATH -> {
-                if (math == null) { showPanel(Panel.LETTERS); return }
-                refreshMath(slide = 0)
-                content.addView(mathPanel, fixed)
+                if (numbers.math == null) { showPanel(Panel.LETTERS); return }
+                numbers.refreshMath(slide = 0)
+                content.addView(numbers.mathPanel, fixed)
             }
-            Panel.NUM -> { numPad.keys.setRows(layout("num").rows); numPad.setItems(numOps.map { if (it == " ") "空格" else it }); content.addView(numPad, fixed); showMoneyChip() }
+            Panel.NUM -> { numbers.showNumPad(layout("num").rows); content.addView(numbers.numPad, fixed); numbers.showMoneyChip() }
             Panel.CURSOR -> { editor.refreshSelection(); syncEditPanel(); content.addView(editPanel, fixed) }
-            Panel.SYMBOLS -> { refreshSymbols(); content.addView(symbolPanel, fixed) }
+            Panel.SYMBOLS -> { symbols.refresh(); content.addView(symbolPanel, fixed) }
             Panel.CLIPBOARD -> { clipboard.refresh(); content.addView(clipPanel, fixed) }
             Panel.QUICK -> { refreshQuick(); content.addView(quickPanel, fixed); if (entering) quickPanel.animateIn() }
             Panel.EMOJI -> { emoji.refresh(); content.addView(emojiPanel, fixed) }
             Panel.AI -> { content.addView(aiPanel, fixed); if (entering) ai.onOpened() }
             Panel.VOICE -> { content.addView(voicePanel, fixed); if (entering) voice.onOpened() }
             Panel.CANDIDATES -> {
-                syncToneTabs()
+                candidates.syncTones()
                 val (cands, comments) = zhCandidates(GRID_CANDIDATES)
-                candGrid.notes = zh.annotations(cands, comments)
-                candGrid.setItems(cands)
-                content.addView(candPanel, fixed)
+                candidates.fill(cands, zh.annotations(cands, comments))
+                content.addView(candidates.view, fixed)
             }
         }
-        if (entering && p != Panel.LETTERS && p != Panel.PHONE && p != Panel.QUICK) animateIn(content.getChildAt(0))
+        if (entering && p != Panel.LETTERS && p != Panel.PHONE && p != Panel.QUICK) motion.animateIn(content.getChildAt(0))
         bar.expanded = p == Panel.CANDIDATES
         bar.activeTool = when (sink) { Sink.EMOJI -> "emoji"; Sink.TRANSLATE -> if (translate.mode == "translate") "translate" else "ai"; Sink.AI -> "ai"; null -> toolFor(p) }
         syncBar()
-        animateHeight(oldTotal, if (noBar) 0 else barH)
-    }
-
-    /** Eases the keyboard's height from what it was to what the new panel needs. */
-    private fun animateHeight(oldTotal: Int, newBar: Int) {
-        if (!Motion.on(prefs) || oldTotal <= 0) return
-        content.measure(View.MeasureSpec.makeMeasureSpec(root.width.coerceAtLeast(1), View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
-        val target = content.measuredHeight
-        val start = oldTotal - newBar
-        if (start <= 0 || abs(start - target) < dp(2f)) return
-        // while it moves the app keeps the larger of the two sizes, so it lays out at most once
-        reportH = maxOf(start, target) + newBar + navInset
-        heightAnim = ValueAnimator.ofInt(start, target).apply {
-            duration = Motion.dur(prefs, Motion.PANEL)
-            interpolator = Motion.ENTER
-            addUpdateListener {
-                val h = it.animatedValue as Int
-                content.layoutParams = content.layoutParams.apply { height = h }; content.requestLayout()
-                // the leaving panel stays on the keyboard's bottom edge while the top edge moves
-                ghost?.translationY = (h - ghostBase).toFloat()
-            }
-            addListener(object : AnimatorListenerAdapter() {
-                override fun onAnimationEnd(a: Animator) {
-                    reportH = -1
-                    content.layoutParams = content.layoutParams.apply { height = ViewGroup.LayoutParams.WRAP_CONTENT }; content.requestLayout()
-                }
-            })
-            start()
-        }
-    }
-
-    /** The panel fading out, drawn on the content's overlay: it is seen, but takes no touches. */
-    private var ghost: View? = null
-    /** The content's height when [ghost] left it. */
-    private var ghostBase = 0
-
-    private fun fadeOut(v: View) {
-        if (!Motion.on(prefs) || !v.isLaidOut || v.alpha < 0.5f) return
-        // whatever it was still doing (rising in) stops; from here the height animation moves it
-        v.animate().cancel()
-        v.translationY = 0f
-        ghostBase = content.height
-        content.overlay.add(v)
-        ghost = v
-        v.animate().alpha(0f).setDuration(Motion.dur(prefs, 150)).setInterpolator(Motion.EXIT).withLayer()
-            .withEndAction { if (ghost === v) clearGhost() }.start()
-    }
-
-    private fun clearGhost() {
-        val g = ghost ?: return
-        ghost = null
-        g.animate().cancel()
-        content.overlay.remove(g)
-        g.alpha = 1f; g.translationY = 0f
-    }
-
-    /** A panel arrives: it rises a little into place as it fades in. */
-    private fun animateIn(v: View?) {
-        if (v == null || !Motion.on(prefs)) return
-        v.alpha = 0f; v.translationY = dp(14f)
-        v.animate().alpha(1f).translationY(0f).setDuration(Motion.dur(prefs, Motion.PANEL))
-            .setInterpolator(Motion.ENTER).withLayer().start()
+        motion.animateHeight(oldTotal, if (noBar) 0 else barH, root.width, navInset)
     }
 
     // ---- the bar ------------------------------------------------------------------------
@@ -965,49 +820,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         if (built && column.height > 0) overlay.toast(text, column.top.toFloat()) else pendingNotice = text
     }
 
-    // ---- the candidate grid, symbols, the edit pad, numbers, the quick panel --------------
-
-    private fun buildCandidatePanel() {
-        candGrid = GridPanel(this, prefs).apply {
-            theme = kbTheme; cellStyle = GridPanel.CellStyle.FLAT; columns = 8; rowHeightDp = 50f; textSp = 19f
-            highlightFirst = true; overlay = this@KkImeService.overlay
-            onItem = { i -> pickZh(i) }
-            onFeedback = { k -> haptics.play(if (k == "popup") HapticEvent.POPUP else HapticEvent.LETTER) }
-            longOptions = { i -> zhOptions(i) }
-            onLongOption = { i, o -> zhOption(i, o) }
-        }
-        val side = newKeyboard().apply {
-            heightScale = 0.9f
-            setRows(listOf(
-                listOf(Key(fn = "collapse", label = "收起")),
-                listOf(Key(fn = "backspace")),
-                listOf(Key(fn = "reinput", label = "重输")),
-            ))
-        }
-        candHandle = newHandle()
-        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        row.addView(candGrid, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
-        row.addView(side, LinearLayout.LayoutParams(dp(68f).toInt(), ViewGroup.LayoutParams.MATCH_PARENT))
-        // 声调筛选, in the opened candidates only: the bar stays as it was
-        toneTabs = TabStrip(this, prefs).apply {
-            theme = kbTheme; compact = true
-            onFeedback = { haptics.play(HapticEvent.OPTION) }
-            onTab = { t -> onToneFilter(t.toInt()) }
-            onVerticalDrag = { phase, y, v -> when (phase) { 0 -> candHandle.begin(y); 1 -> candHandle.drag(y); else -> candHandle.end(v) } }
-        }
-        candPanel = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        candPanel.addView(candHandle, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-        // with several syllables, a row above picks which one the tones are for
-        syllableTabs = TabStrip(this, prefs).apply {
-            theme = kbTheme; compact = true
-            onFeedback = { haptics.play(HapticEvent.OPTION) }
-            onTab = { t -> toneFilter.syllable = t.toInt(); syncToneTabs() }
-            onVerticalDrag = { phase, y, v -> when (phase) { 0 -> candHandle.begin(y); 1 -> candHandle.drag(y); else -> candHandle.end(v) } }
-        }
-        candPanel.addView(syllableTabs, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-        candPanel.addView(toneTabs, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-        candPanel.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
-    }
+    // ---- the grab bar, the edit pad, the quick panel ------------------------------------
 
     /** 面板高度档位: dragging the grab bar resizes the open panel live; it settles on one of two heights. */
     private fun newHandle() = SheetHandle(this, prefs).apply {
@@ -1016,58 +829,6 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         onHeight = { h -> content.getChildAt(0)?.let { v -> v.layoutParams = v.layoutParams.apply { height = h }; v.requestLayout() } }
         onSettled = { t -> tall = t }
         onRest = { root.requestLayout() }
-    }
-
-    private fun buildSymbolPanel() {
-        symbolPanel = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        val top = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        symRail = GridPanel(this, prefs).apply {
-            theme = kbTheme; columns = 1; rowHeightDp = 38f; textSp = 14f; cellStyle = GridPanel.CellStyle.RAIL
-            onItem = { i -> symCat = symCatIds().getOrElse(i) { "recent" }; refreshSymbols() }
-            onFeedback = { haptics.play(HapticEvent.FUNCTION) }
-        }
-        symCells = GridPanel(this, prefs).apply {
-            theme = kbTheme; cellStyle = GridPanel.CellStyle.SOFT; rowHeightDp = 42f
-            emptyText = "用过的符号会出现在这里"
-            onItem = { i -> symItems.getOrNull(i)?.let { onSymbol(it) } }
-            onFeedback = { haptics.play(HapticEvent.LETTER) }
-        }
-        top.addView(symRail, LinearLayout.LayoutParams(dp(62f).toInt(), ViewGroup.LayoutParams.MATCH_PARENT))
-        top.addView(symCells, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
-        symBottom = newKeyboard()
-        symBottom.setRows(listOf(FamilyRows.symbols()))
-        symbolPanel.addView(top, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
-        symbolPanel.addView(symBottom, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-    }
-
-    private fun symCatIds() = listOf("recent") + symbols.map { it.id }
-
-    private fun refreshSymbols() {
-        if (symbols.isEmpty()) return
-        // 最近 holds what was typed; with nothing typed yet the panel opens on the first category
-        if (symCat.isEmpty()) symCat = if (recentSymbols.isNotEmpty()) "recent" else symbols.first().id
-        val idx = symCatIds().indexOf(symCat).coerceAtLeast(0)
-        val cat = symbols.getOrNull(idx - 1)
-        symItems = if (idx == 0) recentSymbols.map { Output.of(it) } else cat?.items.orEmpty()
-        val wide = cat?.wide == true
-        symRail.selectedIndex = idx
-        symRail.setItems(listOf("最近") + symbols.map { it.name }, resetScroll = false)
-        symCells.columns = if (wide) 3 else 6
-        symCells.textSp = if (wide) 14f else 18.5f
-        symCells.marks = emptySet()
-        symCells.setItems(symItems.map { it.label })
-        symBottom.lockOn = symLock
-    }
-
-    private fun onSymbol(o: Output) {
-        finishComposing()
-        lastSymbolsAt = SystemClock.uptimeMillis()
-        editor.type(o.text)
-        recentSymbols.remove(o.text)
-        recentSymbols.add(0, o.text)
-        while (recentSymbols.size > 30) recentSymbols.removeAt(recentSymbols.size - 1)
-        if (!prefs.incognito) prefs.state.edit().putString(Prefs.RECENT_SYMBOLS, recentSymbols.joinToString("\u0001")).apply()
-        if (!symLock && prefs.symbolAutoReturn) showPanel(Panel.LETTERS)
     }
 
     private fun buildEditPanel() {
@@ -1124,50 +885,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         }
     }
 
-    /** 简易/科学: !#1 and number fields open the number keyboard in the mode used last. */
-    private fun numPanel() = if (prefs.numMode == "sci") Panel.MATH else Panel.NUM
-
-    /** The marks of the number pad's column for the field: a phone number's, a date's, a number's; null in a text field (the arithmetic ones). */
-    private var fieldOps: List<String>? = null
-    private val numOps get() = fieldOps ?: NUM_OPS
-
-    private fun showCalcResult() {
-        if (!prefs.mathCalc) return
-        val line = editor.textBefore(200).substringAfterLast('\n').dropLast(1)
-        Calc.eval(line.substringAfterLast('='))?.let { bar.showResult(Calc.format(it)) }
-    }
-
-    private fun buildNumPad() {
-        val strip = GridPanel(this, prefs).apply {
-            theme = kbTheme; cellStyle = GridPanel.CellStyle.SOFT; columns = 1; textSp = 20f
-            cellPadDp = 0f; cellGapDp = prefs.keyGapDp
-            onItem = { i -> numOps.getOrNull(i)?.let { onNumOp(it) } }
-            onFeedback = { haptics.play(HapticEvent.LETTER) }
-        }
-        numPad = NumPadView(this, newKeyboard(), strip)
-    }
-
-    private fun onNumOp(op: String) {
-        finishComposing()
-        editor.type(op, pairable = op == "(")
-        if (op == "=") showCalcResult() else bar.showResult(null)
-        showMoneyChip()
-    }
-
-    /** 大写金额: after a number on the number pad, a chip offers it written out (壹佰贰拾叁元整). */
-    private fun showMoneyChip() {
-        // a phone number, a card's digits, a code: no 大写金额 for those
-        if (fieldOps != null) { bar.showMoney(null); return }
-        val num = Regex("(\\d{1,16}(?:\\.\\d{1,2})?)$").find(editor.textBefore(24))?.value
-        val before = editor.textBefore(26).dropLast(num?.length ?: 0)
-        // not the digits of a longer expression's result or a date
-        bar.showMoney(if (num != null && !before.endsWith("=") && !before.endsWith(".")) ZhNumber.money(num)?.let { num to it } else null)
-    }
-
-    override fun onMoneyChip(number: String, words: String) {
-        if (editor.textBefore(number.length) == number) editor.replaceBefore(number.length, words)
-        bar.showMoney(null)
-    }
+    override fun onMoneyChip(number: String, words: String) = numbers.onMoneyChip(number, words)
 
     /** 日期 · 时间 · 农历: types 雾凇's trigger, whose candidates then fill the bar. */
     private fun rimeTool(code: String) {
@@ -1179,76 +897,13 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         flushRime()
     }
 
-    private fun buildMathPanel() {
-        mathPanel = MathPanel(this, prefs) { newKeyboard() }
-        mathPanel.theme = kbTheme
-        mathPanel.tabs.onTab = { id -> onMathTab(id) }
-        mathPanel.tabs.onFeedback = { haptics.play(HapticEvent.FUNCTION) }
-    }
-
-    private fun onMathTab(id: String) {
-        val m = math ?: return
-        val from = m.tabs.indexOfFirst { it.id == mathTab }
-        val to = m.tabs.indexOfFirst { it.id == id }
-        mathTab = id
-        refreshMath(slide = (to - from).coerceIn(-1, 1))
-    }
-
-    private fun refreshMath(slide: Int) {
-        val m = math ?: return
-        if (m.tabs.none { it.id == mathTab }) mathTab = m.tabs.first().id
-        mathPanel.show(m, mathTab, slide)
-    }
-
-    private fun mathOut(o: Output) {
-        val text = if (prefs.mathFormat == "tex") o.tex else o.text
-        editor.type(text, pairable = false)
-        bar.showResult(null)
-        if (o.label == "=" && prefs.mathFormat == "uni") showCalcResult()
-    }
-
-    /**
-     * 快捷面板, in order: typing switches, look and feedback, the tools not already on the toolbar,
-     * then the keyboard itself. Panels reachable from !#1 (数学、符号) are not repeated here.
-     */
     private fun refreshQuick() {
-        val themeName = when (prefs.theme) { "light" -> "浅色"; "dark" -> "深色"; else -> "自动" }
-        val onBar = prefs.toolbar.toSet()
-        val tools = listOf("ai" to "AI 改写", "mic" to "语音", "translate" to "翻译", "cursor" to "文字编辑", "clipboard" to "剪贴板", "emoji" to "表情")
-            .filter { it.first !in onBar }
-            .map { (id, name) -> QuickPanel.Tile("tool:$id", name) }
-        // switches for the language in use: 中文's own three, or 俄语重音
-        val langSwitches = when {
-            isZh -> listOf(
-                QuickPanel.Tile("trad", "繁体", on = prefs.zhTraditional),
-                QuickPanel.Tile("emoji", "候选表情", on = prefs.zhEmoji),
-                QuickPanel.Tile("pinyin", "拼音模式", on = prefs.pinyinMode))
-            curLang == "ru" -> listOf(QuickPanel.Tile("stress", "俄语重音", on = prefs.stressMode))
-            else -> emptyList()
-        }
-        quickPanel.sections = listOf(
-            QuickPanel.Section(QuickPanel.Kind.SWITCHES, "", listOf(
-                QuickPanel.Tile("incognito", "临时模式", on = prefs.incognito),
-                QuickPanel.Tile("predict", "联想", on = if (isZh) prefs.zhPredict else prefs.wordPredict),
-            ) + (if (isZh) listOf(QuickPanel.Tile("correct", "纠错", on = prefs.zhCorrection)) else emptyList()) + langSwitches + listOf(
-                QuickPanel.Tile("vibrate", "振动", on = prefs.vibrate),
-                QuickPanel.Tile("sound", "按键音", on = prefs.sound),
-            )),
-            QuickPanel.Section(QuickPanel.Kind.ROW, "插入", listOf(
-                QuickPanel.Tile("date", "日期"), QuickPanel.Tile("time", "时间"), QuickPanel.Tile("week", "星期"),
-                QuickPanel.Tile("lunar", "农历"), QuickPanel.Tile("calc", "计算 · 大写"))),
-            QuickPanel.Section(QuickPanel.Kind.ROW, "工具", tools),
-            QuickPanel.Section(QuickPanel.Kind.FOOTER, "", listOf(
-                QuickPanel.Tile("theme", "主题 · $themeName"),
-                QuickPanel.Tile("toolbar", "工具栏"),
-                QuickPanel.Tile("picker", "切换输入法"),
-                QuickPanel.Tile("settings", "设置"))),
-        )
+        quickPanel.sections = QuickTiles.sections(prefs, isZh, curLang)
     }
 
     private fun onQuickTile(id: String) {
         when (id) {
-            in RIME_TOOLS -> rimeTool(RIME_TOOLS[id]!!)
+            in QuickTiles.RIME_TOOLS -> rimeTool(QuickTiles.RIME_TOOLS[id]!!)
             "incognito" -> prefs.state.edit().putBoolean(Prefs.INCOGNITO, !prefs.incognito).apply()
             "calc" -> { prefs.put(Prefs.NUM_MODE, "simple"); showPanel(Panel.NUM) }
             "trad" -> prefs.put(Prefs.ZH_TRAD, !prefs.zhTraditional)
@@ -1313,8 +968,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         // the opened grid first: it fetches the most, and the bar then reads from what it fetched
         if (panel == Panel.CANDIDATES && composing) {
             val (c, comments) = zhCandidates(GRID_CANDIDATES)
-            candGrid.notes = zh.annotations(c, comments)
-            candGrid.setItems(c)
+            candidates.fill(c, zh.annotations(c, comments))
         }
         syncBar()
         if (panel == Panel.CANDIDATES && !composing) showPanel(Panel.LETTERS)
@@ -1403,7 +1057,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         editor.dirty()
         corrected = null
         dropGreeting()
-        if (panel == Panel.MATH) { mathOut(output); return }
+        if (panel == Panel.MATH) { numbers.mathOut(output); return }
         val t = output.text
         val isMain = output === key.main
         if (sink != null && panel == Panel.LETTERS) {
@@ -1414,12 +1068,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
             syncBar()
             return
         }
-        if (panel == Panel.NUM) {
-            editor.type(t, pairable = t.length > 1)
-            if (t == "=") showCalcResult() else bar.showResult(null)
-            showMoneyChip()
-            return
-        }
+        if (panel == Panel.NUM) { numbers.typed(t); return }
         predictions = emptyList()
         editor.deletedRun.clear()
         if (isZh && panel == Panel.LETTERS) {
@@ -1487,7 +1136,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
                     else -> {
                         punct.deleting()
                         learning.deleting { n -> editor.textBefore(n) }
-                        editor.deleteBackward(); updateAutoCap(); suggestAfterDelete(); if (panel == Panel.NUM) showMoneyChip(); syncBar()
+                        editor.deleteBackward(); updateAutoCap(); suggestAfterDelete(); if (panel == Panel.NUM) numbers.showMoneyChip(); syncBar()
                     }
                 }
             }
@@ -1544,23 +1193,18 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
             "symbols" -> {
                 finishComposing()
                 // back to the symbols if they were used a moment ago, otherwise the number keyboard
-                val recent = lastSymbolsAt > 0 && SystemClock.uptimeMillis() - lastSymbolsAt < prefs.symbolMemorySec * 1000L
-                showPanel(if (recent) Panel.SYMBOLS else numPanel())
+                showPanel(if (symbols.recentlyUsed()) Panel.SYMBOLS else numbers.panel())
             }
             "sci" -> { prefs.put(Prefs.NUM_MODE, "sci"); showPanel(Panel.MATH) }
             "simple" -> { prefs.put(Prefs.NUM_MODE, "simple"); showPanel(Panel.NUM) }
-            "num" -> showPanel(numPanel())
+            "num" -> showPanel(numbers.panel())
             "more_symbols" -> showPanel(Panel.SYMBOLS)
             "math" -> { finishComposing(); showPanel(Panel.MATH) }
             "abc" -> { editor.selectMode = false; showPanel(Panel.LETTERS) }
             "collapse" -> { toneFilter.reset(); showPanel(Panel.LETTERS) }
             "reinput" -> { RimeBridge.clearComposition(); flushRime(); showPanel(Panel.LETTERS) }
             "undo" -> undo()
-            "lock" -> {
-                symLock = !symLock
-                symBottom.lockOn = symLock
-                notice(if (symLock) "已锁定：可以连续输入符号" else "已解锁：点一个符号就回到字母")
-            }
+            "lock" -> symbols.toggleLock()
             in CARET_ACTIONS -> caretAction(key.fn.orEmpty())
             "select_all" -> editor.contextMenu(android.R.id.selectAll)
             "copy" -> { copied(editor.copySelection(cut = false), "已复制"); editor.selectMode = false }
@@ -1572,40 +1216,10 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
 
     override fun longOptions(key: Key): List<Output> = longOptionRows(key).flatten()
 
-    /**
-     * 长按选项, grouped: symbols (the flick characters, the digit, extra punctuation) in one
-     * row right above the key, letters (both cases, accented forms) in another. Short lists
-     * stay on one row, symbols first.
-     */
+    /** 长按选项: a function key's own list, or what [LetterKeys.longOptionRows] offers for a key that types. */
     override fun longOptionRows(key: Key): List<List<Output>> {
         key.fn?.let { return listOf(fnOptions(it, key)) }
-        val m = key.main ?: return emptyList()
-        if (panel == Panel.MATH) {
-            val list = DIRS.mapNotNull { key.flicks[it] }
-            return if (list.isEmpty()) emptyList() else listOf(list + m)
-        }
-        val symbols = mutableListOf<Output>()
-        val letters = mutableListOf<Output>()
-        if (prefs.lpHints) DIRS.forEach { d -> key.flicks[d]?.let { symbols += it } }
-        if (prefs.lpDigits && panel == Panel.LETTERS) {
-            // the keys on screen (重音 and 上下标 put copies of the layout's keys there), and their
-            // top letter row, below the digits when 数字行 is on
-            val rows = lettersRows()
-            val top = if (prefs.numberRow && rows.size > 1) rows[1] else rows.firstOrNull()
-            val col = top?.indexOfFirst { it === key } ?: -1
-            if (col in 0..9) symbols += Output.of(((col + 1) % 10).toString())
-        }
-        if (prefs.lpCase && key.isLetter) {
-            val up = m.text.uppercase(); val low = m.text.lowercase()
-            if (shift > 0) { letters += Output.of(low); letters += Output.of(up) } else { letters += Output.of(up); letters += Output.of(low) }
-        }
-        if (curLang == "ru" && m.text.length == 1 && m.text[0] in VOWELS) letters += Output.of(m.text + "́")
-        for (o in key.long) if (o.text.firstOrNull()?.isLetter() == true) letters += o else symbols += o
-        val s = symbols.distinctBy { it.text }
-        val l = letters.distinctBy { it.text }.filter { o -> s.none { it.text == o.text } }
-        val all = s + l
-        if (all.isEmpty() || (all.size == 1 && all[0].text == m.text)) return emptyList()
-        return if (s.isEmpty() || l.isEmpty() || all.size <= 5) listOf(all) else listOf(s, l)
+        return letterKeys.longOptionRows(key, panel, shift, curLang) { lettersRows() }
     }
 
     private fun fnOptions(fn: String, key: Key): List<Output> = when (fn) {
@@ -1652,7 +1266,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     override fun onSwitchLanguage(direction: Int): String? {
         // 数字和符号之间左右滑空格切换, not the language
         if (panel == Panel.NUM) { showPanel(Panel.SYMBOLS); return null }
-        if (panel == Panel.SYMBOLS) { showPanel(numPanel()); return null }
+        if (panel == Panel.SYMBOLS) { showPanel(numbers.panel()); return null }
         switchLanguage(direction)
         return layout(curLang).label
     }
@@ -1772,7 +1386,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     /** The word predictor for the language in use, when it has one and it makes sense here. */
     private fun words(): WordPredictor? {
         if (isZh || !prefs.wordPredict || !wordsHere || curLang !in WordPredictor.LANGS) return null
-        return wordPredictors.getOrPut(curLang) { WordPredictor(this, curLang) }.also { it.load() }
+        return wordTables.get(curLang)
     }
 
     /** Completions of the word being typed, or after a space what may come next. */
@@ -1869,16 +1483,6 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         if (panel == Panel.CANDIDATES) showPanel(Panel.CANDIDATES)
     }
 
-    /** The tone rows of the opened candidates, or none (声调筛选 off, nothing to narrow). */
-    private fun syncToneTabs() {
-        val rows = if (prefs.toneFilter) toneFilter.rows() else null
-        syllableTabs.visibility = if (rows?.syllables != null) View.VISIBLE else View.GONE
-        toneTabs.visibility = if (rows != null) View.VISIBLE else View.GONE
-        if (rows == null) return
-        rows.syllables?.let { syllableTabs.setTabs(it, rows.syllable) }
-        toneTabs.setTabs(rows.tones, rows.tone)
-    }
-
     /** Up to [n] candidates with their comments, narrowed by the tones picked. */
     private fun zhCandidates(n: Int) = toneFilter.candidates(n, TONE_POOL)
 
@@ -1927,15 +1531,10 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         if (index < 0) predictionOption(-1 - index, option) else barToRime(index)?.let { zhOption(it, option) }
     }
 
-    /** [word] as a menu names it: six characters at most. */
-    private fun menuName(word: String) =
-        if (word.codePointCount(0, word.length) > 6) word.substring(0, word.offsetByCodePoints(0, 5)) + "…" else word
-
-    /** An association held: put it in as it is, or never offer it again (and forget it was learned). */
+    /** An association held: see [CandidateMenus.prediction]. */
     private fun predictionOptions(i: Int): List<Output> {
         val word = predictions.getOrNull(i) ?: return emptyList()
-        val shown = menuName(word)
-        return listOf(Output("取消", "§cancel"), Output("上屏「$shown」", "§type"), Output("不再联想「$shown」", "§mute"))
+        return CandidateMenus.prediction(word)
     }
 
     private fun predictionOption(i: Int, option: Output) {
@@ -1954,13 +1553,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
 
     private fun zhOptions(index: Int): List<Output> {
         val word = RimeBridge.menu(rimeIndex(index) + 1).texts.getOrNull(rimeIndex(index)) ?: return emptyList()
-        val shown = menuName(word)
-        val chars = word.codePoints().toArray().filter { Character.UnicodeScript.of(it) == Character.UnicodeScript.HAN }
-        // 以词定字: a character of a word, the rest of the pinyin stays
-        val pick = if (word.codePointCount(0, word.length) >= 2 && chars.size >= 2) listOf(
-            Output("取首字「${String(Character.toChars(chars.first()))}」", "§first"),
-            Output("取末字「${String(Character.toChars(chars.last()))}」", "§last")) else emptyList()
-        return listOf(Output("取消", "§cancel")) + pick + Output("不再优先「$shown」", "§forget") + Output("不再出现「$shown」", "§mute")
+        return CandidateMenus.zh(word)
     }
 
     private fun zhOption(index: Int, option: Output) {
@@ -2099,13 +1692,6 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     }
 
     internal companion object {
-        /** 运算符列 of the standard number pad: five on screen, the rest by scrolling. */
-        val NUM_OPS = listOf("+", "−", "×", "÷", "=", "%", "(", ")", "/", ",", "±")
-        /** 电话 fields: what goes in a phone number (and the * and # of a dial pad). */
-        val PHONE_OPS = listOf("+", "-", " ", "*", "#", "(", ")", ",", ";")
-        val DATE_OPS = listOf("-", "/", ":", " ", ".")
-        val DIRS = listOf(Dir.UP, Dir.DOWN, Dir.LEFT, Dir.RIGHT)
-        const val VOWELS = "аеёиоуыэюя"
         val CARET_ACTIONS = setOf("left", "right", "up", "down", "word_left", "word_right", "home", "end")
         /** Candidates fetched for the bar at first: more than fit; the row asks for more as it is scrolled. */
         const val CANDIDATES_ON_BAR = 20
@@ -2120,14 +1706,5 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         /** 声调筛选 in the opened candidates. */
         const val XK_BRACKETLEFT = 0x5b
         const val XK_BRACKETRIGHT = 0x5d
-        /** Quick-panel tools that open 雾凇's own candidates: tile → what is typed for them. */
-        val RIME_TOOLS = linkedMapOf("date" to "rq", "time" to "sj", "week" to "xq", "lunar" to "nl")
-        val PASSWORDS = setOf(InputType.TYPE_TEXT_VARIATION_PASSWORD, InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD, InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD)
-        val PASSWORD_WORDS = listOf("密码", "password", "passcode", "пароль", "口令")
-        val ACCOUNT_WORDS = listOf("邮箱", "电子邮件", "email", "e-mail", "账号", "帐号", "用户名", "username", "user name", "login", "登录名",
-            "почта", "логин", "网址", "url", "域名")
-        /** Apps whose text fields are account names and the like (Google's sign-in). */
-        val ACCOUNT_APPS = setOf("com.google.android.gms", "com.google.android.gsf.login")
-        val ADDRESSES = setOf(InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS, InputType.TYPE_TEXT_VARIATION_URI, InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS)
     }
 }
