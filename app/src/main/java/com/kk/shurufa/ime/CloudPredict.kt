@@ -45,7 +45,8 @@ class CloudPredict(private val prefs: Prefs, private val onReady: () -> Unit) {
         val count = prefs.cloudCount
         ask.ask(key, prefs.cloudPauseMs.toLong(), { cancelled -> Llm.completeQuick(prefs, target, system(count), key, cancelled) }) { raw ->
             val list = parse(raw.orEmpty(), key, count)
-            cache[key] = list
+            // a request that failed (no answer at all) is asked again next time; an answer is kept
+            if (raw != null) cache[key] = list
             if (list.isNotEmpty()) { forText = key; answer = list; onReady() }
         }
     }

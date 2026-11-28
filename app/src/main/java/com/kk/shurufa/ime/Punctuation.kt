@@ -24,21 +24,31 @@ class Punctuation(private val editor: Editor, private val prefs: Prefs, private 
     }
 
     private var lastPeriodAt = 0L
+    /** When the last ellipsis was made from periods: a third tap right after it is taken into it. */
+    private var ellipsisAt = 0L
 
     /**
-     * 双击句号: the period tapped again right away becomes an ellipsis, 。。→ …… and .. → …
-     * Returns the ellipsis when it made one (and the tap is used up).
+     * 双击句号: the period tapped again right away becomes an ellipsis, 。。→ …… and .. → …; a
+     * third tap right after that is taken into the ellipsis (... stays …, not ….).
+     * Returns the ellipsis and the periods typed for it when the tap was used up, else null.
      */
-    fun ellipsis(t: String): String? {
+    fun ellipsis(t: String): Pair<String, String>? {
         val now = SystemClock.uptimeMillis()
         val quick = now - lastPeriodAt < DOUBLE_PERIOD_MS
+        val third = now - ellipsisAt < DOUBLE_PERIOD_MS
         lastPeriodAt = if (t == "。" || t == ".") now else 0L
-        if (!prefs.doublePeriodEllipsis || !quick || (t != "。" && t != ".")) return null
-        if (editor.textBefore(1) != t) return null
-        lastPeriodAt = 0L
+        ellipsisAt = 0L
+        if (!prefs.doublePeriodEllipsis || (t != "。" && t != ".")) return null
         val made = if (t == "。") "……" else "…"
+        if (third && editor.textBefore(made.length) == made) {
+            lastPeriodAt = 0L
+            return made to t + t + t
+        }
+        if (!quick || editor.textBefore(1) != t) return null
+        lastPeriodAt = 0L
+        ellipsisAt = now
         editor.replaceBefore(1, made)
-        return made
+        return made to t + t
     }
 
     /** A mark made half-width after a digit (",", "，"), until something else is typed after it. */

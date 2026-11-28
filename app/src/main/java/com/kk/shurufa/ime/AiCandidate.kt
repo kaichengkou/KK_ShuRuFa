@@ -37,7 +37,7 @@ class AiCandidate(private val prefs: Prefs, private val onReady: () -> Unit) {
         val context = before().takeLast(prefs.aiCandContext)
         // a moment's rest first: no request for every letter
         ask.ask(input, prefs.aiCandPauseMs.toLong(), { cancelled ->
-            Llm.completeQuick(prefs, target, SYSTEM, "Context: $context\nRime's first guess: $first\nPinyin: $input", cancelled)
+            Llm.completeQuick(prefs, target, system(prefs.zhTraditional), "Context: $context\nRime's first guess: $first\nPinyin: $input", cancelled)
         }) { res ->
             val r = res?.trim()?.lineSequence()?.firstOrNull()?.trim().orEmpty()
             if (looksRight(r, first)) { forInput = input; answer = r; onReady() }
@@ -53,10 +53,10 @@ class AiCandidate(private val prefs: Prefs, private val onReady: () -> Unit) {
     }
 
     companion object {
-        private const val SYSTEM =
+        private fun system(traditional: Boolean) =
             "You turn pinyin typed on a phone keyboard into Chinese. The pinyin has no tones; syllables may be " +
                 "shortened to initials and may contain a small typo. Using the text already written before it as " +
-                "context, and the input method's own first guess as a hint, give the single most likely Simplified " +
+                "context, and the input method's own first guess as a hint, give the single most likely ${if (traditional) "Traditional" else "Simplified"} " +
                 "Chinese for the whole pinyin: natural, as a native speaker would write it, punctuation only where " +
                 "clearly meant. Reply with that text only."
     }

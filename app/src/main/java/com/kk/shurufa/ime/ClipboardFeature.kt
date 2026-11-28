@@ -1,5 +1,6 @@
 package com.kk.shurufa.ime
 
+import com.kk.shurufa.keyboard.Ui
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -162,7 +163,7 @@ class ClipboardFeature(private val host: Host) {
         favs.friction = prefs.clipFriction
         favs.columns = prefs.clipColumns
         // narrower cards use slightly smaller text so a line still holds a few words
-        favs.textSp = when (prefs.clipColumns) { 2 -> 13.5f; 3 -> 12.5f; else -> 11.5f }
+        favs.textSp = when (prefs.clipColumns) { 2 -> Ui.LABEL; 3 -> Ui.SMALL; else -> Ui.CAPTION }
     }
 
     fun refresh(keep: Boolean = false) {
@@ -255,11 +256,14 @@ class ClipHistory(private val file: File, private val keep: () -> Int) {
 
     private fun save() {
         val snapshot = list.joinToString("\u0002") { (if (it.pinned) "1" else "0") + it.text }
-        Background.run { file.writeText(snapshot) }
+        // written beside the file and moved over it: a write cut short never takes the 收藏 with it
+        Background.run { val tmp = File(file.path + ".tmp"); tmp.writeText(snapshot); if (!tmp.renameTo(file)) { file.delete(); tmp.renameTo(file) } }
     }
 
-    fun add(text: String) {
-        if (text.isBlank()) return
+    fun add(text0: String) {
+        if (text0.isBlank()) return
+        // a whole article copied is kept to its first part: the history is written out on every copy
+        val text = if (text0.length > MAX_CHARS) text0.substring(0, text0.offsetByCodePoints(0, text0.codePointCount(0, MAX_CHARS))) else text0
         val pinned = list.firstOrNull { it.text == text }?.pinned ?: false
         list.removeAll { it.text == text }
         list.add(0, Entry(text, pinned))
@@ -286,6 +290,9 @@ class ClipHistory(private val file: File, private val keep: () -> Int) {
     data class Kind(val name: String, val value: String)
 
     companion object {
+        /** The longest text kept of one copy. */
+        const val MAX_CHARS = 20_000
+
         /** The kinds the panel can filter by, in the order its tabs show them. */
         val KINDS = listOf("图片", "验证码", "链接", "号码", "邮箱", "公式")
 
@@ -302,7 +309,8 @@ class ClipHistory(private val file: File, private val keep: () -> Int) {
         /** What [t] looks like, with the part of it worth pasting on its own; null for plain text. */
         fun classify(t: String): Kind? {
             if (ClipImages.isImage(t)) return Kind("图片", t)
-            val s = t.trim()
+            // a long text is judged by its start: the panel classifies every clip each time it shows
+            val s = t.trim().let { if (it.length > 2000) it.substring(0, 2000) else it }
             if (s.isEmpty()) return null
             // a code: the whole clip, or a 4–8 digit run in a message that says it is one
             if (s.length <= 8 && DIGITS.matches(s)) return Kind("验证码", s)

@@ -35,6 +35,10 @@ data class KbTheme(
     val shadow: Int,
     val divider: Int,
 ) {
+    /** Status marks (a dot, a short word): fine, and worth a look. The same two everywhere they show. */
+    val good: Int get() = if (dark) 0xFF6CC497.toInt() else 0xFF3E9B6A.toInt()
+    val caution: Int get() = if (dark) 0xFFE8B260.toInt() else 0xFFC98A1E.toInt()
+
     companion object {
         /**
          * Accent presets: id to (name, (light, dark)). Named and mixed after 中国传统色; each dark

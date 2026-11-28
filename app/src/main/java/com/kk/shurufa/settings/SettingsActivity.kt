@@ -248,11 +248,7 @@ private fun Home(prefs: Prefs, list: androidx.compose.foundation.lazy.LazyListSt
         item {
             // the app's own key, as on the home screen, beside its name
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 18.dp)) {
-                Box(Modifier.size(56.dp).clip(RoundedCornerShape(17.dp))
-                    .background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(androidx.compose.ui.graphics.Color(0xFFC3D8E6), androidx.compose.ui.graphics.Color(0xFFC3D8E6)))),
-                    contentAlignment = Alignment.Center) {
-                    androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(R.drawable.ic_launcher_foreground), null, modifier = Modifier.requiredSize(84.dp))
-                }
+                AppIcon(56.dp)
                 Spacer(Modifier.width(16.dp))
                 Column {
                     Text("KK输入法", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)

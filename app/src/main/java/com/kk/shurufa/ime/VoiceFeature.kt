@@ -32,6 +32,8 @@ class VoiceFeature(private val host: Host, private val translate: TranslateServi
     private var spoke = false
     private var lastInsert = ""
     private val release = Runnable { recognizer?.releaseModels() }
+    /** Counts the panel's openings: a translation that comes back after the panel was left goes nowhere. */
+    private var opened = 0
 
     fun build(): View {
         view = VoicePanel(host.context, prefs).apply {
@@ -126,6 +128,7 @@ class VoiceFeature(private val host: Host, private val translate: TranslateServi
 
     /** Opening the panel starts listening right away, when it can. */
     fun onOpened() {
+        opened++
         handler.removeCallbacks(release)
         syncChips()
         view.partial = ""
@@ -147,6 +150,7 @@ class VoiceFeature(private val host: Host, private val translate: TranslateServi
 
     /** The panel was left: stop listening, and let the models go a minute later. */
     fun onClosed() {
+        opened++
         recognizer?.cancel()
         scheduleRelease()
     }
@@ -187,7 +191,9 @@ class VoiceFeature(private val host: Host, private val translate: TranslateServi
         if (text.isBlank()) { host.editor.finishComposingText(); return }
         if (translating) {
             view.partial = text
+            val at = opened
             translate.translate(text, lang(), prefs.translateTarget) { r ->
+                if (at != opened || host.panel != Panel.VOICE) return@translate
                 r.onSuccess { insert(it) }.onFailure { view.status = it.message ?: "翻译失败" }
             }
             return

@@ -132,7 +132,7 @@ class TranslateStrip(context: Context, prefs: Prefs) : KbView(context, prefs) {
     }
 
     private fun textW(w: Int): Int {
-        val bw = action?.let { chipWidth(it.second, textSp = Ui.SMALL + 1f) + dp(10f) } ?: 0f
+        val bw = action?.let { chipWidth(it.second, textSp = Ui.LABEL) + dp(10f) } ?: 0f
         return (w - 2 * dp(Ui.EDGE) - dp(28f) - bw).toInt().coerceAtLeast(1)
     }
 
@@ -180,18 +180,18 @@ class TranslateStrip(context: Context, prefs: Prefs) : KbView(context, prefs) {
         hits.add("engine", r, slop = dp(4f))
         val engineLeft = r.left
         var x = cardL + dp(8f)
-        val mw = chipWidth(modeLabel, chevron = true, textSp = Ui.SMALL + 1f)
+        val mw = chipWidth(modeLabel, chevron = true, textSp = Ui.LABEL)
         r.set(x, hy, x + mw, hy + hh)
-        drawChip(c, r, modeLabel, ChipStyle.ACTIVE, pressed = pressed == "mode" || picking == "mode", chevron = true, textSp = Ui.SMALL + 1f)
+        drawChip(c, r, modeLabel, ChipStyle.ACTIVE, pressed = pressed == "mode" || picking == "mode", chevron = true, textSp = Ui.LABEL)
         hits.add("mode", r, slop = dp(4f))
         x = r.right + dp(6f)
         if (optLabel.isNotEmpty()) {
             val swapW = if (showSwap) hh + dp(8f) else 0f
             val room = engineLeft - dp(8f) - x - swapW
-            val label = fit(optLabel, room, Ui.SMALL + 1f)
-            val ow = chipWidth(label, chevron = true, textSp = Ui.SMALL + 1f)
+            val label = fit(optLabel, room, Ui.LABEL)
+            val ow = chipWidth(label, chevron = true, textSp = Ui.LABEL)
             r.set(x, hy, x + ow, hy + hh)
-            drawChip(c, r, label, if (picking == "opt") ChipStyle.ACTIVE else ChipStyle.SOFT, pressed = pressed == "opt", chevron = true, textSp = Ui.SMALL + 1f)
+            drawChip(c, r, label, if (picking == "opt") ChipStyle.ACTIVE else ChipStyle.SOFT, pressed = pressed == "opt", chevron = true, textSp = Ui.LABEL)
             hits.add("opt", r, slop = dp(4f))
             if (showSwap) {
                 r.set(r.right + dp(2f), hy, r.right + dp(2f) + hh + dp(6f), hy + hh)
@@ -232,7 +232,7 @@ class TranslateStrip(context: Context, prefs: Prefs) : KbView(context, prefs) {
 
     private fun drawChoices(c: Canvas, l: Float, top: Float, right: Float, h: Float, list: PickList) {
         chipRow.set(l - dp(4f), top, right + dp(4f), top + h)
-        val ch = dp(30f); val gap = dp(6f)
+        val ch = minOf(dp(Ui.CHIP_H), h - dp(4f)); val gap = dp(6f)
         var x = l
         val y = top + (h - ch) / 2
         c.save(); c.clipRect(chipRow)
@@ -240,10 +240,10 @@ class TranslateStrip(context: Context, prefs: Prefs) : KbView(context, prefs) {
             val mine = item.sub == "我的"
             // one of 我的 makes room for its ✕ at the end
             val label = if (mine) item.name + "　" else item.name
-            val w = chipWidth(label, textSp = Ui.SMALL + 1f)
+            val w = chipWidth(label, textSp = Ui.LABEL)
             r.set(x - chipScroll, y, x - chipScroll + w, y + ch)
             if (r.right > chipRow.left && r.left < chipRow.right) {
-                drawChip(c, r, label, if (item.id == list.current || item.sub == "当前") ChipStyle.ACTIVE else ChipStyle.SOFT, pressed = pressed == "pick:${item.id}", textSp = Ui.SMALL + 1f)
+                drawChip(c, r, label, if (item.id == list.current || item.sub == "当前") ChipStyle.ACTIVE else ChipStyle.SOFT, pressed = pressed == "pick:${item.id}", textSp = Ui.LABEL)
                 hits.add("pick:${item.id}", maxOf(r.left, chipRow.left), r.top, minOf(r.right, chipRow.right), r.bottom)
                 if (mine) {
                     val cx = r.right - dp(15f); val cy = r.centerY(); val d = dp(3.4f)
@@ -266,7 +266,7 @@ class TranslateStrip(context: Context, prefs: Prefs) : KbView(context, prefs) {
         val t = theme
         val clearW = if (source.isNotEmpty() && !sourceIsSelection) dp(28f) else 0f
         val tagW = when {
-            source.isEmpty() && !sourceIsSelection && insertable.isNotEmpty() -> chipWidth("一键插入", icon = "clipboard", textSp = Ui.SMALL + 1f)
+            source.isEmpty() && !sourceIsSelection && insertable.isNotEmpty() -> chipWidth("一键插入", icon = "clipboard", textSp = Ui.LABEL)
             sourceTag.isNotEmpty() -> tagWidth(sourceTag)
             else -> 0f
         }
@@ -310,7 +310,7 @@ class TranslateStrip(context: Context, prefs: Prefs) : KbView(context, prefs) {
         if (source.isEmpty() && !sourceIsSelection && insertable.isNotEmpty()) {
             // 一键插入: the box is empty, and there is something to work on at hand
             r.set(innerR - tagW, innerT + (inputH - btnH) / 2, innerR, innerT + (inputH + btnH) / 2)
-            drawChip(c, r, "一键插入", ChipStyle.SOFT, pressed = pressed == "insert", icon = "clipboard", textSp = Ui.SMALL + 1f)
+            drawChip(c, r, "一键插入", ChipStyle.SOFT, pressed = pressed == "insert", icon = "clipboard", textSp = Ui.LABEL)
             hits.add("insert", r, slop = dp(6f))
         } else if (sourceTag.isNotEmpty()) drawTag(c, sourceTag, innerR, innerT + inputH / 2)
     }
@@ -326,10 +326,10 @@ class TranslateStrip(context: Context, prefs: Prefs) : KbView(context, prefs) {
         val room = innerB - resT
         c.save(); c.clipRect(innerL, resT, innerR, innerB); c.translate(innerL, resT + ((room - rl.height) / 2).coerceAtLeast(dp(6f))); rl.draw(c); c.restore()
         action?.let { (id, label) ->
-            val w = chipWidth(label, textSp = Ui.SMALL + 1f)
+            val w = chipWidth(label, textSp = Ui.LABEL)
             val top = resT + ((room - btnH) / 2).coerceAtMost(dp(30f))
             r.set(innerR - w, top, innerR, top + btnH)
-            drawChip(c, r, label, ChipStyle.PRIMARY, pressed = pressed == "b:$id", textSp = Ui.SMALL + 1f)
+            drawChip(c, r, label, ChipStyle.PRIMARY, pressed = pressed == "b:$id", textSp = Ui.LABEL)
             hits.add("b:$id", r, slop = dp(6f))
         }
     }
@@ -338,7 +338,7 @@ class TranslateStrip(context: Context, prefs: Prefs) : KbView(context, prefs) {
     private val srcBox = RectF()
     private val srcOrigin = android.graphics.PointF()
     private val tagPaint = TextPaint(Paint.ANTI_ALIAS_FLAG)
-    private fun tagWidth(s: String): Float { tagPaint.textSize = sp(Ui.SMALL - 1f); return tagPaint.measureText(s) + dp(14f) }
+    private fun tagWidth(s: String): Float { tagPaint.textSize = sp(Ui.CAPTION); return tagPaint.measureText(s) + dp(14f) }
     private fun drawTag(c: Canvas, s: String, right: Float, cy: Float) {
         val w = tagWidth(s); val h = dp(20f)
         r.set(right - w, cy - h / 2, right, cy + h / 2)
@@ -430,7 +430,7 @@ class TranslateStrip(context: Context, prefs: Prefs) : KbView(context, prefs) {
         val list = if (picking == "mode") modes else opts
         var x = 0f
         for (item in list.items) {
-            val w = chipWidth(if (item.sub == "我的") item.name + "　" else item.name, textSp = Ui.SMALL + 1f)
+            val w = chipWidth(if (item.sub == "我的") item.name + "　" else item.name, textSp = Ui.LABEL)
             if (item.id == list.current || item.sub == "当前") { chipScroll = (x - dp(40f)).coerceAtLeast(0f); return }
             x += w + dp(6f)
         }

@@ -51,7 +51,7 @@ class FloatPills(context: Context, prefs: Prefs) : KbView(context, prefs) {
 
     private val tabH get() = dp(36f)
     private val gap get() = dp(4f)
-    private val textSize get() = sp(Ui.BODY + 1f)
+    private val textSize get() = sp(Ui.EMPHASIS)
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val rows = max(1, right.size)
@@ -71,7 +71,7 @@ class FloatPills(context: Context, prefs: Prefs) : KbView(context, prefs) {
         hits.clear(); tabRects.clear()
         val t = theme
         // translucent, so the app shows through: dark glass by day, light glass at night
-        val fill = if (t.dark) Colors.alpha(0xFFFFFFFF.toInt(), 0x2E) else Colors.alpha(0xFF3A3A3A.toInt(), 0x8C)
+        val fill = if (t.dark) Colors.alpha(0xFFFFFFFF.toInt(), 0x2E) else Colors.alpha(t.ink, 0x8C)
         val ink = if (t.dark) t.ink else 0xFFFFFFFF.toInt()
         val pad = dp(11f)
         val maxW = width * 0.62f

@@ -78,12 +78,14 @@ class Kay(private val context: Context, private val prefs: Prefs) {
      * what is known of tomorrow and how today went. Nothing typed is sent.
      */
     fun prefetch(now: LocalTime = LocalTime.now(), today: LocalDate = LocalDate.now()) {
-        if (!prefs.kayAiGreet || now.hour < 18) return
+        // the line is for the greeting: none asked for while greetings are off
+        if (!prefs.kayGreet || !prefs.kayAiGreet || now.hour < 18) return
         val tomorrow = today.plusDays(1)
         val st = prefs.state
         if (st.getString(Prefs.KAY_LINE_FOR, "") == tomorrow.toString() || st.getString(Prefs.KAY_ASKED, "") == today.toString()) return
         val target = Llm.resolve(prefs, prefs.quickTarget.ifEmpty { prefs.aiProvider }) ?: return
-        if (!com.kk.shurufa.online.AiBudget.mayAsk()) return
+        // like 云联想: within the budget, and only on Wi-Fi when that is asked for
+        if (!com.kk.shurufa.online.AiBudget.mayAsk() || !prefs.quickAiNetworkOk()) return
         st.edit().putString(Prefs.KAY_ASKED, today.toString()).apply()
         val facts = KayLines.facts(tomorrow, age(tomorrow), TypingStats.get(context).snapshot().days[today.toString()]?.total ?: 0)
         val recent = listOfNotNull(st.getString(Prefs.KAY_LINE, null))
@@ -114,7 +116,8 @@ class Kay(private val context: Context, private val prefs: Prefs) {
         val st = prefs.state
         if (st.getString(Prefs.KAY_CHATTER_FOR, "") == today || st.getString(Prefs.KAY_CHATTER_ASKED, "") == today) return
         val target = Llm.resolve(prefs, prefs.quickTarget.ifEmpty { prefs.aiProvider }) ?: return
-        if (!com.kk.shurufa.online.AiBudget.mayAsk()) return
+        // like 云联想: within the budget, and only on Wi-Fi when that is asked for
+        if (!com.kk.shurufa.online.AiBudget.mayAsk() || !prefs.quickAiNetworkOk()) return
         st.edit().putString(Prefs.KAY_CHATTER_ASKED, today).apply()
         val facts = KayLines.facts(LocalDate.now(), age(), 0)
         Background.download({

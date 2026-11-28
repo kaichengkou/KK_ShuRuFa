@@ -342,9 +342,9 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
             it.onStickyChanged = { root.requestLayout() }
         }
         bar = CandidateBar(this, prefs).also { it.theme = kbTheme; it.listener = this; it.overlay = overlay }
-        // 按住工具栏拖动: with a resizable panel open, the toolbar works as its grab bar too
+        // 按住工具栏拖动: with a resizable panel open (剪贴板, the opened candidates), the bar works as its grab bar too
         bar.onVerticalDrag = { phase, rawY, v ->
-            val h = if (panel == Panel.CLIPBOARD) clipboard.handle else null
+            val h = when (panel) { Panel.CLIPBOARD -> clipboard.handle; Panel.CANDIDATES -> candidates.handle; else -> null }
             if (h != null) when (phase) { 0 -> h.begin(rawY); 1 -> h.drag(rawY); else -> h.end(v) }
         }
         content = FrameLayout(this)
@@ -709,7 +709,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         }
         if (entering && p != Panel.LETTERS && p != Panel.PHONE && p != Panel.QUICK) motion.animateIn(content.getChildAt(0))
         bar.expanded = p == Panel.CANDIDATES
-        bar.activeTool = when (sink) { Sink.EMOJI -> "emoji"; Sink.TRANSLATE -> if (translate.mode == "translate") "translate" else "ai"; Sink.AI -> "ai"; null -> toolFor(p) }
+        bar.activeTool = when (sink) { Sink.EMOJI -> "emoji"; Sink.TRANSLATE -> if (translate.mode == "translate") "translate" else "ai"; null -> toolFor(p) }
         syncBar()
         motion.animateHeight(oldTotal, if (noBar) 0 else barH, root.width, navInset)
     }
@@ -742,10 +742,6 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
             panel == Panel.NUM -> bar.showMath(prefs.mathFormat, simple = true)
             // a query the user opened comes first: it works without the Chinese engine
             s == Sink.TRANSLATE && !composing && letters -> { bar.showToolbar(); translate.sync() }
-            s == Sink.AI && !composing && letters -> {
-                val q = query.toString()
-                bar.showQuery("AI 指令", q, "说说想怎么改，比如“改成适合发朋友圈的语气”", if (q.isBlank()) null else "执行")
-            }
             greeting != null && s == null && letters && !composing && predictions.isEmpty() -> bar.showGreeting(greeting!!, Llm.resolve(prefs, prefs.quickTarget.ifEmpty { prefs.aiProvider }) != null)
             s == Sink.EMOJI && !composing && letters -> showEmojiSearch()
             isZh && RimeEngine.state == RimeEngine.State.DEPLOYING && letters -> bar.showMessage("正在部署雾凇拼音词库，首次约需一分钟…", busy = true)
@@ -1023,7 +1019,9 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         val info = currentInputEditorInfo
         val cls = (info?.inputType ?: 0) and InputType.TYPE_MASK_CLASS
         val caps = panel == Panel.LETTERS && !isZh && prefs.autoCap && cls == InputType.TYPE_CLASS_TEXT && plainField && run {
-            val before = currentInputConnection?.getTextBeforeCursor(3, 0)?.toString() ?: return@run false
+            // through the editor's read of the field, which the rest of the key's work shares
+            if (currentInputConnection == null) return@run false
+            val before = editor.textBefore(3)
             val t = before.trimEnd(' ')
             t.isEmpty() || t.last() in ".!?…\n。！？" && (before.endsWith(" ") || t.last() == '\n')
         }
@@ -1117,8 +1115,8 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
 
     /** 双击句号; true when the tap made an ellipsis (which the next backspace takes back). */
     private fun ellipsis(t: String): Boolean {
-        val made = punct.ellipsis(t) ?: return false
-        corrected = Correction(made, t + t, "", isWord = false)
+        val (made, typed) = punct.ellipsis(t) ?: return false
+        corrected = Correction(made, typed, "", isWord = false)
         return true
     }
 
@@ -1165,7 +1163,6 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
             }
             "enter" -> when {
                 composing -> rimeKey(RimeBridge.XK_Return)
-                sink == Sink.AI -> runInstruction()
                 sink == Sink.TRANSLATE -> translate.enter()
                 sink == Sink.EMOJI -> searchResults.firstOrNull()?.let { emoji.type(it) }
                 else -> {
@@ -1317,6 +1314,32 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         haptics.click(key.fn)
     }
 
+    // ---- the back key: a layer closes before the keyboard does ----
+
+    private var backTaken = false
+
+    /** What the back key closes first, if anything is open over the letters; true when it closed something. */
+    private fun backOneLayer(): Boolean {
+        if (!built || !isInputViewShown) return false
+        if (overlay.sticky) { overlay.dismissSticky(); return true }
+        if (sink != null) { closeSink(); return true }
+        if (panel in BACK_CLOSES) {
+            if (panel == Panel.CANDIDATES) toneFilter.reset()
+            showPanel(Panel.LETTERS); return true
+        }
+        return false
+    }
+
+    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
+        if (keyCode == KeyEvent.KEYCODE_BACK && event.repeatCount == 0 && backOneLayer()) { backTaken = true; return true }
+        return super.onKeyDown(keyCode, event)
+    }
+
+    override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
+        if (keyCode == KeyEvent.KEYCODE_BACK && backTaken) { backTaken = false; return true }
+        return super.onKeyUp(keyCode, event)
+    }
+
     // ---- the bar's listener -------------------------------------------------------------
 
     override fun onTool(id: String) {
@@ -1332,6 +1355,8 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         }
         // a second tap on the same button closes its panel (or its query)
         if (target != null && panel == target && sink == null) { showPanel(Panel.LETTERS); return }
+        // …the same for the lit button of an open strip: ✦ closes 改写 and 聊天 as 译 closes 翻译
+        if (sink != null && id == bar.activeTool && id != "translate") { closeSink(); return }
         when (id) {
             "math" -> { finishComposing(); showPanel(if (panel == Panel.MATH) Panel.LETTERS else Panel.MATH) }
             "undo" -> undo()
@@ -1344,7 +1369,6 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     override fun onCandidate(index: Int) {
         // what was read of the field lasts for one key at most (the app may have changed it since)
         editor.dirty()
-        if (index < 0 && sink == Sink.AI && !composing) { runInstruction(); return }
         if (index < 0 && sink == Sink.EMOJI && !composing) { searchResults.getOrNull(-1 - index)?.let { emoji.type(it) }; return }
         if (index < 0 && cloudShown.isNotEmpty()) {
             // the bar shows the cloud's continuations, then the local suggestions without repeats
@@ -1439,10 +1463,14 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
 
     /** The word right before the caret is finished (a space or punctuation follows): learn it. */
     private fun learnWordBefore() {
-        if (!learnHere || !prefs.wordLearn) return
-        val p = words() ?: return
+        if (isZh || panel != Panel.LETTERS || !wordsHere) return
         val before = editor.textBefore(64)
         val (typed, ctx) = WordPredictor.split(before)
+        if (typed.isEmpty()) return
+        // 打字数据's word cloud: the letters were counted one by one, the word is counted here
+        editor.countWord(typed)
+        if (!learnHere || !prefs.wordLearn) return
+        val p = words() ?: return
         if (typed.length >= 2) p.learn(ctx, typed, sentenceStart = WordPredictor.sentenceStart(before.dropLast(typed.length)))
     }
 
@@ -1463,6 +1491,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         val before = editor.textBefore(64)
         val (typed, ctx) = WordPredictor.split(before)
         editor.replaceBefore(typed.length, "$word ")
+        editor.countWord(word)
         autoSpaced = true
         if (learnHere && prefs.wordLearn) p?.learn(ctx, word, sentenceStart = WordPredictor.sentenceStart(before.dropLast(typed.length)))
         updateAutoCap()
@@ -1531,20 +1560,27 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         if (index < 0) predictionOption(-1 - index, option) else barToRime(index)?.let { zhOption(it, option) }
     }
 
+    /** The word at [i] of the suggestions as the bar shows them: 云联想's continuations first, then the rest without repeats. */
+    private fun shownPrediction(i: Int): String? =
+        if (cloudShown.isEmpty()) predictions.getOrNull(i)
+        else cloudShown.getOrNull(i) ?: predictions.filter { it !in cloudShown }.getOrNull(i - cloudShown.size)
+
     /** An association held: see [CandidateMenus.prediction]. */
     private fun predictionOptions(i: Int): List<Output> {
-        val word = predictions.getOrNull(i) ?: return emptyList()
+        val word = shownPrediction(i) ?: return emptyList()
         return CandidateMenus.prediction(word)
     }
 
     private fun predictionOption(i: Int, option: Output) {
-        val word = predictions.getOrNull(i) ?: return
+        val word = shownPrediction(i) ?: return
         when (option.text) {
             "§type" -> onCandidate(-1 - i)
             "§mute" -> {
-                Muted.add(this, word)
-                zhMemory.forget(word)
+                // Russian and English words are kept off in lowercase, whatever case they showed in
+                if (isZh) { Muted.add(this, word); zhMemory.forget(word) }
+                else { Muted.add(this, word.lowercase()); words()?.forget(word) }
                 predictions = predictions.filter { it != word }
+                cloudShown = cloudShown.filter { it != word }
                 syncBar()
                 notice("「$word」不会再出现在联想里，可以在「自定义词库」里恢复")
             }
@@ -1622,8 +1658,6 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         syncBar()
     }
 
-    override fun onQueryAction() { if (sink == Sink.AI) runInstruction() }
-
     override fun onDismissSuggestions() {
         if (sink != null) { closeSink(); return }
         predictions = emptyList()
@@ -1653,7 +1687,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         showPanel(Panel.LETTERS)
         this.sink = sink
         if (sink == Sink.TRANSLATE) translate.onOpened(selection)
-        bar.activeTool = when (sink) { Sink.EMOJI -> "emoji"; Sink.TRANSLATE -> if (translate.mode == "translate") "translate" else "ai"; Sink.AI -> "ai" }
+        bar.activeTool = when (sink) { Sink.EMOJI -> "emoji"; Sink.TRANSLATE -> if (translate.mode == "translate") "translate" else "ai" }
         syncBar()
     }
 
@@ -1666,7 +1700,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
     override fun closeSink(to: Panel?) {
         val s = sink ?: return
         dropSink()
-        showPanel(to ?: when (s) { Sink.EMOJI -> Panel.EMOJI; Sink.AI -> Panel.AI; Sink.TRANSLATE -> Panel.LETTERS })
+        showPanel(to ?: when (s) { Sink.EMOJI -> Panel.EMOJI; Sink.TRANSLATE -> Panel.LETTERS })
     }
 
     /** Forgets the query without changing the panel. */
@@ -1679,19 +1713,13 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         if (s == Sink.TRANSLATE) translate.onClosed()
     }
 
-    /** ▶ 执行 or ↵ with an instruction typed: back to the AI panel, which runs it. */
-    private fun runInstruction() {
-        val instruction = query.toString().trim()
-        dropSink()
-        // instructions are typed in 小K's strip now
-        if (instruction.isNotBlank()) { translate.nextMode = "rewrite"; openSink(Sink.TRANSLATE) } else showPanel(Panel.AI)
-    }
-
     override fun openSettings(page: String?) {
         startActivity(Intent(this, SettingsActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).apply { if (page != null) putExtra("page", page) })
     }
 
     internal companion object {
+        /** The tool panels the back key closes (back to the letters) before it closes the keyboard. */
+        val BACK_CLOSES = setOf(Panel.CANDIDATES, Panel.CLIPBOARD, Panel.EMOJI, Panel.AI, Panel.VOICE, Panel.CURSOR, Panel.QUICK)
         val CARET_ACTIONS = setOf("left", "right", "up", "down", "word_left", "word_right", "home", "end")
         /** Candidates fetched for the bar at first: more than fit; the row asks for more as it is scrolled. */
         const val CANDIDATES_ON_BAR = 20

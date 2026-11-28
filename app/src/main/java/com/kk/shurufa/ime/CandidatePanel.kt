@@ -1,5 +1,6 @@
 package com.kk.shurufa.ime
 
+import com.kk.shurufa.keyboard.Ui
 import android.view.View
 import android.view.ViewGroup
 import android.widget.LinearLayout
@@ -32,7 +33,7 @@ internal class CandidatePanel(
 
     init {
         grid = GridPanel(ctx, prefs).apply {
-            theme = host.kbTheme; cellStyle = GridPanel.CellStyle.FLAT; columns = 8; rowHeightDp = 50f; textSp = 19f
+            theme = host.kbTheme; cellStyle = GridPanel.CellStyle.FLAT; columns = 8; rowHeightDp = 50f; textSp = Ui.CANDIDATE
             highlightFirst = true; overlay = host.overlay
             onItem = { i -> pick(i) }
             onFeedback = { k -> host.haptics.play(if (k == "popup") HapticEvent.POPUP else HapticEvent.LETTER) }

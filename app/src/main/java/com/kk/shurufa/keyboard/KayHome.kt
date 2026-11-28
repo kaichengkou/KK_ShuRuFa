@@ -85,6 +85,8 @@ class KayHome(context: Context, prefs: Prefs) : KbView(context, prefs) {
     private var bubbleFrom = 0
     private var bubbleAt = 0L
     private var bubbleUntil = 0L
+    /** When something last happened on the page (opened, a word said, a touch). */
+    private var activeAt = 0L
     private var bubblePop = 0L
     private var thread: List<String> = emptyList()
     private var threadAt = 0
@@ -99,6 +101,7 @@ class KayHome(context: Context, prefs: Prefs) : KbView(context, prefs) {
         posX.set(0f); posY.set(0f); act = null; homeAt = 0L; facingLeft = false
         thread = emptyList(); threadAt = 0; threads = 0; joking = false; pokes = 0
         bubble = ""; pokeTimes.clear(); override = null
+        activeAt = Motion.now()
         val opener = opener()
         postDelayed({ if (isAttachedToWindow) say(opener, 4200) }, 380)
         quietAgain(9000)
@@ -145,7 +148,7 @@ class KayHome(context: Context, prefs: Prefs) : KbView(context, prefs) {
         val now = Motion.now()
         if (from == 0 || bubble.isEmpty() || now > bubbleUntil) bubblePop = now
         bubble = text; bubbleFrom = from.coerceAtMost(text.length)
-        bubbleAt = now
+        bubbleAt = now; activeAt = now
         bubbleUntil = now + (text.length - bubbleFrom) * CHAR_MS + holdMs
         invalidate()
     }
@@ -310,7 +313,7 @@ class KayHome(context: Context, prefs: Prefs) : KbView(context, prefs) {
         // the right side: narrow; a quiet line on top (where the internet sees us, the model), the three below
         val colW = minOf(dp(150f), w * 0.36f)
         val colR = w - pad; val colL = colR - colW
-        tp.textSize = sp(Ui.SMALL - 1f); tp.typeface = Ui.regular; tp.color = t.hint
+        tp.textSize = sp(Ui.CAPTION); tp.typeface = Ui.regular; tp.color = t.hint
         val top = dp(18f)
         val info = listOfNotNull(place, provider.takeIf { it.isNotEmpty() }).joinToString("  ·  ")
         if (info.isNotEmpty()) {
@@ -319,7 +322,7 @@ class KayHome(context: Context, prefs: Prefs) : KbView(context, prefs) {
             c.drawText(shown, colR, top, tp)
             if (place != null) {
                 val dx = colR - tp.measureText(shown) - dp(7f)
-                bg.color = when (placeOk) { true -> 0xFF4CAF7A.toInt(); false -> 0xFFE0A33A.toInt(); null -> t.hint }
+                bg.color = when (placeOk) { true -> t.good; false -> t.caution; null -> t.hint }
                 c.drawCircle(dx, top - dp(4f), dp(2.6f), bg)
             }
         }
@@ -354,7 +357,7 @@ class KayHome(context: Context, prefs: Prefs) : KbView(context, prefs) {
             tp.color = Colors.fade(if (dim) t.inkSoft else t.ink, s)
             val tx = iconX + dp(17f)
             c.drawText(card.title, tx, r.centerY() - dp(1f), tp)
-            tp.textSize = sp(Ui.SMALL - 2f); tp.typeface = Ui.regular; tp.color = Colors.fade(t.hint, s)
+            tp.textSize = sp(Ui.HINT); tp.typeface = Ui.regular; tp.color = Colors.fade(t.hint, s)
             c.drawText(TextUtils.ellipsize(card.sub, tp, r.right - tx - dp(8f), TextUtils.TruncateAt.END).toString(), tx, r.centerY() + dp(14f), tp)
             c.restore()
             hits.add(card.id, r)
@@ -365,8 +368,10 @@ class KayHome(context: Context, prefs: Prefs) : KbView(context, prefs) {
         val s0 = stage(0)
         val face = minOf(dp(96f), area.width() * 0.5f, area.height() * 0.5f)
         val homeX = area.centerX(); val homeY = area.bottom - face * 0.58f
-        // breathing: a slow rise and fall, never quite still
-        val breath = sin(2 * PI.toFloat() * (now % 2600L) / 2600f)
+        // breathing: a slow rise and fall while something happens on the page (it talks, it is
+        // touched); a while after that it settles and the page stops redrawing until it acts again
+        val calm = ((BREATH_MS - (now - activeAt)) / BREATH_FADE_MS.toFloat()).coerceIn(0f, 1f)
+        val breath = sin(2 * PI.toFloat() * (now % 2600L) / 2600f) * calm
         var x = homeX + posX.value
         var y = homeY + posY.value + (1 - s0) * dp(18f) + breath * dp(2.2f)
         var rot = 0f; var sx = 1f; var sy = 1f + breath * 0.015f
@@ -398,7 +403,7 @@ class KayHome(context: Context, prefs: Prefs) : KbView(context, prefs) {
         lean += ((v * 18f).coerceIn(-12f, 12f) - lean) * 0.25f
         lastX = x; lastFrame = now
         rot += lean
-        val (pose0, _) = SharkLife.frame(now, java.time.LocalTime.now().hour, still = true)
+        val (pose0, poseWait) = SharkLife.frame(now, java.time.LocalTime.now().hour, still = true)
         val typing = bubble.isNotEmpty() && now < bubbleAt + (bubble.length - bubbleFrom) * CHAR_MS
         val held = override?.takeIf { now < overrideUntil }
         if (held == null) override = null
@@ -415,7 +420,7 @@ class KayHome(context: Context, prefs: Prefs) : KbView(context, prefs) {
         if (bubble.isNotEmpty() && now < bubbleUntil) {
             val shown = (bubbleFrom + ((now - bubbleAt) / CHAR_MS).toInt()).coerceIn(1, bubble.length)
             val text = bubble.substring(0, shown)
-            tp.textAlign = Paint.Align.LEFT; tp.textSize = sp(Ui.SMALL + 1f); tp.typeface = Ui.regular; tp.color = t.ink
+            tp.textAlign = Paint.Align.LEFT; tp.textSize = sp(Ui.LABEL); tp.typeface = Ui.regular; tp.color = t.ink
             val maxW = (area.width() - dp(16f)).toInt().coerceAtLeast(1)
             // laid out once per bubble (its size) and once per character that comes out, not per frame
             if (fullFor != bubble || fullW != maxW) {
@@ -439,7 +444,7 @@ class KayHome(context: Context, prefs: Prefs) : KbView(context, prefs) {
             c.scale(0.8f + 0.2f * pop, 0.8f + 0.2f * pop, tailX, by + bh)
             bg.color = t.surface; bg.alpha = (255 * fade * pop.coerceAtMost(1f)).toInt()
             r.set(bx, by, bx + bw, by + bh)
-            c.drawRoundRect(r, dp(12f), dp(12f), bg)
+            c.drawRoundRect(r, Ui.radiusLarge(dp(prefs.keyRadiusDp), dp(1f)), Ui.radiusLarge(dp(prefs.keyRadiusDp), dp(1f)), bg)
             tail.rewind(); tail.moveTo(tailX - dp(5f), r.bottom - 0.5f); tail.lineTo(tailX, r.bottom + dp(6f)); tail.lineTo(tailX + dp(5f), r.bottom - 0.5f); tail.close()
             c.drawPath(tail, bg)
             tp.alpha = (255 * fade).toInt()
@@ -447,10 +452,18 @@ class KayHome(context: Context, prefs: Prefs) : KbView(context, prefs) {
             c.restore()
             tp.alpha = 255
         }
-        // alive: while something moves, every frame; at rest only its slow breathing (a couple of
-        // pixels over 2.6 s) goes on, and 15 frames a second draw that as smoothly as 30 did
+        // alive: while something moves, every frame
         val moving = act != null || appear.running || pressT.running || posX.running || posY.running || abs(lean) > 0.3f
-        if (moving) postInvalidateOnAnimation() else invalidateIn(66L)
+        if (moving) { postInvalidateOnAnimation(); return }
+        // at rest: the next frame comes when something changes — a blink, the next character of
+        // the bubble, its fade, a held face ending — and while it breathes, 15 frames a second
+        var wait = poseWait
+        if (typing) wait = minOf(wait, CHAR_MS)
+        if (bubble.isNotEmpty() && now < bubbleUntil) wait = minOf(wait, (bubbleUntil - 260 - now).coerceAtLeast(16L))
+        if (held != null) wait = minOf(wait, overrideUntil - now)
+        if (homeAt > now) wait = minOf(wait, homeAt - now)
+        if (calm > 0f) wait = minOf(wait, 66L)
+        invalidateIn(wait.coerceIn(16L, 60_000L))
     }
     private var turned = false
     private var fullFor = ""; private var fullW = 0; private var fullLay: StaticLayout? = null; private var fullLineW = 0f
@@ -461,6 +474,7 @@ class KayHome(context: Context, prefs: Prefs) : KbView(context, prefs) {
     override fun onTouchEvent(e: MotionEvent): Boolean {
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
+                activeAt = Motion.now()
                 pressed = hits.at(e.x, e.y)
                 if (pressed == "poke") postDelayed(longPress, 520)
                 if (pressed != null) {
@@ -494,6 +508,9 @@ class KayHome(context: Context, prefs: Prefs) : KbView(context, prefs) {
     private companion object {
         /** A character of a bubble comes out every this many ms. */
         const val CHAR_MS = 55L
+        /** How long after the last thing on the page 小K keeps breathing, and how long it takes to settle. */
+        const val BREATH_MS = 15_000L
+        const val BREATH_FADE_MS = 2_000L
         const val THREADS_BEFORE_JOKES = 3
         const val LAST_OPEN = "kay_home_last_open"
         const val LINE_SAID = "kay_home_line_said"

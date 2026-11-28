@@ -35,7 +35,7 @@ class TypingStats private constructor(private val file: File) {
     init { runCatching { load() } }
 
     /** Counts [text] written into a field by [source]. Cheap; the splitting happens in the background. */
-    fun record(text: String, source: Source) {
+    fun record(text: String, source: Source, words: Boolean = true) {
         val n = text.codePoints().filter { !Character.isWhitespace(it) }.count().toInt()
         if (n == 0) return
         val today = LocalDate.now().toString()
@@ -46,7 +46,21 @@ class TypingStats private constructor(private val file: File) {
             hours[hour] += n
             dirty = true
         }
-        if (source == Source.TYPED || source == Source.VOICE) Background.run { tally(text) }
+        // a single character makes no word (Russian and English letters are counted as words
+        // once a word is finished, see [word]); an emoji alone still counts
+        if (words && (source == Source.TYPED || source == Source.VOICE) && (n > 1 || isEmoji(text))) Background.run { tally(text) }
+        scheduleSave()
+    }
+
+    /** A Russian or English word finished (a space or punctuation after it, or a suggestion picked): it joins the word cloud. */
+    fun word(w: String) {
+        if (!worthy(w)) return
+        synchronized(lock) {
+            val k = w.lowercase()
+            words[k] = (words[k] ?: 0) + 1
+            if (words.size > MAX_WORDS * 2) prune()
+            dirty = true
+        }
         scheduleSave()
     }
 

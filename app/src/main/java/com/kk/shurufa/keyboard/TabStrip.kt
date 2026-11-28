@@ -49,7 +49,7 @@ class TabStrip(context: Context, prefs: Prefs) : KbView(context, prefs) {
     /** Left edge of tab [i]; one past the last gives the right edge of the last. */
     private fun edge(i: Int): Float {
         if (!compact) return dp(4f) + i * slot
-        mp.textSize = sp(Ui.SMALL + 1f); mp.typeface = Ui.medium
+        mp.textSize = sp(Ui.LABEL); mp.typeface = Ui.medium
         var x = dp(Ui.EDGE - 4f)
         for (k in 0 until i.coerceAtMost(tabs.size)) x += mp.measureText(tabs[k].second) + dp(26f)
         return x
@@ -73,7 +73,7 @@ class TabStrip(context: Context, prefs: Prefs) : KbView(context, prefs) {
         val r = at(p) { edge(it + 1) } - dp(3f)
         bg.color = theme.accentSoft
         c.drawRoundRect(l, top, r, bottom, (bottom - top) / 2, (bottom - top) / 2, bg)
-        tp.textSize = sp(if (compact) Ui.SMALL + 1f else Ui.BODY)
+        tp.textSize = sp(if (compact) Ui.LABEL else Ui.BODY)
         tabs.forEachIndexed { i, (_, name) ->
             // the label takes the accent as the highlight arrives under it
             val near = (1f - abs(p - i)).coerceIn(0f, 1f)

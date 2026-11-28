@@ -125,7 +125,7 @@ class PopupOverlay(context: Context, prefs: Prefs) : KbView(context, prefs) {
             }
             rows = lines; widths = lw
         } else {
-            fontPx = sp(22f); text.textSize = fontPx; text.typeface = Ui.regular
+            fontPx = sp(Ui.KEY); text.textSize = fontPx; text.typeface = Ui.regular
             val widest = all.maxOf { text.measureText(it.label) }
             var cw = max(max(key.width() * 0.92f, dp(40f)), widest + dp(16f))
             if (floor(avail / cw).toInt() < 1) cw = avail

@@ -1,5 +1,6 @@
 package com.kk.shurufa.ime
 
+import com.kk.shurufa.keyboard.Ui
 import android.os.SystemClock
 import android.view.View
 import android.view.ViewGroup
@@ -43,7 +44,7 @@ class SymbolsFeature(private val host: Host) {
         val panel = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
         val top = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
         rail = GridPanel(ctx, prefs).apply {
-            theme = host.kbTheme; columns = 1; rowHeightDp = 38f; textSp = 14f; cellStyle = GridPanel.CellStyle.RAIL
+            theme = host.kbTheme; columns = 1; rowHeightDp = 38f; textSp = Ui.BODY; cellStyle = GridPanel.CellStyle.RAIL
             onItem = { i -> cat = catIds().getOrElse(i) { "recent" }; refresh() }
             onFeedback = { host.haptics.play(HapticEvent.FUNCTION) }
         }

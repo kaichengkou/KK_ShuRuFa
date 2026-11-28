@@ -130,6 +130,18 @@ object Llm {
         val id = targetId(target); val m = targetModel(prefs, target)
         if (!configured(prefs, id)) error("还没有设置 ${provider(id).title} 的 API Key")
         val think = prefs.aiThinking
+        // an answer that comes late is no use while typing: short timeouts, so a stalled request
+        // does not hold its thread (and the text it was for) for a minute and a half
+        quick.set(true)
+        try { return completeQuickRun(prefs, id, m, system, user, cancelled, think) } finally { quick.set(false) }
+    }
+
+    /** Set on the thread of a [completeQuick] request: [post] uses the short timeouts. */
+    private val quick = ThreadLocal.withInitial { false }
+    private const val QUICK_CONNECT_MS = 4_000
+    private const val QUICK_READ_MS = 8_000
+
+    private fun completeQuickRun(prefs: Prefs, id: String, m: String, system: String, user: String, cancelled: () -> Boolean, think: String): String {
         return when (protocol(prefs, id)) {
             "claude" -> try {
                 claude(key(prefs, id), m, system, user, {}, cancelled, if (id == "claude") null else base(prefs, id), think)
@@ -486,7 +498,8 @@ object Llm {
     private fun post(url: String, headers: Map<String, String>, body: JSONObject): HttpURLConnection {
         val c = URL(url).openConnection() as HttpURLConnection
         c.requestMethod = "POST"; c.doOutput = true
-        c.connectTimeout = 15000; c.readTimeout = 90000
+        if (quick.get()) { c.connectTimeout = QUICK_CONNECT_MS; c.readTimeout = QUICK_READ_MS }
+        else { c.connectTimeout = 15000; c.readTimeout = 90000 }
         c.setRequestProperty("Content-Type", "application/json")
         c.setRequestProperty("Accept", "text/event-stream")
         headers.forEach { (k, v) -> c.setRequestProperty(k, v) }

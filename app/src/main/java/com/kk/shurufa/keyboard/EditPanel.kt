@@ -199,7 +199,7 @@ class EditPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
                     "text" -> { tp.textSize = sp(Ui.BODY); text(c, b.text, r.centerX(), r.centerY()) }
                     else -> if (r.height() > dp(50f)) {
                         Icons.draw(c, b.icon, r.centerX(), r.centerY() - dp(9f), dp(20f), ip)
-                        tp.textSize = sp(Ui.CAPTION + 0.5f)
+                        tp.textSize = sp(Ui.CAPTION)
                         text(c, b.text, r.centerX(), r.centerY() + dp(12f))
                     } else {
                         tp.textSize = sp(Ui.SMALL)

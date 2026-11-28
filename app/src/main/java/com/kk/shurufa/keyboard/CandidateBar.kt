@@ -95,6 +95,26 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
     private var preedit = ""
     private var caret = -1          // caret position in the preedit, -1 when at the end
     private var candidates: List<String> = emptyList()
+    /** The widths of [candidates] and their notes, measured once for each list (not on every frame of a scroll). */
+    private var candTw = FloatArray(0)
+    private var candNw = FloatArray(0)
+    private var measuredFor: List<String>? = null
+    private var measuredNotes: List<String>? = null
+    private var measuredSize = 0f
+    private var measuredFace: android.graphics.Typeface? = null
+
+    private fun measureCandidates(size: Float, noteSize: Float, face: android.graphics.Typeface) {
+        if (measuredFor === candidates && measuredNotes === notes && measuredSize == size && measuredFace === face && candTw.size == candidates.size) return
+        val n = candidates.size
+        candTw = FloatArray(n); candNw = FloatArray(n)
+        tp.typeface = face
+        for (i in 0 until n) {
+            tp.textSize = size; candTw[i] = tp.measureText(candidates[i])
+            val note = notes.getOrNull(i).orEmpty()
+            if (note.isNotEmpty()) { tp.textSize = noteSize; candNw[i] = tp.measureText(note) }
+        }
+        measuredFor = candidates; measuredNotes = notes; measuredSize = size; measuredFace = face
+    }
     private var notes: List<String> = emptyList()
     private var predictionLabel = ""
     private var mathFormat = "uni"
@@ -159,21 +179,21 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
         val face = dp(24f)
         val fx = dp(12f) + face / 2
         val wait = Shark.drawLive(c, fx, cy, face, alpha = (255 * a).toInt())
-        val ch = dp(30f)
+        val ch = dp(Ui.CHIP_H)
         var right = width - dp(10f)
-        val seenW = chipWidth("已阅", textSp = Ui.SMALL + 1f)
+        val seenW = chipWidth("已阅", textSp = Ui.LABEL)
         val r = RectF(right - seenW, cy - ch / 2, right, cy + ch / 2)
-        drawChip(c, r, "已阅", ChipStyle.GHOST, pressed = pressedGreet == "seen", textSp = Ui.SMALL + 1f)
+        drawChip(c, r, "已阅", ChipStyle.GHOST, pressed = pressedGreet == "seen", textSp = Ui.LABEL)
         hits.add("greet:seen2", r, slop = dp(4f))
         right = r.left - dp(4f)
         if (greetChat) {
-            val w = chipWidth("接着聊", textSp = Ui.SMALL + 1f)
+            val w = chipWidth("接着聊", textSp = Ui.LABEL)
             r.set(right - w, cy - ch / 2, right, cy + ch / 2)
-            drawChip(c, r, "接着聊", ChipStyle.ACTIVE, pressed = pressedGreet == "chat", textSp = Ui.SMALL + 1f)
+            drawChip(c, r, "接着聊", ChipStyle.ACTIVE, pressed = pressedGreet == "chat", textSp = Ui.LABEL)
             hits.add("greet:chat", r, slop = dp(4f))
             right = r.left - dp(6f)
         }
-        tp.textAlign = Paint.Align.LEFT; tp.typeface = Ui.regular; tp.textSize = sp(Ui.BODY + 1f)
+        tp.textAlign = Paint.Align.LEFT; tp.typeface = Ui.regular; tp.textSize = sp(Ui.EMPHASIS)
         tp.color = Colors.fade(theme.ink, a)
         ellipsizer.set(tp)
         val x = fx + face / 2 + dp(8f)
@@ -347,7 +367,7 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
                 ip.color = ink
                 Icons.draw(c, prefs.kayIcon, cx, cy, dp(Ui.TOOL_ICON + 1f), ip, t = t)
             } else if (glyph != null) {
-                tp.textAlign = Paint.Align.CENTER; tp.typeface = Ui.medium; tp.textSize = sp(Ui.TITLE + 1f)
+                tp.textAlign = Paint.Align.CENTER; tp.typeface = Ui.medium; tp.textSize = sp(Ui.GLYPH)
                 tp.color = ink
                 val pop = 1f + 0.22f * kotlin.math.sin(Math.PI.toFloat() * t)
                 c.save(); c.scale(pop, pop, cx, cy)
@@ -428,15 +448,15 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
         val bottom = height - dp(3f)
         tp.textAlign = Paint.Align.LEFT
         val size = sp(Ui.CANDIDATE * prefs.candidateScale)
-        val noteSize = sp(Ui.CAPTION - 1f)
+        val noteSize = sp(Ui.HINT)
         val r = dp(prefs.keyRadiusDp)
         val face = Ui.regular
+        measureCandidates(size, noteSize, face)
         for (i in candidates.indices) {
             val s = candidates[i]
-            tp.textSize = size; tp.typeface = face
             val note = notes.getOrNull(i).orEmpty()
-            val tw = tp.measureText(s)
-            val nw = if (note.isNotEmpty()) { tp.textSize = noteSize; tp.measureText(note) } else 0f
+            val tw = candTw[i]
+            val nw = candNw[i]
             // marks (AI, 云, a correction like i→u or 多i) sit small at the word's upper right, clear of
             // the pinyin line; a rare character's reading sits above it and adds width only if longer
             val badge = note.isNotEmpty() && isBadge(note)
@@ -602,7 +622,7 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
         names.forEachIndexed { i, name ->
             val near = (1f - abs(p - i)).coerceIn(0f, 1f)
             tp.color = Colors.fade(Colors.blend(theme.inkSoft, if (strong) theme.onAccent else theme.accent, near), a)
-            tp.textSize = sp(if (strong) Ui.BODY else Ui.SMALL + 0.5f)
+            tp.textSize = sp(if (strong) Ui.BODY else Ui.SMALL)
             tp.typeface = if (near > 0.5f) Ui.medium else Ui.regular
             val l = box.left + i * w
             drawText(c, name, l + w / 2, box.centerY(), tp)
@@ -684,7 +704,7 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
     }
 
     private fun drawEdit(c: Canvas, a: Float) {
-        val size = sp(21f)
+        val size = sp(Ui.PINYIN_EDIT)
         tp.textSize = size; tp.textAlign = Paint.Align.LEFT; tp.typeface = Ui.regular
         editPos.clear()
         var x = dp(16f)
@@ -806,8 +826,10 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
                     if (p != editCaret) { editCaret = p; listener?.onEditCaret(p); invalidate() }
                     return true
                 }
-                if (onVerticalDrag != null && mode == Mode.TOOLBAR && !vDrag && abs(e.y - downY) > slop && abs(e.y - downY) > abs(e.x - downX)) {
-                    vDrag = true; pressedTool = null; invalidate()
+                // the toolbar, or the candidates over the opened grid, drag a resizable panel taller
+                val grabs = mode == Mode.TOOLBAR || (mode == Mode.CANDIDATES && expanded && !dragging && !menuOpen)
+                if (onVerticalDrag != null && grabs && !vDrag && abs(e.y - downY) > slop && abs(e.y - downY) > abs(e.x - downX)) {
+                    vDrag = true; pressedTool = null; pressedCand = -1; handler.removeCallbacks(longRunnable); invalidate()
                     onVerticalDrag?.invoke(0, e.rawY, 0f)
                 }
                 if (vDrag) { onVerticalDrag?.invoke(1, e.rawY, 0f); return true }

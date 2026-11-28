@@ -90,7 +90,7 @@ class ClipStrip(context: Context, prefs: Prefs) : KbView(context, prefs) {
     private fun measureCards() {
         lefts = FloatArray(cards.size); widths = FloatArray(cards.size)
         if (width == 0) return
-        body.textSize = sp(Ui.BODY + 0.5f)
+        body.textSize = sp(Ui.BODY)
         tp.textSize = sp(Ui.CAPTION)
         val inner = dp(10f)
         var x = pad
@@ -218,7 +218,7 @@ class ClipStrip(context: Context, prefs: Prefs) : KbView(context, prefs) {
         }
         val w = (r.width() - 2 * inner).toInt().coerceAtLeast(1)
         val lay = layouts.getOrPut(i) {
-            body.textSize = sp(Ui.BODY + 0.5f)
+            body.textSize = sp(Ui.BODY)
             body.color = theme.ink
             val text = card.text.replace(Regex("\\s+"), " ").trim().let { t ->
                 if (t.length > prefs.clipMaxChars) t.take(prefs.clipMaxChars) + "…" else t

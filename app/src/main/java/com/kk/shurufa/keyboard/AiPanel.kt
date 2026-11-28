@@ -181,7 +181,7 @@ class AiPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
         val text = place ?: return
         val t = theme
         val tp = placePaint
-        tp.textSize = sp(Ui.SMALL - 1f); tp.typeface = Ui.regular; tp.textAlign = android.graphics.Paint.Align.RIGHT
+        tp.textSize = sp(Ui.CAPTION); tp.typeface = Ui.regular; tp.textAlign = android.graphics.Paint.Align.RIGHT
         val dot = dp(5f); val gap = dp(5f)
         val shown = listOf(text, text.substringBefore(' ')).firstOrNull { tp.measureText(it) + dot + gap <= maxRight - left } ?: return
         val right = if (fromLeft) left + dot + gap + tp.measureText(shown) else maxRight
@@ -189,7 +189,7 @@ class AiPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
         val fm = tp.fontMetrics
         c.drawText(shown, right, cy - (fm.ascent + fm.descent) / 2, tp)
         val dx = right - tp.measureText(shown) - gap - dot / 2
-        tp.color = when (placeOk) { true -> 0xFF4CAF7A.toInt(); false -> 0xFFE0A33A.toInt(); null -> t.hint }
+        tp.color = when (placeOk) { true -> t.good; false -> t.caution; null -> t.hint }
         c.drawCircle(dx, cy, dot / 2, tp)
         hits.add("place", dx - dot, cy - dp(14f), right, cy + dp(14f))
     }
@@ -306,9 +306,9 @@ class AiPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
 
     /** 停止, right-aligned at [right]; returns its left edge. */
     private fun drawStop(c: Canvas, right: Float, top: Float, h: Float): Float {
-        val w = chipWidth("停止", icon = "stop", textSp = Ui.SMALL + 1f)
+        val w = chipWidth("停止", icon = "stop", textSp = Ui.LABEL)
         val sr = RectF(right - w, top, right, top + h)
-        drawChip(c, sr, "停止", ChipStyle.SOFT, pressed = pressed == "stop", icon = "stop", textSp = Ui.SMALL + 1f)
+        drawChip(c, sr, "停止", ChipStyle.SOFT, pressed = pressed == "stop", icon = "stop", textSp = Ui.LABEL)
         hits.add("stop", sr, slop = dp(5f))
         return sr.left
     }
@@ -357,7 +357,7 @@ class AiPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
         }
         if (result.isEmpty()) {
             if (status.isNotEmpty() || source.isBlank()) {
-                tp.textAlign = Paint.Align.CENTER; tp.textSize = sp(Ui.SMALL + 1f); tp.color = t.hint
+                tp.textAlign = Paint.Align.CENTER; tp.textSize = sp(Ui.LABEL); tp.color = t.hint
                 drawText(c, status.ifEmpty { idleNote() }, card.centerX(), card.centerY(), tp)
                 return false
             }
@@ -376,7 +376,7 @@ class AiPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
                 .setLineSpacing(0f, 1.1f).setMaxLines(maxOf(1, (box.height() / (body.textSize * 1.3f)).toInt()))
                 .setEllipsize(TextUtils.TruncateAt.END).build()
             c.save(); c.clipRect(box); c.translate(box.left, box.top); lay.draw(c); c.restore()
-            tp.textSize = sp(Ui.SMALL - 1f); tp.color = t.hint
+            tp.textSize = sp(Ui.CAPTION); tp.color = t.hint
             drawText(c, if (sourceLabel == "选中") "点上面的一项，只处理选中的这段" else "点上面的一项开始；先选中一段，就只处理那一段", cardL + inner, cardB - dp(16f), tp)
             return false
         }
@@ -400,9 +400,9 @@ class AiPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
             var bx = cardR - dp(8f)
             for ((id, label) in BUTTONS) {
                 val primary = id == "replace"
-                val w = chipWidth(label, textSp = Ui.SMALL + 1f)
+                val w = chipWidth(label, textSp = Ui.LABEL)
                 r.set(bx - w, lineT, bx, lineT + lineH)
-                drawChip(c, r, label, if (primary) ChipStyle.PRIMARY else ChipStyle.SOFT, pressed = pressed == id, textSp = Ui.SMALL + 1f)
+                drawChip(c, r, label, if (primary) ChipStyle.PRIMARY else ChipStyle.SOFT, pressed = pressed == id, textSp = Ui.LABEL)
                 hits.add(id, r, slop = dp(5f))
                 bx = r.left - dp(6f)
             }
@@ -410,7 +410,7 @@ class AiPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
         // the text, in a window that scrolls when the answer is longer than the card
         resView.set(cardL + inner, lineT + lineH + dp(6f), cardR - inner, cardB - dp(10f))
         val lay = resLayout ?: run {
-            body.textSize = sp(Ui.BODY + 1f); body.color = t.ink
+            body.textSize = sp(Ui.EMPHASIS); body.color = t.ink
             val text = marked(result, diffBase)
             StaticLayout.Builder.obtain(text, 0, text.length, body, resView.width().toInt().coerceAtLeast(1))
                 .setAlignment(Layout.Alignment.ALIGN_NORMAL).setLineSpacing(0f, 1.1f).build()
@@ -451,29 +451,29 @@ class AiPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
         val lineCy = lineT + lineH / 2
         val face = dp(22f)
         val wait = Shark.drawLive(c, cardL + inner + face / 2, lineCy, face)
-        tp.textAlign = Paint.Align.LEFT; tp.textSize = sp(Ui.SMALL + 1f); tp.typeface = Ui.medium; tp.color = if (running != null) t.accent else t.inkSoft
+        tp.textAlign = Paint.Align.LEFT; tp.textSize = sp(Ui.LABEL); tp.typeface = Ui.medium; tp.color = if (running != null) t.accent else t.inkSoft
         drawText(c, if (running != null) "$kayName 在想" + dots() else kayName, cardL + inner + face + dp(8f), lineCy, tp)
         val nameRight = cardL + inner + face + dp(8f) + tp.measureText(if (running != null) "$kayName 在想..." else kayName)
         tp.typeface = Ui.regular
         var bx = cardR - dp(8f)
         if (running != null) bx = drawStop(c, bx, lineT, lineH) - dp(6f)
         else {
-            val w = chipWidth("回话", textSp = Ui.SMALL + 1f)
+            val w = chipWidth("回话", textSp = Ui.LABEL)
             r.set(bx - w, lineT, bx, lineT + lineH)
-            drawChip(c, r, "回话", ChipStyle.PRIMARY, pressed = pressed == "reply", textSp = Ui.SMALL + 1f)
+            drawChip(c, r, "回话", ChipStyle.PRIMARY, pressed = pressed == "reply", textSp = Ui.LABEL)
             hits.add("reply", r, slop = dp(5f))
             bx = r.left - dp(6f)
             if (chat.isNotEmpty()) {
-                val iw = chipWidth("清空", textSp = Ui.SMALL + 1f)
+                val iw = chipWidth("清空", textSp = Ui.LABEL)
                 r.set(bx - iw, lineT, bx, lineT + lineH)
-                drawChip(c, r, "清空", ChipStyle.GHOST, pressed = pressed == "clear", textSp = Ui.SMALL + 1f)
+                drawChip(c, r, "清空", ChipStyle.GHOST, pressed = pressed == "clear", textSp = Ui.LABEL)
                 hits.add("clear", r, slop = dp(5f))
                 bx = r.left - dp(4f)
             }
             // today's 一言, back in the conversation
-            val lw = chipWidth("一言", textSp = Ui.SMALL + 1f)
+            val lw = chipWidth("一言", textSp = Ui.LABEL)
             r.set(bx - lw, lineT, bx, lineT + lineH)
-            drawChip(c, r, "一言", ChipStyle.SOFT, pressed = pressed == "line", textSp = Ui.SMALL + 1f)
+            drawChip(c, r, "一言", ChipStyle.SOFT, pressed = pressed == "line", textSp = Ui.LABEL)
             hits.add("line", r, slop = dp(5f))
             bx = r.left - dp(6f)
         }
@@ -481,16 +481,16 @@ class AiPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
         drawPlace(c, nameRight + dp(12f), bx - dp(6f), lineCy, fromLeft = true)
         resView.set(cardL + inner, lineT + lineH + dp(6f), cardR - inner, cardB - dp(10f))
         if (chat.isEmpty()) {
-            tp.textAlign = Paint.Align.CENTER; tp.textSize = sp(Ui.SMALL + 1f); tp.color = t.hint
+            tp.textAlign = Paint.Align.CENTER; tp.textSize = sp(Ui.LABEL); tp.color = t.hint
             drawText(c, status.ifEmpty { "点「回话」，想说什么都行" }, resView.centerX(), resView.centerY() - dp(10f), tp)
             if (status.isEmpty()) {
-                tp.textSize = sp(Ui.SMALL - 1f)
+                tp.textSize = sp(Ui.CAPTION)
                 drawText(c, "「一言」是它今天说的那句", resView.centerX(), resView.centerY() + dp(12f), tp)
             }
             return wait == 0L || running != null
         }
         val lay = resLayout ?: run {
-            body.textSize = sp(Ui.BODY + 1f); body.color = t.ink
+            body.textSize = sp(Ui.EMPHASIS); body.color = t.ink
             val text = hanging(chat, body)
             StaticLayout.Builder.obtain(text, 0, text.length, body, resView.width().toInt().coerceAtLeast(1))
                 .setAlignment(Layout.Alignment.ALIGN_NORMAL).setLineSpacing(dp(2f), 1.1f).build().also { resLayout = it }

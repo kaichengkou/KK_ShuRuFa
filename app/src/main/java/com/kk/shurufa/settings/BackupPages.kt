@@ -63,11 +63,7 @@ internal fun AboutPage() {
     LaunchedEffect(Unit) { check() }
     Group("版本") {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(64.dp).clip(RoundedCornerShape(19.dp))
-                .background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(androidx.compose.ui.graphics.Color(0xFFC3D8E6), androidx.compose.ui.graphics.Color(0xFFC3D8E6)))),
-                contentAlignment = Alignment.Center) {
-                androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(R.drawable.ic_launcher_foreground), null, modifier = Modifier.requiredSize(96.dp))
-            }
+            AppIcon(64.dp)
             Spacer(Modifier.width(16.dp))
             Column {
                 Text("KK输入法", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)

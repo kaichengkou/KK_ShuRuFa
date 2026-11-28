@@ -1,5 +1,6 @@
 package com.kk.shurufa.ime
 
+import com.kk.shurufa.keyboard.Ui
 import android.content.Context
 import android.graphics.Paint
 import android.net.ConnectivityManager
@@ -76,7 +77,7 @@ class EmojiFeature(private val host: Host) {
         val panel = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
         val top = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
         rail = GridPanel(ctx, prefs).apply {
-            theme = host.kbTheme; columns = 1; rowHeightDp = 38f; textSp = 14f; cellStyle = GridPanel.CellStyle.RAIL
+            theme = host.kbTheme; columns = 1; rowHeightDp = 38f; textSp = Ui.BODY; cellStyle = GridPanel.CellStyle.RAIL
             // the first item is 查找, the rest are tabs
             onItem = { i -> if (i == 0) startSearch() else { tab = i - 1; refresh() } }
             onFeedback = { host.haptics.play(HapticEvent.FUNCTION) }

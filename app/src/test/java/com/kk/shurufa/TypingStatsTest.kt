@@ -26,6 +26,23 @@ class TypingStatsTest {
         while (!done() && System.currentTimeMillis() < end) { Thread.sleep(25); shadowOf(Looper.getMainLooper()).idle() }
     }
 
+    /** Russian and English go in a letter at a time: the word cloud counts the finished word, not its letters. */
+    @Test fun wordsTypedLetterByLetter() {
+        File(ctx.filesDir, "typing_stats.json").delete()
+        TypingStats.reload()
+        val s = TypingStats.get(ctx)
+        for (c in "привет") s.record(c.toString(), TypingStats.Source.TYPED)
+        s.word("Привет"); s.word("hello"); s.word("ok")
+        settle()
+        val words = s.snapshot().words.toMap()
+        assertEquals(1, words["привет"])
+        assertEquals(1, words["hello"])
+        assertTrue("two letters make no word for the cloud", "ok" !in words)
+        assertEquals("the letters are counted once each", 6, s.snapshot().bySource(TypingStats.Source.TYPED))
+        TypingStats.get(ctx).clear(); settle()
+        TypingStats.reload()
+    }
+
     @Test fun countsAndWords() {
         File(ctx.filesDir, "typing_stats.json").delete()
         TypingStats.reload()
