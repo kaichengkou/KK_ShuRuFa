@@ -271,7 +271,7 @@ class AiPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
             }
             hits.add(id, r, slop = dp(3f))
         }
-        return running != null
+        return waiting()
     }
 
     /** Nothing set up yet: what this panel does, and the way to the settings. */
@@ -302,6 +302,16 @@ class AiPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
     fun resultText() = result
 
     /** …, growing a dot at a time while something runs. */
+    /**
+     * While an answer is on its way, what moves (the dots, the breathing chip, the shimmer) is slow:
+     * a frame every [WAIT_FRAME_MS] is enough, not every frame of a 120 Hz screen for many
+     * seconds. Always false, so that the caller asks for no frame of its own for it.
+     */
+    private fun waiting(): Boolean {
+        if (running != null) invalidateIn(WAIT_FRAME_MS)
+        return false
+    }
+
     private fun dots(): String = ".".repeat(1 + ((Motion.now() - runSince) / 380 % 3).toInt())
 
     /** 停止, right-aligned at [right]; returns its left edge. */
@@ -353,7 +363,7 @@ class AiPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
             val stopW = drawStop(c, cardR - dp(8f), lineT, lineH)
             if (secs >= 1f) { tp.textAlign = Paint.Align.RIGHT; drawText(c, String.format("%.0f 秒", secs), stopW - dp(8f), lineCy, tp) }
             shimmer(c, cardL + inner, lineT + lineH + dp(12f), cardR - inner, cardB - dp(12f))
-            return true
+            return waiting()
         }
         if (result.isEmpty()) {
             if (status.isNotEmpty() || source.isBlank()) {
@@ -440,7 +450,7 @@ class AiPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
             bg.color = t.divider
             c.drawRoundRect(cardR - dp(6f), y, cardR - dp(3.5f), y + h, dp(2f), dp(2f), bg)
         }
-        return moving || running != null
+        return waiting() || moving
     }
 
     /** The conversation card: 小K and its name, 回话 · 插入, and what was said, newest at the bottom. */
@@ -487,7 +497,7 @@ class AiPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
                 tp.textSize = sp(Ui.CAPTION)
                 drawText(c, "「一言」是它今天说的那句", resView.centerX(), resView.centerY() + dp(12f), tp)
             }
-            return wait == 0L || running != null
+            return waiting() || wait == 0L
         }
         val lay = resLayout ?: run {
             body.textSize = sp(Ui.EMPHASIS); body.color = t.ink
@@ -501,7 +511,7 @@ class AiPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
         resScroll = resScroll.coerceIn(0f, resMax)
         c.save(); c.clipRect(resView); c.translate(resView.left, resView.top - resScroll); lay.draw(c); c.restore()
         if (wait > 0 && running == null) invalidateIn(wait)
-        return wait == 0L || running != null || !resScroller.isFinished
+        return waiting() || wait == 0L || !resScroller.isFinished
     }
 
     /**
@@ -656,5 +666,7 @@ class AiPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
         /** Result buttons, drawn right to left. */
         val BUTTONS = listOf("replace" to "替换", "insert" to "插入", "copy" to "复制", "retry" to "重试")
         val BUTTON_IDS = setOf("replace", "insert", "copy", "retry", "setup", "custom", "stop", "reply", "clear")
+        /** A frame while waiting for an answer: about 30 a second. */
+        const val WAIT_FRAME_MS = 33L
     }
 }

@@ -288,7 +288,7 @@ class TranslateStrip(context: Context, prefs: Prefs) : KbView(context, prefs) {
             // a caret where typing goes, blinking at half a second
             val since = SystemClock.uptimeMillis() - caretSince
             val on = (since / 530) % 2 == 0L
-            postInvalidateDelayed(530 - since % 530)
+            invalidateIn(530 - since % 530)
             if (on) {
                 val cx = innerL + (if (source.isEmpty()) 0f else sl.getPrimaryHorizontal(at) + if (at == source.length) dp(1.5f) else 0f)
                 bg.color = t.accent

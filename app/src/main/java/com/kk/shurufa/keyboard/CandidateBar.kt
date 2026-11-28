@@ -544,7 +544,7 @@ class CandidateBar(context: Context, prefs: Prefs) : KbView(context, prefs) {
             val h = sp(Ui.TITLE) * 0.62f
             c.drawRect(cx, lineCy - h, cx + dp(1.6f), lineCy + h, bg)
         }
-        postInvalidateDelayed(530 - since % 530)
+        invalidateIn(530 - since % 530)
         ip.color = Colors.fade(theme.inkSoft, a)
         Icons.draw(c, "close", width - endW / 2, lineCy, dp(18f), ip)
         bg.color = Colors.fade(theme.divider, a)

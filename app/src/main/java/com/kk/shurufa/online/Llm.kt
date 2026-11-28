@@ -308,6 +308,9 @@ object Llm {
 
     private val noSystem = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
     private val noTools = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    /** Models whose web search ran out of quota, until when it is not asked for. */
+    private val searchPausedUntil = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    private const val SEARCH_PAUSE_MS = 60 * 60_000L
 
     private val NOT_TEXT = listOf("tts", "image", "banana", "lyria", "robotics", "computer-use", "customtools", "deep-research", "antigravity", "embedding", "aqa", "veo", "imagen")
 
@@ -573,7 +576,7 @@ object Llm {
 
     private fun geminiRun(base: String, key: String, model: String, system: String, user: String, onText: (String) -> Unit, cancelled: () -> Boolean, search: Boolean, think: String): String {
         // some models (Gemma, the transcribe model) refuse a system instruction: put it in the message instead
-        val tools = search && model !in noTools
+        val tools = search && model !in noTools && android.os.SystemClock.elapsedRealtime() >= (searchPausedUntil[model] ?: 0L)
         fun body(fold: Boolean) = JSONObject().apply {
             if (!fold) put("systemInstruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", system))))
             // 帮忙查: Google Search, where the model can use it
@@ -586,6 +589,9 @@ object Llm {
             else try { post(url, mapOf("x-goog-api-key" to key), body(false).put("generationConfig", cfg)) } catch (e: HttpError) {
                 // a model without search: asked again without it, and not offered it again
                 if (tools && e.code == 400 && (e.detail.contains("tool", true) || e.detail.contains("search", true))) { noTools += model; throw NoTools() }
+                // the search's own quota (none at all on many free keys) is not the model's: asked
+                // again without it, and search left out for a while
+                if (tools && e.code == 429) { searchPausedUntil[model] = android.os.SystemClock.elapsedRealtime() + SEARCH_PAUSE_MS; throw NoTools() }
                 if (e.code != 400 || !e.detail.contains("instruction", true)) throw e
                 noSystem += model
                 post(url, mapOf("x-goog-api-key" to key), body(true).put("generationConfig", cfg))

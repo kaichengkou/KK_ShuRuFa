@@ -29,6 +29,13 @@ abstract class KbView(context: Context, protected val prefs: Prefs) : View(conte
     /** A frame of something moving: drawn on the next vsync, at the screen's highest rate ([FrameRate]). */
     override fun postInvalidateOnAnimation() { FrameRate.moving(this); super.postInvalidateOnAnimation() }
 
+    /**
+     * A frame of a short motion (a key going down and back up, an icon's little jump): drawn on
+     * the next vsync, but without asking for the highest rate. Those are over before an adaptive
+     * screen would drop, and asking costs a window update on Android 11–14 each time.
+     */
+    protected fun postShortFrame() { super.postInvalidateOnAnimation() }
+
     private val redraw = Runnable { invalidate() }
     /** One redraw [ms] from now, replacing any planned before (timed redraws never pile up). */
     fun invalidateIn(ms: Long) { removeCallbacks(redraw); if (ms <= 0L) super.postInvalidateOnAnimation() else postDelayed(redraw, ms) }

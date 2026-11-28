@@ -323,12 +323,14 @@ class PopupOverlay(context: Context, prefs: Prefs) : KbView(context, prefs) {
     // ---- drawing ----
     override fun onDraw(c: Canvas) {
         var again = false
+        // the key preview comes and goes with each key: a short motion, at the screen's own rate
+        var short = false
         val ta = toastAnim.value
         if (ta > 0.01f && toastText.isNotEmpty()) { drawToast(c, ta); again = toastAnim.running }
         val pa = pvAlpha.value
         if (pa > 0.01f && opShow.value < 0.5f) {
             if (pvScale.running) pvScale.step()
-            again = pvAlpha.running || pvSwap.running || pvScale.running
+            short = pvAlpha.running || pvSwap.running || pvScale.running
             drawPreview(c, pa, pvScale.value)
         }
         val os = opShow.value
@@ -337,7 +339,7 @@ class PopupOverlay(context: Context, prefs: Prefs) : KbView(context, prefs) {
             again = again || opShow.running
             drawOptions(c, os)
         }
-        if (again) postInvalidateOnAnimation()
+        if (again) postInvalidateOnAnimation() else if (short) postShortFrame()
     }
 
     private fun bubble(c: Canvas, r: RectF, alpha: Float) {

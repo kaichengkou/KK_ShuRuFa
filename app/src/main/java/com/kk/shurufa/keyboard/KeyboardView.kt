@@ -111,8 +111,11 @@ class KeyboardView(context: Context, prefs: Prefs) : KbView(context, prefs) {
     private var tappedKey: Key? = null
     private val keyTapT = Tween(1f)
     private fun tapped(k: Key) {
-        if (!Motion.on(prefs) || k.fn == null) return
-        tappedKey = k; keyTapT.set(0f); keyTapT.animateTo(1f, dur(KEY_TAP_MS), Motion.LINEAR); postInvalidateOnAnimation()
+        // only a key drawn as an icon with a motion of its own (删除, 回车, Shift …): the space
+        // key and keys with a word on them have none, and would redraw the board for nothing
+        val fn = k.fn ?: return
+        if (!Motion.on(prefs) || !(fn == "shift" || (k.label == null && Icons.hasTapMotion(fn)))) return
+        tappedKey = k; keyTapT.set(0f); keyTapT.animateTo(1f, dur(KEY_TAP_MS), Motion.LINEAR); postShortFrame()
     }
     private fun tapOf(k: Key) = if (k === tappedKey) keyTapT.value else 1f
     private var swapDir = 0
@@ -245,8 +248,11 @@ class KeyboardView(context: Context, prefs: Prefs) : KbView(context, prefs) {
         val pressDy = dp(0.7f)
         val tp = trackpad.value
         val la = labelsAlpha.value * (1f - 0.88f * tp)
-        var animating = labelsAlpha.running || trackpad.running || spaceSwap.running || keyTapT.running
-        if (spaceOffset.running) { spaceOffset.step(); animating = true }
+        // what moves for long (the trackpad, the space key's swipe, a language sliding in) asks for the
+        // screen's highest rate; a key's press and an icon's tap motion are short and do not
+        var moving = trackpad.running || spaceSwap.running
+        var animating = labelsAlpha.running || keyTapT.running
+        if (spaceOffset.running) { spaceOffset.step(); moving = true }
         for (i in keys.indices) {
             val k = keys[i]
             val rect = rects[i]
@@ -306,10 +312,10 @@ class KeyboardView(context: Context, prefs: Prefs) : KbView(context, prefs) {
                 // the keyboard that left, on its way out the other side
                 ghostPaint.alpha = (255 * (1f - sp)).toInt()
                 c.drawBitmap(g, -swapDir * sp * travel, 0f, ghostPaint)
-                animating = true
+                moving = true
             } else { spare = g; ghost = null }
         }
-        if (animating) postInvalidateOnAnimation()
+        if (moving) postInvalidateOnAnimation() else if (animating) postShortFrame()
     }
 
     private fun shiftOn() = (listener?.shiftState() ?: 0) > 0
@@ -608,7 +614,7 @@ class KeyboardView(context: Context, prefs: Prefs) : KbView(context, prefs) {
 
     private companion object {
         /** How long a function key's icon motion runs. */
-        const val KEY_TAP_MS = 460L
+        const val KEY_TAP_MS = 320L
         /** A drag that takes longer than this to go far is a change of mind, not a flick. */
         const val SLOW_DRAG_MS = 450L
     }

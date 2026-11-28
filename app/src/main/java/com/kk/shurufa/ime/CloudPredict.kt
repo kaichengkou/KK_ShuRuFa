@@ -27,13 +27,20 @@ class CloudPredict(private val prefs: Prefs, private val onReady: () -> Unit) {
     }
 
     /** The continuations for exactly [before] (the text before the caret), if they came. */
-    fun answerFor(before: String): List<String> = if (before.isNotEmpty() && before.takeLast(prefs.cloudContext) == forText) answer else emptyList()
+    fun answerFor(before: String): List<String> = if (before.isNotEmpty() && keyOf(before) == forText) answer else emptyList()
+
+    /**
+     * What is sent: the last few dozen characters before the caret, from the start of the line
+     * (a new line in a chat is a new message, often in another language: the one before would
+     * only lead the continuations astray).
+     */
+    private fun keyOf(before: String) = before.takeLast(prefs.cloudContext).substringAfterLast('\n')
 
     fun clear() = ask.cancel()
 
     /** Called when suggestions show for [before]; asks after a short pause if this text is new. */
     fun update(before: String, allowed: Boolean) {
-        val key = before.takeLast(prefs.cloudContext)
+        val key = keyOf(before)
         if (!prefs.cloudPredict || !allowed || key.isBlank() || key.trim().length < 2) { ask.cancel(); return }
         if (key == forText) { ask.drop(); return }
         // already waiting for its pause or on its way: the pause is not started again
@@ -43,7 +50,7 @@ class CloudPredict(private val prefs: Prefs, private val onReady: () -> Unit) {
         // within the keyboard's own budget, and not while the service asked to wait
         if (!AiBudget.mayAsk() || !prefs.quickAiNetworkOk()) return ask.drop()
         val count = prefs.cloudCount
-        ask.ask(key, prefs.cloudPauseMs.toLong(), { cancelled -> Llm.completeQuick(prefs, target, system(count), key, cancelled) }) { raw ->
+        ask.ask(key, prefs.cloudPauseNowMs, { cancelled -> Llm.completeQuick(prefs, target, system(count), key, cancelled) }) { raw ->
             val list = parse(raw.orEmpty(), key, count)
             // a request that failed (no answer at all) is asked again next time; an answer is kept
             if (raw != null) cache[key] = list

@@ -117,7 +117,8 @@ class Editor(private val ime: InputMethodService, private val prefs: Prefs) {
      * Types [text]: commits it (pairing brackets when [pairable]) and records it for undo.
      * [syllables] are the pinyin that produced its Chinese characters (for 删除后联想).
      */
-    fun type(text: String, pairable: Boolean = true, syllables: List<String>? = null, source: TypingStats.Source = TypingStats.Source.TYPED) { dirty();
+    fun type(text: String, pairable: Boolean = true, syllables: List<String>? = null, source: TypingStats.Source = TypingStats.Source.TYPED) {
+        // (what was read of the field is let go in commit, which knows what it becomes)
         val tail = commit(text, pairable, syllables, source) ?: return
         history.push(EditHistory.Op.Insert(tail.first, tail.second))
     }
@@ -126,7 +127,12 @@ class Editor(private val ime: InputMethodService, private val prefs: Prefs) {
      * Commits [text] without recording it; `‸` marks where the caret should land. Returns what
      * went in before and after the caret, or null when nothing did.
      */
-    fun commit(text: String, pairable: Boolean = true, syllables: List<String>? = null, source: TypingStats.Source = TypingStats.Source.TYPED): Pair<String, String>? { dirty();
+    fun commit(text: String, pairable: Boolean = true, syllables: List<String>? = null, source: TypingStats.Source = TypingStats.Source.TYPED): Pair<String, String>? {
+        // what was read before this key, if anything: with the text added it is what the field
+        // holds before the caret after it (unless pinyin was shown in the field, which goes)
+        val known = beforeCache?.takeIf { !composingShown }
+        val knownAsked = beforeAsked
+        dirty()
         val ic = ic ?: return null
         logChars(text.replace("‸", ""), syllables)
         var t = text
@@ -146,7 +152,12 @@ class Editor(private val ime: InputMethodService, private val prefs: Prefs) {
         val idx = t.indexOf('‸')
         val clean = t.replace("‸", "")
         record(clean, source)
-        if (idx < 0 || idx >= clean.length) { ic.commitText(clean, 1); return clean to "" }
+        if (idx < 0 || idx >= clean.length) {
+            ic.commitText(clean, 1)
+            composingShown = false
+            if (known != null) { beforeCache = (known + clean).takeLast(knownAsked); beforeAsked = knownAsked }
+            return clean to ""
+        }
         // read the position before the edit: inside a batch edit the editor may report stale values
         val start = selection()?.first
         ic.beginBatchEdit()
@@ -184,9 +195,11 @@ class Editor(private val ime: InputMethodService, private val prefs: Prefs) {
     }
 
     /** Shows [text] as composing text (replaced by the next compose or commit). */
-    fun compose(text: String) { dirty(); ic?.setComposingText(text, 1) }
+    fun compose(text: String) { dirty(); composingShown = text.isNotEmpty(); ic?.setComposingText(text, 1) }
+    /** Pinyin is shown in the field (内嵌拼音), as composing text. */
+    private var composingShown = false
 
-    fun finishComposingText() { dirty(); ic?.finishComposingText() }
+    fun finishComposingText() { dirty(); composingShown = false; ic?.finishComposingText() }
 
     /** Replaces the composing preview with a finished sentence, after deleting [deleteBefore] characters. */
     fun commitVoice(deleteBefore: Int, text: String) { dirty();

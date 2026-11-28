@@ -164,11 +164,14 @@ class VoicePanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
         val room = min(cy - top - dp(4f), lineY - dp(12f) - cy)
         val r = (room / 1.38f).coerceIn(dp(20f), min(width, height) * 0.17f)
         val cx = width / 2f
-        var again = level.running || lit.running
+        var again = lit.running
+        // the waves and the level follow the microphone, which reports about 31 times a second:
+        // that many frames show all there is, for as long as it listens
+        var slow = level.running
         val l = lit.value
         if (l > 0.01f) {
             drawWaves(c, cx, cy, r, l)
-            again = true
+            slow = true
         }
         val idle = if (pressed == "mic") t.softPressed else t.soft
         val on = if (pressed == "mic") t.accentPressed else t.accent
@@ -220,7 +223,7 @@ class VoicePanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
             val pad = dp(12f)
             if (pick.draw(c, chipRect.apply { set(pad, m + ch + dp(8f), width - pad, height - pad) }, t, Ui.radiusLarge(dp(prefs.keyRadiusDp), dp(1f)))) again = true
         }
-        if (again) postInvalidateOnAnimation()
+        if (again) postInvalidateOnAnimation() else if (slow) invalidateIn(LISTEN_FRAME_MS)
     }
 
     /** Draws a chip anchored at its left (or right) edge [x]; returns the opposite edge. */
@@ -266,5 +269,10 @@ class VoicePanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
             MotionEvent.ACTION_CANCEL -> { handler.removeCallbacks(repeat); pressed = null; invalidate() }
         }
         return true
+    }
+
+    private companion object {
+        /** A frame while listening: about 30 a second, as often as the microphone reports. */
+        const val LISTEN_FRAME_MS = 33L
     }
 }

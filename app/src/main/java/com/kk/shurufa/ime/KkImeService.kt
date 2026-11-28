@@ -504,6 +504,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
             SharkLife.greet(greetingAt)
         }
         if (!prefs.incognito) kay.prefetch()
+        SharkLife.saver = prefs.powerSave()
         // back after a long while: it wakes with a start
         if (!restarting && greeting == null) SharkLife.woke(SystemClock.uptimeMillis())
         if (built) { paintNavigationBar(); show(panel) }
