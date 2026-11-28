@@ -1,4 +1,4 @@
-add_library(kk_rime SHARED kk_rime.cc kk_corrector.cc)
+add_library(kk_rime SHARED kk_rime.cc kk_core.cc kk_corrector.cc)
 target_link_libraries(kk_rime rime-static libopencc)
 if(ANDROID)
   target_link_libraries(kk_rime log)

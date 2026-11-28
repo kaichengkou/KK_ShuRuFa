@@ -1,0 +1,98 @@
+name: Build iOS
+
+# The iOS keyboard (ios/): builds librime for the iPhone, compiles the dictionaries, runs the
+# tests on the simulator and packs an unsigned .ipa to sign and install (see ios/README.md).
+on:
+  push:
+    paths:
+      - "ios/**"
+      - "app/src/main/jni/**"
+      - "app/src/main/assets/layouts/**"
+      - "app/src/main/assets/data/*_words.txt"
+      - "rime-data/**"
+      - ".github/workflows/ios.yml"
+  pull_request:
+    paths:
+      - "ios/**"
+      - "app/src/main/jni/**"
+      - "app/src/main/assets/layouts/**"
+      - "rime-data/**"
+      - ".github/workflows/ios.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      # only what the iOS build needs (pinyin-data's own submodules nest without end; whisper is Android only)
+      - name: Submodules
+        run: |
+          git submodule update --init --depth 1 app/src/main/jni/librime app/src/main/jni/librime-lua \
+            app/src/main/jni/librime-lua-deps app/src/main/jni/librime-octagram app/src/main/jni/snappy rime-data/rime-ice
+          git -C app/src/main/jni/librime submodule update --init --depth 1 \
+            deps/leveldb deps/marisa-trie deps/opencc deps/spdlog deps/yaml-cpp
+
+      - name: Cache Boost sources
+        uses: actions/cache@v4
+        with:
+          path: app/src/main/jni/.cache
+          key: boost-1.92.0
+
+      # the native sources as committed (the JNI folder's tree, submodule commits included)
+      - name: Native sources
+        id: native
+        run: echo "tree=$(git rev-parse HEAD:app/src/main/jni)-$(git rev-parse HEAD:ios/RimeKit)-$(git hash-object ios/scripts/build_rimekit.sh)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache RimeKit
+        id: rimekit
+        uses: actions/cache@v4
+        with:
+          path: |
+            ios/build/rimekit
+            ios/build/host/kk_bridge/kk_rime_deploy
+          key: rimekit-${{ steps.native.outputs.tree }}
+
+      - name: Tools
+        run: brew install xcodegen
+
+      - name: Build librime for iOS
+        if: steps.rimekit.outputs.cache-hit != 'true'
+        run: ios/scripts/build_rimekit.sh
+
+      - name: Compile the dictionaries
+        run: ios/scripts/build_rime_data.sh ios/build/host/kk_bridge/kk_rime_deploy ios/build
+
+      - name: Generate the Xcode project
+        working-directory: ios
+        run: xcodegen
+
+      - name: Test on the simulator
+        working-directory: ios
+        run: |
+          set -o pipefail
+          DEVICE=$(xcrun simctl list devices available | grep -m1 -oE 'iPhone [0-9]+[^(]*' | sed 's/ *$//')
+          echo "simulator: $DEVICE"
+          xcodebuild test -project KKShuRuFa.xcodeproj -scheme KKShuRuFa \
+            -destination "platform=iOS Simulator,name=$DEVICE" \
+            CODE_SIGNING_ALLOWED=NO | tee test.log | grep -E '(error|warning: unre|Test Case|Executed|\*\*)' || (tail -80 test.log; exit 1)
+
+      - name: Build for iPhone (unsigned)
+        working-directory: ios
+        run: |
+          set -o pipefail
+          xcodebuild build -project KKShuRuFa.xcodeproj -scheme KKShuRuFa -configuration Release \
+            -sdk iphoneos -derivedDataPath build/dd \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" | tee device.log | grep -E '(error|\*\*)' || (tail -80 device.log; exit 1)
+          mkdir -p build/ipa/Payload
+          cp -R build/dd/Build/Products/Release-iphoneos/KKShuRuFa.app build/ipa/Payload/
+          (cd build/ipa && zip -qry ../KKShuRuFa-unsigned.ipa Payload)
+          du -sh build/ipa/Payload/KKShuRuFa.app build/KKShuRuFa-unsigned.ipa
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: kk-shurufa-ios-unsigned
+          path: ios/build/KKShuRuFa-unsigned.ipa

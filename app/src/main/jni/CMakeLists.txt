@@ -3,7 +3,9 @@
 cmake_minimum_required(VERSION 3.18.0)
 project(kk_rime VERSION 0.1.0)
 
-add_link_options("LINKER:--build-id=none")
+if(NOT APPLE)
+  add_link_options("LINKER:--build-id=none")
+endif()
 set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake" ${CMAKE_MODULE_PATH})
 
 option(BUILD_SHARED_LIBS "" OFF)
@@ -81,7 +83,12 @@ endif()
 add_subdirectory(librime)
 target_compile_options(rime-static PRIVATE "-Wno-error=deprecated-declarations")
 
-add_subdirectory(kk_rime)
+# The iOS keyboard builds the same engine with its own C bridge (ios/RimeKit) instead of the JNI one.
+if(KK_BRIDGE_DIR)
+  add_subdirectory("${KK_BRIDGE_DIR}" kk_bridge)
+else()
+  add_subdirectory(kk_rime)
+endif()
 
 # Voice input: whisper.cpp (ggml on the CPU) in its own library, loaded only when used.
 if(ANDROID)

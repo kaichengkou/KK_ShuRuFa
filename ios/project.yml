@@ -1,0 +1,110 @@
+# Xcode project for the iOS keyboard, generated with XcodeGen (`xcodegen` in this folder):
+# the .xcodeproj is not committed. Build the native part first (see README.md).
+name: KKShuRuFa
+options:
+  bundleIdPrefix: com.kk
+  deploymentTarget:
+    iOS: "16.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    CODE_SIGN_STYLE: Automatic
+    DEVELOPMENT_TEAM: ""
+    TARGETED_DEVICE_FAMILY: "1,2"
+packages:
+  Yams:
+    url: https://github.com/jpsim/Yams
+    exactVersion: 5.1.3
+targets:
+  # what both the app and the keyboard use: layouts, word lists, text rules, settings
+  KKCore:
+    type: framework
+    platform: iOS
+    sources: [Core]
+    dependencies:
+      - package: Yams
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.kk.shurufa.core
+        APPLICATION_EXTENSION_API_ONLY: YES
+        GENERATE_INFOPLIST_FILE: YES
+        SKIP_INSTALL: YES
+
+  KKKeyboard:
+    type: app-extension
+    platform: iOS
+    sources:
+      - Keyboard
+      # the layouts and word lists of the Android app, as they are
+      - path: ../app/src/main/assets/layouts
+        type: folder
+        buildPhase: resources
+      - path: ../app/src/main/assets/data/ru_words.txt
+        buildPhase: resources
+      - path: ../app/src/main/assets/data/en_words.txt
+        buildPhase: resources
+      # Rime's shared data with the compiled dictionaries (scripts/build_rime_data.sh)
+      - path: build/RimeShared
+        type: folder
+        buildPhase: resources
+    dependencies:
+      - target: KKCore
+        embed: false
+    entitlements:
+      path: Keyboard/Keyboard.entitlements
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.kk.shurufa.keyboard
+        PRODUCT_NAME: KKKeyboard
+        INFOPLIST_FILE: Keyboard/Info.plist
+        APPLICATION_EXTENSION_API_ONLY: YES
+        # librime and its dependencies, one static library per platform (scripts/build_rimekit.sh)
+        SWIFT_INCLUDE_PATHS: $(SRCROOT)/RimeKit/include
+        HEADER_SEARCH_PATHS: $(SRCROOT)/RimeKit/include
+        LIBRARY_SEARCH_PATHS: $(SRCROOT)/build/rimekit/$(PLATFORM_NAME)
+        OTHER_LDFLAGS: [-lRimeKit, -lc++]
+
+  KKShuRuFa:
+    type: application
+    platform: iOS
+    sources: [App]
+    dependencies:
+      - target: KKCore
+      - target: KKKeyboard
+    entitlements:
+      path: App/App.entitlements
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.kk.shurufa
+        PRODUCT_NAME: KKShuRuFa
+        INFOPLIST_FILE: App/Info.plist
+
+  KKCoreTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - Tests
+      - path: ../app/src/main/assets/layouts
+        type: folder
+        buildPhase: resources
+      - path: ../app/src/main/assets/data/ru_words.txt
+        buildPhase: resources
+      - path: ../app/src/main/assets/data/en_words.txt
+        buildPhase: resources
+    dependencies:
+      - target: KKCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.kk.shurufa.tests
+        GENERATE_INFOPLIST_FILE: YES
+
+schemes:
+  KKShuRuFa:
+    build:
+      targets:
+        KKShuRuFa: all
+    test:
+      targets: [KKCoreTests]
