@@ -88,7 +88,7 @@ class QuickPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
             drawText(c, row.label, padX + dp(2f), y + rowH / 2, tp)
             var x = padX + dp(40f)
             for (tile in row.tiles) {
-                tp.typeface = Ui.regular; tp.textSize = sp(Ui.SMALL + 1f)
+                tp.typeface = Ui.regular; tp.textSize = sp(Ui.LABEL)
                 // in a row, only a real icon: a text glyph (日 before 日期) would say the name twice
                 val glyph = glyphOf(tile.id)?.takeIf { Icons.all.containsKey(it) }
                 val cw = tp.measureText(tile.title) + dp(if (glyph != null) 42f else 26f)
@@ -120,7 +120,7 @@ class QuickPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
 
     /** How wide a row's chips are together (to know whether it needs a second line). */
     private fun rowWidth(s: Section): Float {
-        tp.typeface = Ui.regular; tp.textSize = sp(Ui.SMALL + 1f)
+        tp.typeface = Ui.regular; tp.textSize = sp(Ui.LABEL)
         return s.tiles.sumOf { t ->
             val g = glyphOf(t.id)?.takeIf { Icons.all.containsKey(it) }
             (tp.measureText(t.title) + dp(if (g != null) 42f else 26f) + dp(6f)).toDouble()
@@ -149,7 +149,7 @@ class QuickPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
         val glyph = glyphOf(tile.id)
         val gx = rr.left + dp(18f)
         if (glyph != null) drawGlyph(c, glyph, gx, rr.centerY(), dp(16f), ink, filled = glyph == "ai" && on > 0.5f)
-        tp.textAlign = Paint.Align.LEFT; tp.typeface = if (on > 0.5f) Ui.medium else Ui.regular; tp.textSize = sp(Ui.SMALL + 1f)
+        tp.textAlign = Paint.Align.LEFT; tp.typeface = if (on > 0.5f) Ui.medium else Ui.regular; tp.textSize = sp(Ui.LABEL)
         tp.color = ink
         val title = if (tile.sub.isNotEmpty()) "${tile.title} ${tile.sub}" else tile.title
         val left = if (glyph != null) gx + dp(14f) else rr.left + dp(12f)
@@ -168,7 +168,7 @@ class QuickPanel(context: Context, prefs: Prefs) : KbView(context, prefs) {
         val ink = Colors.fade(t.ink, alpha)
         var tx = rr.left + dp(13f)
         if (glyph != null) { drawGlyph(c, glyph, rr.left + dp(19f), rr.centerY(), dp(15f), Colors.fade(t.inkSoft, alpha)); tx = rr.left + dp(31f) }
-        tp.textAlign = Paint.Align.LEFT; tp.typeface = Ui.regular; tp.textSize = sp(Ui.SMALL + 1f); tp.color = ink
+        tp.textAlign = Paint.Align.LEFT; tp.typeface = Ui.regular; tp.textSize = sp(Ui.LABEL); tp.color = ink
         drawText(c, tile.title, tx, rr.centerY(), tp)
     }
 

@@ -50,6 +50,8 @@ class Haptics(context: Context, private val prefs: Prefs) {
     private val worker = Handler(thread.looper)
     private val effects = ConcurrentHashMap<HapticEvent, Any>()
     private val none = Any()
+    private val touch: android.os.VibrationAttributes? =
+        if (Build.VERSION.SDK_INT >= 33) android.os.VibrationAttributes.createForUsage(android.os.VibrationAttributes.USAGE_TOUCH) else null
 
     /** Settings changed: build the effects again on next use. */
     fun invalidate() = effects.clear()
@@ -58,7 +60,10 @@ class Haptics(context: Context, private val prefs: Prefs) {
         if (!prefs.vibrate) return
         worker.post {
             val effect = effects.getOrPut(e) { build(e) ?: none }
-            if (effect is VibrationEffect) runCatching { vib.vibrate(effect) }
+            if (effect is VibrationEffect) runCatching {
+                // as touch feedback: the system's 触摸振动 setting and strength apply to it
+                if (Build.VERSION.SDK_INT >= 33) vib.vibrate(effect, touch!!) else vib.vibrate(effect)
+            }
         }
     }
 

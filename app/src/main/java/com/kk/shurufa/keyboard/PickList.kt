@@ -94,7 +94,7 @@ class PickList(private val host: View) {
             if (i == pressed || on) {
                 bg.color = if (i == pressed) theme.softPressed else theme.accentSoft
                 val rr = RectF(r).apply { inset(dp(2f), dp(2f)) }
-                c.drawRoundRect(rr, dp(10f), dp(10f), bg)
+                c.drawRoundRect(rr, (radius - dp(4f)).coerceAtLeast(dp(2f)), (radius - dp(4f)).coerceAtLeast(dp(2f)), bg)
             } else if (i > 0 && items[i - 1].id != current && i - 1 != pressed) {
                 bg.color = theme.divider
                 c.drawRect(r.left + dp(12f), r.top - dp(0.4f), r.right - dp(12f), r.top + dp(0.4f), bg)
@@ -102,7 +102,7 @@ class PickList(private val host: View) {
             // check · name ··········· service
             val checkW = dp(26f)
             if (on) { ip.color = theme.accent; Icons.draw(c, "check", r.left + dp(18f), r.centerY(), dp(15f), ip) }
-            tp.textAlign = Paint.Align.RIGHT; tp.textSize = sp(Ui.CAPTION + 0.5f); tp.typeface = Ui.regular
+            tp.textAlign = Paint.Align.RIGHT; tp.textSize = sp(Ui.CAPTION); tp.typeface = Ui.regular
             tp.color = if (on) theme.accent else theme.hint
             val subW = if (it.sub.isEmpty()) 0f else min(tp.measureText(it.sub), r.width() * 0.35f)
             val sub = TextUtils.ellipsize(it.sub, tp, subW, TextUtils.TruncateAt.END).toString()

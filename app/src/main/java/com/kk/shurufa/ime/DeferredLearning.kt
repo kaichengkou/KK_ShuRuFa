@@ -67,7 +67,9 @@ class DeferredLearning(private val delayMs: Long = DELAY_MS) {
     private fun teach(list: List<Item>) {
         list.forEach { onTaught?.invoke(it) }
         val rime = list.filter { it.input.isNotEmpty() }
-        if (rime.isNotEmpty()) com.kk.shurufa.rime.RimeEngine.whenReady { for (i in rime) runCatching { RimeBridge.learn(i.input, i.text) } }
+        // one job each: the engine's lock is let go between them, so keys typed meanwhile (in the
+        // next field, right after leaving this one) do not wait for the whole list
+        for (i in rime) com.kk.shurufa.rime.RimeEngine.whenReady { runCatching { RimeBridge.learn(i.input, i.text) } }
     }
 
     val pending get() = items.size

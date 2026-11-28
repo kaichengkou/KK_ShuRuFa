@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.width
@@ -341,3 +342,17 @@ internal fun PickRow(title: String, value: String, onClick: () -> Unit) {
         Text("$value ▾", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Medium)
     }
 }
+
+/** The app's own icon as on the home screen (misty blue, the shark over it), at [size]. */
+@Composable
+internal fun AppIcon(size: androidx.compose.ui.unit.Dp) {
+    androidx.compose.foundation.layout.Box(Modifier.size(size).clip(androidx.compose.foundation.shape.RoundedCornerShape(size * 0.3f))
+        .background(APP_ICON_BG),
+        contentAlignment = androidx.compose.ui.Alignment.Center) {
+        androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(com.kk.shurufa.R.drawable.ic_launcher_foreground), null,
+            modifier = Modifier.requiredSize(size * 1.5f))
+    }
+}
+
+/** The icon's background, the same as the launcher icon's. */
+private val APP_ICON_BG = Color(0xFFC3D8E6)

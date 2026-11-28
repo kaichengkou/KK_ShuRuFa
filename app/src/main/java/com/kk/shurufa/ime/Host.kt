@@ -11,15 +11,13 @@ enum class Panel { LETTERS, NUM, SYMBOLS, MATH, PHONE, CURSOR, CLIPBOARD, CANDID
 
 /**
  * 输入到查询: the keys type into a query of the keyboard's own instead of the app, and the bar
- * shows what the query finds. One mechanism for three tools.
+ * shows what the query finds. One mechanism for both.
  */
 enum class Sink {
     /** 表情查找: emoji whose names match. */
     EMOJI,
     /** 翻译: the translation strip above the bar. */
     TRANSLATE,
-    /** AI 输入指令: an instruction for the AI panel. */
-    AI,
 }
 
 /**

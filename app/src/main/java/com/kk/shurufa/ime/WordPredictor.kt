@@ -65,7 +65,9 @@ class WordPredictor(private val context: Context, val lang: String) {
         }
         // what this person writes, also words the table does not have: a word used a few times
         // outranks rare dictionary words
-        for ((k, n) in used) if (k.startsWith(low)) score[k] = (score[k] ?: (100.0 + bonus(k, follows))) + 10 + 35 * ln(1.0 + n)
+        for ((k, n) in usedStarting(low)) score[k] = (score[k] ?: (100.0 + bonus(k, follows))) + 10 + 35 * ln(1.0 + n)
+        // 不再联想: words the person took off the suggestions stay off
+        score.keys.removeAll { muted(it) }
         val ranked = score.entries.filter { it.key != low }.sortedByDescending { it.value }
         // the typed letters as a word of their own go first only when about as likely as the best
         // completion (как, but not the rare мо while 'могу' is meant)
@@ -80,6 +82,29 @@ class WordPredictor(private val context: Context, val lang: String) {
         val f = forms[word] ?: tableForm(word)
         val allCaps = typed.length >= 2 && typed.all { !it.isLetter() || it.isUpperCase() }
         return if (f != null && !allCaps) f else matchCase(word, typed)
+    }
+
+    /** A word on the 不再联想 list (as written there, or in lowercase). */
+    private fun muted(w: String) = Muted.has(context, w) || Muted.has(context, w.lowercase())
+
+    /**
+     * Learned words starting with [low]: the learned words kept sorted, so a key reads only the
+     * ones that match instead of every word this person ever wrote.
+     */
+    private fun usedStarting(low: String): List<Pair<String, Int>> = synchronized(this) {
+        val idx = usedIndex ?: java.util.TreeMap(used).also { usedIndex = it }
+        idx.subMap(low, low + '\uffff').map { it.key to it.value }
+    }
+    /** [used] sorted, made again after it changes. */
+    private var usedIndex: java.util.TreeMap<String, Int>? = null
+
+    /** [word] taken off the suggestions: what was learned of it goes too. */
+    fun forget(word: String) {
+        val low = word.lowercase()
+        synchronized(this) {
+            used.remove(low); forms.remove(low); after.values.forEach { it.remove(low) }; after.remove(low)
+            usedIndex = null; dirty = true
+        }
     }
 
     /** The best-scored words starting with the letter [low], by letter, read once each. */
@@ -106,7 +131,7 @@ class WordPredictor(private val context: Context, val lang: String) {
                 .forEachIndexed { i, w -> if (w !in out) out[w] = 40.0 - i }
             common.forEachIndexed { i, w -> if (w !in out) out[w] = 20.0 - i }
         }
-        return out.entries.sortedByDescending { it.value }.map { it.key }.take(max)
+        return out.entries.sortedByDescending { it.value }.map { it.key }.filter { !muted(it) }.take(max)
             .map { w -> forms[w] ?: tableForm(w) ?: if (capital) w.replaceFirstChar { c -> c.uppercase() } else w }
     }
 
@@ -160,7 +185,7 @@ class WordPredictor(private val context: Context, val lang: String) {
         val w = word.lowercase()
         synchronized(this) {
             kept += w
-            if (learn) { used[w] = maxOf(2, (used[w] ?: 0) + 1); dirty = true }
+            if (learn) { used[w] = maxOf(2, (used[w] ?: 0) + 1); usedIndex = null; dirty = true }
         }
     }
 
@@ -226,6 +251,7 @@ class WordPredictor(private val context: Context, val lang: String) {
         if (w.length < 2 || w.length > 30) return
         synchronized(this) {
             used[w] = (used[w] ?: 0) + 1
+            usedIndex = null
             // the written form: a capital inside a sentence (Леонидович) or capitals throughout (МГУ)
             // is how the word is written; a capital opening a sentence only for a word the table lacks
             if (word != w) {
@@ -243,7 +269,7 @@ class WordPredictor(private val context: Context, val lang: String) {
 
     /** Forgets everything learned. */
     fun clearLearned() {
-        synchronized(this) { used.clear(); after.clear(); forms.clear(); dirty = false }
+        synchronized(this) { used.clear(); after.clear(); forms.clear(); usedIndex = null; dirty = false }
         Background.run { file.delete() }
     }
 
@@ -292,6 +318,7 @@ class WordPredictor(private val context: Context, val lang: String) {
                 if (quarters > 0) { age(quarters); agedAt = then.plusMonths(quarters.toLong() * AGE_MONTHS).toString(); dirty = true }
                 else agedAt = then.toString()
             }
+            usedIndex = null
         }
     }
 
@@ -303,12 +330,14 @@ class WordPredictor(private val context: Context, val lang: String) {
         forms.keys.retainAll(used.keys)
         for (m in after.values) { m.replaceAll { _, n -> n shr shift }; m.values.removeAll { it == 0 } }
         after.values.removeAll { it.isEmpty() }
+        usedIndex = null
     }
 
     /** Keeps the most used words (and the pairs that lead to them) when the memory grows big. */
     private fun trim() {
         val keep = used.entries.sortedByDescending { it.value }.take(MAX_WORDS * 3 / 4).map { it.key }.toHashSet()
         used.keys.retainAll(keep)
+        usedIndex = null
         forms.keys.retainAll(keep)
         after.keys.retainAll(keep + "^")
         for (m in after.values) m.keys.retainAll(keep)

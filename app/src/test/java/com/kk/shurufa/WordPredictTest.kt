@@ -40,6 +40,27 @@ class WordPredictTest {
         return p
     }
 
+    /** 不再联想 on a Russian word: it is kept off the completions and the next words alike. */
+    @Test fun mutedWordsStayOff() {
+        val p = loaded()
+        val first = p.complete("при", emptyList()).first()
+        com.kk.shurufa.ime.Muted.add(ctx, first.lowercase())
+        try {
+            assertTrue("$first is muted", first !in p.complete("при", emptyList()))
+            assertTrue(p.following(emptyList(), capital = false).none { it.equals(first, ignoreCase = true) })
+        } finally { com.kk.shurufa.ime.Muted.remove(ctx, first.lowercase()) }
+        assertEquals(first, p.complete("при", emptyList()).first())
+    }
+
+    /** Learned words are found by their first letters, and the index follows what is learned. */
+    @Test fun learnedWordsByPrefix() {
+        val p = loaded()
+        p.learn(emptyList(), "Шмыгалово")
+        assertTrue(p.complete("шмы", emptyList()).any { it.equals("Шмыгалово", ignoreCase = true) })
+        p.forget("Шмыгалово")
+        assertTrue(p.complete("шмы", emptyList()).none { it.equals("Шмыгалово", ignoreCase = true) })
+    }
+
     @Test fun splitsTheTextBeforeTheCaret() {
         assertEquals("мо" to listOf("я", "не"), WordPredictor.split("Ну, я не мо"))
         assertEquals("" to listOf("я", "не"), WordPredictor.split("я не "))

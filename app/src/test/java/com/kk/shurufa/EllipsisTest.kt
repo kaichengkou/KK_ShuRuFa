@@ -56,4 +56,12 @@ class EllipsisTest {
     @Test fun russian() {
         assertEquals("Да…", typing("ru,zh") { _, tap -> tap("Да"); tap("."); tap(".") })
     }
+
+    @Test fun threePeriodsStayOneEllipsis() {
+        // ... typed quickly is …, not ….
+        assertEquals("Да…", typing("ru,zh") { _, tap -> tap("Да"); tap("."); tap("."); tap(".") })
+        assertEquals("好……", typing("zh") { _, tap -> tap("好"); tap("。"); tap("。"); tap("。") })
+        // a fourth, after a pause, is a period of its own
+        assertEquals("Да….", typing("ru,zh") { _, tap -> tap("Да"); tap("."); tap("."); tap("."); pause(500); tap(".") })
+    }
 }

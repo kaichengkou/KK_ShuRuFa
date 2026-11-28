@@ -40,9 +40,12 @@ class Editor(private val ime: InputMethodService, private val prefs: Prefs) {
     var stats: TypingStats? = null
     var recording = true
 
-    private fun record(text: String, source: TypingStats.Source) {
-        if (recording) stats?.record(text, source)
+    private fun record(text: String, source: TypingStats.Source, words: Boolean = true) {
+        if (recording) stats?.record(text, source, words)
     }
+
+    /** A Russian or English word just finished, for the word cloud of 打字数据. */
+    fun countWord(word: String) { if (recording) stats?.word(word) }
 
     /** Selection as last reported by the editor. */
     var selStart = 0
@@ -99,7 +102,9 @@ class Editor(private val ime: InputMethodService, private val prefs: Prefs) {
 
     /** Absolute selection (start, end) in the field, or null when the editor does not say. */
     fun selection(): Pair<Int, Int>? {
-        val et = ic?.getExtractedText(ExtractedTextRequest(), 0) ?: return null
+        // only the offsets are wanted: an editor that honours the hint sends a few characters, not
+        // the whole document (a long one is a lot to send for each bracket typed)
+        val et = ic?.getExtractedText(ExtractedTextRequest().apply { hintMaxChars = 64 }, 0) ?: return null
         return (et.startOffset + minOf(et.selectionStart, et.selectionEnd)) to (et.startOffset + maxOf(et.selectionStart, et.selectionEnd))
     }
 
@@ -215,6 +220,9 @@ class Editor(private val ime: InputMethodService, private val prefs: Prefs) {
         ic.commitText(text, 1)
         ic.endBatchEdit()
         history.push(EditHistory.Op.Replace(old, text))
+        // what it adds (the rest of a word picked from the suggestions) is counted; a word
+        // corrected in place was counted as it was typed
+        if (text.length > old.length) record(text.substring(old.length), TypingStats.Source.TYPED, words = false)
     }
 
     /**

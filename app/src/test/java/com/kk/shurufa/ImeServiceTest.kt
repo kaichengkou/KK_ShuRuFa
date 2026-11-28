@@ -162,7 +162,7 @@ class ImeServiceTest {
         ime.onFunction(Key(fn = "simple")); idle()
         ime.onFunction(Key(fn = "abc")); idle()
         assertEquals(Panel.LETTERS, ime.panel)
-        // the three queries: translation, emoji search, an AI instruction
+        // the queries: translation, emoji search, 改写
         ime.onTool("translate"); idle()
         assertEquals(Sink.TRANSLATE, ime.sink)
         shot(view, "${tag}_translate")
@@ -176,12 +176,12 @@ class ImeServiceTest {
         ime.onDismissSuggestions(); idle()
         assertNull(ime.sink)
         assertEquals("closing the search goes back to the emoji panel", Panel.EMOJI, ime.panel)
+        // 改写 open from ✦: the lit button closes it again, as 译 closes 翻译
+        ime.openStrip("rewrite"); idle()
+        assertEquals(Sink.TRANSLATE, ime.sink)
         ime.onTool("ai"); idle()
-        ime.openSink(Sink.AI); idle()
-        assertEquals(Sink.AI, ime.sink)
-        shot(view, "${tag}_ai_instruction")
-        ime.onDismissSuggestions(); idle()
-        assertEquals(Panel.AI, ime.panel)
+        assertNull(ime.sink)
+        assertEquals(Panel.LETTERS, ime.panel)
         // a notice floats above the keyboard; the window's transparent top is kept in this shot
         ime.notice("已复制"); idle(100)
         shot(view, "${tag}_notice", whole = true)

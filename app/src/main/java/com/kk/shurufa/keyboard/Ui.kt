@@ -46,12 +46,20 @@ object Ui {
     const val CAPTION = 11f
     /** Section titles, secondary lines, the pinyin above the candidates. */
     const val SMALL = 12f
+    /** Labels of small chips and tabs, the text of cards in narrow columns. */
+    const val LABEL = 13f
     /** Chips, buttons, tabs, menu items, panel text. */
     const val BODY = 14f
+    /** A line that leads its panel: the greeting, an answer's first words, the 浮窗's pills. */
+    const val EMPHASIS = 15f
     /** Emphasized single lines: results, statuses. */
     const val TITLE = 16f
     /** Candidates and symbol cells. */
     const val CANDIDATE = 18f
+    /** A character standing in for an icon on the toolbar (译). */
+    const val GLYPH = 17f
+    /** The pinyin being edited in place on the bar. */
+    const val PINYIN_EDIT = 21f
     /** Words on function keys (!#1, ABC, 符号, 空格). */
     const val KEY_WORD = 14.5f
     /** Letters and digits. */

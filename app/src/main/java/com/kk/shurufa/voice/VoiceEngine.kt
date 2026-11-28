@@ -239,9 +239,10 @@ class VoiceEngine(private val context: Context, private val prefs: Prefs) {
         }
     }
 
+    /** The characters the keyboard writes: Simplified, or Traditional when 繁体 is on (the models answer in either). */
     private fun simplified(t: String): String {
         if (!RimeEngine.ready || t.isEmpty()) return t
-        val cfg = File(RimeEngine.sharedDir(context), "opencc/t2s.json")
+        val cfg = File(RimeEngine.sharedDir(context), if (prefs.zhTraditional) "opencc/s2t.json" else "opencc/t2s.json")
         return if (cfg.isFile) runCatching { RimeBridge.t2s(t, cfg.absolutePath) }.getOrDefault(t) else t
     }
 
