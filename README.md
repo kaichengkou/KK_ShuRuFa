@@ -64,7 +64,7 @@
 
 ## 安装
 
-在 [Actions](../../actions) 页面下载最新构建的 `kk-shurufa` APK。安装后打开应用，按页面提示两步启用并切换为当前输入法。首次输入中文前会部署词库，约需一分钟，之后的更新只在词库内容变化时才重新部署。
+在 [Releases](../../releases) 页面下载正式版 APK，或在 [Actions](../../actions) 页面下载每次提交的 `kk-shurufa` 构建。安装后打开应用，按页面提示两步启用并切换为当前输入法。首次输入中文前会部署词库，约需一分钟，之后的更新只在词库内容变化时才重新部署。
 
 需要 Android 8.0 或更高版本，目前提供 arm64 构建。
 
@@ -77,6 +77,8 @@ cd KK_ShuRuFa
 ```
 
 需要 JDK 17+、Android SDK 35、NDK 27.2.12479018 和 CMake 3.22.1。首次编译会下载 Boost 源码。
+
+发版：改好 `app/build.gradle.kts` 里的 `versionName` 后推送同名 tag（如 `git tag v0.19.7 && git push origin v0.19.7`），CI 构建完会自动发布带 APK 的 Release。tag 与 `versionName` 不一致时发布会失败。
 
 `./gradlew testDebugUnitTest` 运行全部单元测试，并将键盘、各面板与设置页的浅色和深色截图渲染到 `app/build/screens/`。
 
