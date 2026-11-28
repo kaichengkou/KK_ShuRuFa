@@ -152,7 +152,7 @@ class Prefs(context: Context) {
     val kaySaySize get() = sp.getInt(KAY_SAY_SIZE, 100) / 100f
     /** 云联想: characters before the caret sent, the pause before asking (ms), how many continuations. */
     val cloudContext get() = sp.getInt(CLOUD_CONTEXT, 80)
-    val cloudPauseMs get() = sp.getInt(CLOUD_PAUSE, 600)
+    val cloudPauseMs get() = sp.getInt(CLOUD_PAUSE, 300)
     /** 云联想 and AI 候选 only on networks that are not metered (Wi-Fi), where a request costs little. */
     val aiUnmeteredOnly get() = b(AI_UNMETERED, false)
     /** Whether the quick AI features (云联想, AI 候选) may ask now. */
@@ -180,12 +180,17 @@ class Prefs(context: Context) {
     }
 
     /**
-     * 云联想's pause before asking: on mobile data or in 省电模式 longer (at least 1.5 s), so that
-     * typing with short pauses does not keep the radio awake with a request after every word.
+     * 云联想's pause before asking: in 省电模式 longer (at least 1.5 s), so that typing with short
+     * pauses does not keep the radio awake with a request after every word; on mobile data a
+     * little longer (requests there are not sent ahead, see CloudPredict).
      */
     val cloudPauseNowMs: Long get() {
         val base = cloudPauseMs.toLong()
-        return if (metered() || powerSave()) maxOf(base * 5 / 2, 1500L) else base
+        return when {
+            powerSave() -> maxOf(base * 5 / 2, 1500L)
+            metered() -> maxOf(base * 3 / 2, 450L)
+            else -> base
+        }
     }
     val cloudCount get() = sp.getInt(CLOUD_COUNT, 3)
     /** AI 候选: syllables before it asks, the pause (ms), characters of context sent. */

@@ -195,9 +195,16 @@ class Editor(private val ime: InputMethodService, private val prefs: Prefs) {
     }
 
     /** Shows [text] as composing text (replaced by the next compose or commit). */
-    fun compose(text: String) { dirty(); composingShown = text.isNotEmpty(); ic?.setComposingText(text, 1) }
+    fun compose(text: String) { dirty(); composingShown = text.isNotEmpty(); composed = text; ic?.setComposingText(text, 1) }
     /** Pinyin is shown in the field (内嵌拼音), as composing text. */
     private var composingShown = false
+    private var composed = ""
+
+    /** The text before the caret without the pinyin shown in the field (内嵌拼音), if it is. */
+    fun textBeforeComposing(n: Int): String {
+        if (!composingShown) return textBefore(n)
+        return textBefore(n + composed.length).removeSuffix(composed).takeLast(n)
+    }
 
     fun finishComposingText() { dirty(); composingShown = false; ic?.finishComposingText() }
 

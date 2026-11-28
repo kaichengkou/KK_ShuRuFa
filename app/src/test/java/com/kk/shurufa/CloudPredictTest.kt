@@ -13,4 +13,21 @@ class CloudPredictTest {
         // a line that only repeats the end of the text is dropped
         assertEquals(listOf("you doing today"), CloudPredict.parse("how are\nyou doing today", "how are"))
     }
+
+    /** Text that goes on the way a continuation said gets the rest of it, without asking. */
+    @Test fun continuesWhatWasSaid() {
+        val given = listOf("我今天" to listOf("想去看电影", "有点累", "想吃火锅"))
+        assertEquals(listOf("看电影"), CloudPredict.continuation(given, "我今天想去"))
+        assertEquals(listOf("去看电影", "吃火锅"), CloudPredict.continuation(given, "我今天想"))
+        assertEquals(listOf("to the park"), CloudPredict.continuation(listOf("I am " to listOf("going to the park", "fine")), "I am going "))
+        // all of it typed, or something else: nothing
+        assertEquals(null, CloudPredict.continuation(given, "我今天有点累"))
+        assertEquals(null, CloudPredict.continuation(given, "我今天不去"))
+        assertEquals(null, CloudPredict.continuation(given, "我今天"))
+    }
+
+    @Test fun sentenceEnds() {
+        for (t in listOf("好的。", "真的吗？", "我想想，", "OK. ", "Да!")) assertEquals(t, true, CloudPredict.sentenceEnd(t))
+        for (t in listOf("我想去", "how are ", "")) assertEquals(t, false, CloudPredict.sentenceEnd(t))
+    }
 }

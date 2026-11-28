@@ -133,7 +133,106 @@ object Llm {
         // an answer that comes late is no use while typing: short timeouts, so a stalled request
         // does not hold its thread (and the text it was for) for a minute and a half
         quick.set(true)
-        try { return completeQuickRun(prefs, id, m, system, user, cancelled, think) } finally { quick.set(false) }
+        // a model that was slow to start lately: a lighter one of the same service, if it has one
+        val all = (listOf(m) + fallbacks(prefs, id)).distinct()
+        val use = all.firstOrNull { !slow(id, it) } ?: m
+        try {
+            return withFirstToken(QUICK_FIRST_MS) { completeQuickRun(prefs, id, use, system, user, cancelled, think) }
+        } catch (e: SlowStart) {
+            markSlow(id, use)
+            error("$use 迟迟没有开口")
+        } finally { quick.set(false) }
+    }
+
+    /**
+     * Models of [id] to fall back on when the chosen one is overloaded, retired or slow to start:
+     * Gemini's light models; for the services' own addresses their quick model.
+     */
+    private fun fallbacks(prefs: Prefs, id: String): List<String> = when {
+        protocol(prefs, id) == "gemini" -> GEMINI_FALLBACK
+        id == "claude" -> listOf("claude-haiku-5-5")
+        id in FAST && base(prefs, id) == provider(id).defaultBase -> listOfNotNull(FAST[id])
+        else -> emptyList()
+    }
+    private val FAST = mapOf("openai" to "gpt-5-mini", "deepseek" to "deepseek-chat")
+
+    // ---- 首字超时: a request whose first word does not come in time is given up ----
+
+    /** The first word of an answer did not come in time. */
+    class SlowStart : RuntimeException()
+
+    /** Watches one request: closes it when nothing came within [limitMs]. */
+    private class FirstToken(private val limitMs: Long) {
+        @Volatile var fired = false
+            private set
+        @Volatile private var got = false
+        @Volatile private var close: (() -> Unit)? = null
+        @Volatile private var task: java.util.concurrent.ScheduledFuture<*>? = null
+        fun start() {
+            task = watchdog.schedule({ if (!got) { fired = true; close?.let { runCatching(it) } } }, limitMs, java.util.concurrent.TimeUnit.MILLISECONDS)
+        }
+        /** How to close what is on its way now (each new connection of the request). */
+        fun attach(c: () -> Unit) { close = c; if (fired) runCatching(c) }
+        fun got() { if (!got) { got = true; task?.cancel(false) } }
+        fun end() { task?.cancel(false) }
+    }
+    private val firstToken = ThreadLocal<FirstToken?>()
+    private val watchdog = java.util.concurrent.Executors.newSingleThreadScheduledExecutor { r -> Thread(r, "kk-first-word").apply { isDaemon = true } }
+
+    private inline fun <T> withFirstToken(limitMs: Long, block: () -> T): T {
+        val ft = FirstToken(limitMs)
+        val prev = firstToken.get()
+        firstToken.set(ft); ft.start()
+        try {
+            val r = block()
+            if (ft.fired) throw SlowStart()
+            return r
+        } catch (e: SlowStart) { throw e
+        } catch (e: Throwable) {
+            if (ft.fired) throw SlowStart()
+            throw e
+        } finally { ft.end(); firstToken.set(prev) }
+    }
+
+    /**
+     * How long the first word may take: thinking and searching take their time before it; an
+     * answer that keeps the user waiting longer goes to a faster model (Nov 2026: Gemini 3.5
+     * Flash once said nothing for 90 s; Flash Lite starts in under a second).
+     */
+    private fun firstWordMs(think: String, search: Boolean): Long =
+        when (think) { "low" -> 12_000L; "medium" -> 25_000L; "high" -> 45_000L; else -> 6_000L } + if (search) 5_000L else 0L
+
+    /** Models slow to start lately ("id|model"), until when the next one is asked instead. */
+    private val slowUntil = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    private const val SLOW_PAUSE_MS = 10 * 60_000L
+    private fun slow(id: String, m: String) = android.os.SystemClock.elapsedRealtime() < (slowUntil["$id|$m"] ?: 0L)
+    private fun markSlow(id: String, m: String) { slowUntil["$id|$m"] = android.os.SystemClock.elapsedRealtime() + SLOW_PAUSE_MS }
+    private const val QUICK_FIRST_MS = 3_000L
+
+    // ---- the connection, opened ahead ----
+
+    private val warmedAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    private const val WARM_MS = 4 * 60_000L
+
+    /**
+     * Opens a connection to [target]'s service (a HEAD request, nothing sent), so the request
+     * that follows within a few minutes needs no new connection (TLS: a few hundred ms on a phone).
+     * Blocking; at most once every few minutes for each address.
+     */
+    fun warm(prefs: Prefs, target: String) {
+        val id = targetId(target)
+        if (!configured(prefs, id) || protocol(prefs, id) == "claude") return
+        val b = base(prefs, id)
+        val now = android.os.SystemClock.elapsedRealtime()
+        val last = warmedAt[b]
+        if (last != null && now - last < WARM_MS) return
+        warmedAt[b] = now
+        runCatching {
+            val c = URL(b).openConnection() as HttpURLConnection
+            c.requestMethod = "HEAD"; c.connectTimeout = 3000; c.readTimeout = 3000
+            // read and left open: the connection goes back to the pool for the next request
+            c.responseCode
+        }
     }
 
     /** Set on the thread of a [completeQuick] request: [post] uses the short timeouts. */
@@ -167,20 +266,28 @@ object Llm {
         if (!configured(prefs, id)) error("还没有设置 ${provider(id).title} 的 API Key")
         val m0 = model?.takeIf { it.isNotBlank() } ?: model(prefs, id)
         val think = prefs.aiThinking
-        // a busy free tier (503, 429) is common: wait and try again, then a lighter Gemini model
-        val models = if (protocol(prefs, id) == "gemini") listOf(m0) + GEMINI_FALLBACK.filter { it != m0 } else listOf(m0)
+        // a busy free tier (503, 429) is common: wait and try again, then a lighter model; one
+        // that was slow to start lately is passed over for a while
+        val all = (listOf(m0) + fallbacks(prefs, id)).distinct()
+        val models = all.filter { !slow(id, it) }.ifEmpty { all }
+        val firstMs = firstWordMs(think, search)
         var last: HttpError? = null
+        var slowOne: String? = null
         for (m in models) {
             for (attempt in 0..2) {
                 if (cancelled()) return ""
                 var streamed = false
                 try {
-                    return when (protocol(prefs, id)) {
+                    return withFirstToken(firstMs) { when (protocol(prefs, id)) {
                         // Claude itself, or a service that speaks the Anthropic format at its own address
                         "claude" -> claude(key(prefs, id), m, system, user, { streamed = true; onText(it) }, cancelled, if (id == "claude") null else base(prefs, id), think)
                         "gemini" -> gemini(base(prefs, id), key(prefs, id), m, system, user, { streamed = true; onText(it) }, cancelled, search, think)
                         else -> openAi(base(prefs, id), key(prefs, id), m, system, user, { streamed = true; onText(it) }, cancelled, id, think)
-                    }.trim().also { if (m != m0) remember(prefs, id, model, m0, m, last) }
+                    } }.trim().also { if (m != m0) remember(prefs, id, model, m0, m, last) }
+                } catch (e: SlowStart) {
+                    // nothing within the time: the next, lighter model at once
+                    markSlow(id, m); slowOne = m
+                    break
                 } catch (e: HttpError) {
                     last = e
                     if (streamed) error(e.userMessage())
@@ -190,6 +297,7 @@ object Llm {
                 }
             }
         }
+        if (last == null && slowOne != null) error("$slowOne 超过 ${firstMs / 1000} 秒没有开口，换个快一点的模型试试")
         error(last?.userMessage() ?: "出错了")
     }
 
@@ -451,11 +559,12 @@ object Llm {
         var refused = false
         try {
             client.beta().messages().createStreaming(params).use { stream ->
+                firstToken.get()?.attach { stream.close() }
                 val it = stream.stream().iterator()
                 while (it.hasNext()) {
                     if (cancelled()) break
                     val ev = it.next()
-                    ev.contentBlockDelta().ifPresent { d -> d.delta().text().ifPresent { t -> sb.append(t.text()); out.text(sb) } }
+                    ev.contentBlockDelta().ifPresent { d -> firstToken.get()?.got(); d.delta().text().ifPresent { t -> sb.append(t.text()); out.text(sb) } }
                     ev.messageDelta().ifPresent { m -> m.delta().stopReason().ifPresent { r -> if (r == BetaStopReason.REFUSAL) refused = true } }
                 }
             }
@@ -500,6 +609,7 @@ object Llm {
 
     private fun post(url: String, headers: Map<String, String>, body: JSONObject): HttpURLConnection {
         val c = URL(url).openConnection() as HttpURLConnection
+        firstToken.get()?.attach { c.disconnect() }
         c.requestMethod = "POST"; c.doOutput = true
         if (quick.get()) { c.connectTimeout = QUICK_CONNECT_MS; c.readTimeout = QUICK_READ_MS }
         else { c.connectTimeout = 15000; c.readTimeout = 90000 }
@@ -528,6 +638,7 @@ object Llm {
                 for (line in lines) {
                     if (cancelled()) break
                     if (!line.startsWith("data:")) continue
+                    firstToken.get()?.got()
                     val d = line.removePrefix("data:").trim()
                     // read on to the end: a stream read through gives its connection back for the next request
                     if (d == "[DONE]") continue

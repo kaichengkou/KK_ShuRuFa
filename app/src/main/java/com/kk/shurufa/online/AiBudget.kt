@@ -30,6 +30,13 @@ object AiBudget {
         return times.size < PER_MINUTE
     }
 
+    /** How many more requests this minute allows (0 while the service asked to wait). */
+    @Synchronized fun room(now: Long = SystemClock.elapsedRealtime()): Int {
+        if (now < pausedUntil) return 0
+        while (times.isNotEmpty() && now - times.first() > 60_000) times.removeFirst()
+        return PER_MINUTE - times.size
+    }
+
     @Synchronized fun asked(prefs: Prefs, now: Long = SystemClock.elapsedRealtime()) {
         times.addLast(now)
         val day = today()
@@ -39,6 +46,9 @@ object AiBudget {
     }
 
     @Synchronized fun ok() { strikes = 0 }
+
+    /** For tests: a new minute, no pause. */
+    @Synchronized internal fun reset() { times.clear(); pausedUntil = 0; strikes = 0; justPaused = false }
 
     /** The service said too many: wait. True when this starts a long pause. */
     @Synchronized fun limited(now: Long = SystemClock.elapsedRealtime()): Boolean {
