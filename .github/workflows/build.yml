@@ -21,6 +21,8 @@ jobs:
         with:
           distribution: temurin
           java-version: 21
+          # the downloaded dependencies are kept between runs
+          cache: gradle
 
       - name: Install NDK and CMake
         run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0" "ndk;27.2.12479018" "cmake;3.22.1" > /dev/null

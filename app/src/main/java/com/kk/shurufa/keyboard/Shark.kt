@@ -356,6 +356,12 @@ object SharkLife {
         val saySec: Int = 12,
     )
     @Volatile var tune = Tune()
+    /** The phone is in 省电模式 (set when the keyboard opens). */
+    @Volatile var saver = false
+    /** How long after the last key it still plays and talks by itself. */
+    private const val PLAY_MS = 30_000L
+    /** Asleep, the z rises a step this often. */
+    private const val Z_MS = 3000L
 
     /** A longer act (唱歌, 敲电脑 …) plays to its end: typing does not cut it short; only a pat does. */
     private var long = false
@@ -523,22 +529,26 @@ object SharkLife {
             for ((p, ms) in anim) { if (t < ms) return p to (ms - t); t -= ms }
         }
         if (anim.isNotEmpty()) { anim = emptyList(); pushFrames = emptySet() }
+        // 省电模式: it still answers a pat or a message sent (above), and otherwise keeps still
+        if (saver) return Shark.Pose(Shark.Face.CALM) to 60_000L
         if (thinking) return Shark.Pose(Shark.Face.LOOKUP, extra = Shark.Extra.BUBBLES, phase = ((now / 380) % 4).toInt()) to (380 - now % 380)
         val idle = if (lastKey == 0L) 0L else now - lastKey
-        // asleep: the z rises once a second; after five minutes it sinks a pixel
+        // asleep: the z rises a step every few seconds; after five minutes it sinks a pixel
         if (idle > 90_000) {
             // after five minutes it sinks a pixel and lies still: nothing to redraw until a key wakes it
             if (idle > 5 * 60_000) return Shark.Pose(Shark.Face.SLEEP, dy = 1, extra = Shark.Extra.Z, phase = 2) to 60_000L
-            return Shark.Pose(Shark.Face.SLEEP, extra = Shark.Extra.Z, phase = ((now / 1000) % 3).toInt()) to minOf(1000 - now % 1000, 5 * 60_000 - idle)
+            return Shark.Pose(Shark.Face.SLEEP, extra = Shark.Extra.Z, phase = ((now / Z_MS) % 3).toInt()) to minOf(Z_MS - now % Z_MS, 5 * 60_000 - idle)
         }
+        // left alone for a while, it stops playing by itself: it only blinks now and then until it dozes off
+        val playful = lastKey > 0 && idle < PLAY_MS
         // now and then, something of its own, typing or not: it does what it likes
         if (nextSay == 0L) nextSay = now + spread(tune.sayEvery) / 2
-        if (now >= nextSay && lastKey > 0) {
+        if (now >= nextSay && playful) {
             nextSay = now + spread(tune.sayEvery)
             if (!(sayText != null && now < sayUntil)) say(now, nextWords(), sayMs())
         }
         if (nextAct == 0L) nextAct = now + spread(tune.actEvery) / 2
-        if (now >= nextAct && lastKey > 0) {
+        if (now >= nextAct && playful) {
             idleAct(now)
             nextAct = now + spread(tune.actEvery) + if (playing(now)) anim.sumOf { it.second } else 0
             if (playing(now)) return frame(now, hour, still)
@@ -565,8 +575,9 @@ object SharkLife {
             if (still) null else 1700 - now % 1700,
             if (fast) 1000L else null,
             if (lastKey > 0) 90_000 - idle else null,
-            if (lastKey > 0) nextAct - now else null,
-            if (lastKey > 0) nextSay - now else null,
+            if (playful) nextAct - now else null,
+            if (playful) nextSay - now else null,
+            if (playful) PLAY_MS - idle else null,
             sayUntil - now,
             sayUntil - sayMs - now,
         ).filter { it > 0 }

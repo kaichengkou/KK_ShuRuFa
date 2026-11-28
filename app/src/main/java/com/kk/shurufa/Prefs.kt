@@ -152,14 +152,45 @@ class Prefs(context: Context) {
     val kaySaySize get() = sp.getInt(KAY_SAY_SIZE, 100) / 100f
     /** 云联想: characters before the caret sent, the pause before asking (ms), how many continuations. */
     val cloudContext get() = sp.getInt(CLOUD_CONTEXT, 80)
-    val cloudPauseMs get() = sp.getInt(CLOUD_PAUSE, 600)
+    val cloudPauseMs get() = sp.getInt(CLOUD_PAUSE, 300)
     /** 云联想 and AI 候选 only on networks that are not metered (Wi-Fi), where a request costs little. */
     val aiUnmeteredOnly get() = b(AI_UNMETERED, false)
     /** Whether the quick AI features (云联想, AI 候选) may ask now. */
-    fun quickAiNetworkOk(): Boolean {
-        if (!aiUnmeteredOnly) return true
-        val cm = app.getSystemService(Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager ?: return true
-        return runCatching { !cm.isActiveNetworkMetered }.getOrDefault(true)
+    fun quickAiNetworkOk(): Boolean = !aiUnmeteredOnly || !metered()
+
+    /** Whether the network now is metered (mobile data), looked up at most every few seconds. */
+    fun metered(): Boolean {
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (meteredAt == 0L || now - meteredAt > NET_CHECK_MS) {
+            meteredAt = now
+            val cm = app.getSystemService(Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager
+            meteredNow = cm != null && runCatching { cm.isActiveNetworkMetered }.getOrDefault(false)
+        }
+        return meteredNow
+    }
+
+    /** Whether the phone is in 省电模式, looked up at most every few seconds. */
+    fun powerSave(): Boolean {
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (saverAt == 0L || now - saverAt > NET_CHECK_MS) {
+            saverAt = now
+            saverNow = (app.getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager)?.isPowerSaveMode == true
+        }
+        return saverNow
+    }
+
+    /**
+     * 云联想's pause before asking: in 省电模式 longer (at least 1.5 s), so that typing with short
+     * pauses does not keep the radio awake with a request after every word; on mobile data a
+     * little longer (requests there are not sent ahead, see CloudPredict).
+     */
+    val cloudPauseNowMs: Long get() {
+        val base = cloudPauseMs.toLong()
+        return when {
+            powerSave() -> maxOf(base * 5 / 2, 1500L)
+            metered() -> maxOf(base * 3 / 2, 450L)
+            else -> base
+        }
     }
     val cloudCount get() = sp.getInt(CLOUD_COUNT, 3)
     /** AI 候选: syllables before it asks, the pause (ms), characters of context sent. */
@@ -267,6 +298,13 @@ class Prefs(context: Context) {
     }
 
     companion object {
+        /** How long a look at the network or the power state is good for. */
+        private const val NET_CHECK_MS = 5000L
+        @Volatile private var meteredAt = 0L
+        @Volatile private var meteredNow = false
+        @Volatile private var saverAt = 0L
+        @Volatile private var saverNow = false
+
         @Volatile private var started = false
 
         /** Settings that change how the keyboard is built (size, colors, layouts); the rest apply live. */

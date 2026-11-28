@@ -504,6 +504,8 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
             SharkLife.greet(greetingAt)
         }
         if (!prefs.incognito) kay.prefetch()
+        SharkLife.saver = prefs.powerSave()
+        cloud.warm()
         // back after a long while: it wakes with a start
         if (!restarting && greeting == null) SharkLife.woke(SystemClock.uptimeMillis())
         if (built) { paintNavigationBar(); show(panel) }
@@ -773,6 +775,7 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
         if (barKey != barFor) { barFor = barKey; barCands = CANDIDATES_ON_BAR }
         val (cands, comments) = zhCandidates(barCands)
         askAiCandidate(input, pre, cands.firstOrNull().orEmpty())
+        aheadCloud(pre, cands.firstOrNull().orEmpty())
         val aiAnswer = aiCand.answerFor(input)
         // in the 浮窗 it leaves the bar as Rime has it
         val floating = prefs.aiPlace == "float"
@@ -806,6 +809,16 @@ class KkImeService : InputMethodService(), Host, KeyboardListener, CandidateBar.
             cloudShown.isEmpty() -> bar.showPredictions(predictions, predictionLabel)
             else -> bar.showPredictions(cloudShown + predictions.filter { it !in cloudShown }, predictionLabel, cloudShown.map { "云" })
         }
+    }
+
+    /**
+     * 云联想 asked ahead for what space would make of the pinyin: when nothing of it is picked
+     * yet and the first candidate is all of it (a character a syllable).
+     */
+    private fun aheadCloud(pre: String, first: String) {
+        val syllables = pre.split(' ', '\'').count { it.isNotBlank() }
+        val whole = first.isNotEmpty() && pre.none { isCjk(it) } && first.length == syllables
+        cloud.prefetch(if (whole) first else "", { editor.textBeforeComposing(prefs.cloudContext) }, allowed = learnHere && sink == null)
     }
 
     /** 云联想 for the text before the caret, after a pause, where it may be asked. */

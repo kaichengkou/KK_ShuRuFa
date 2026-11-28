@@ -271,7 +271,7 @@ internal fun OnlinePage(prefs: Prefs, openServices: () -> Unit) {
         when (mode) {
             "cloud" -> {
                 Note("打字停顿时，把光标前的字发给 AI，它给的几种接法显示出来。临时模式、密码和地址栏里不发。")
-                IntSlider(prefs, Prefs.CLOUD_PAUSE, "停顿多久再问", 600, 200..1500, " 毫秒", "短一些来得快，长一些问得少、省电也省额度")
+                IntSlider(prefs, Prefs.CLOUD_PAUSE, "停顿多久再问", 300, 150..1500, " 毫秒", "短一些来得快，长一些问得少、省电也省额度")
                 Toggle(prefs, Prefs.AI_UNMETERED, "只在 Wi-Fi 下问", "用流量时不发请求：移动网络每次联网都要唤醒基带，比键盘本身耗电得多", false)
                 IntSlider(prefs, Prefs.CLOUD_CONTEXT, "带上前文", 80, 20..200, " 字", "越多越懂上下文，也发出去越多")
                 IntSlider(prefs, Prefs.CLOUD_COUNT, "给几种接法", 3, 1..5, " 种")

@@ -224,6 +224,11 @@ object Icons {
     /** A quick rise and a springy settle back. */
     private fun hop(t: Float): Float = if (t < 0.3f) sin(t / 0.3f * PI.toFloat() / 2) else cos((t - 0.3f) / 0.7f * PI.toFloat() * 1.5f) * (1f - (t - 0.3f) / 0.7f)
 
+    /** The icons that play a motion of their own after a tap (the others are drawn still). */
+    private val MOTIONS = setOf("emoji", "translate", "clipboard", "cursor", "shark", "shark_fin", "ai", "mic", "voice",
+        "quick", "grid", "backspace", "enter", "shift", "language", "undo", "settings")
+    fun hasTapMotion(name: String) = name in MOTIONS && all.containsKey(name)
+
     /** Draws [name] mid-motion (canvas already in the 24-unit grid). False: no motion of its own. */
     private fun tapMotion(c: Canvas, name: String, src: Path, paint: Paint, t: Float): Boolean {
         fun around(deg: Float = 0f, scale: Float = 1f, dx: Float = 0f, dy: Float = 0f, sx: Float = scale, path: Path = src) {

@@ -27,23 +27,32 @@ class QuickAsk(private val prefs: Prefs) {
     fun pending(key: String) = key == scheduled || key == asking
 
     /** What waits for its pause is not sent; a request on its way still answers. */
-    fun drop() { waiting.removeCallbacksAndMessages(null); scheduled = null }
+    fun drop() { waiting.removeCallbacksAndMessages(null); scheduled = null; send = null }
 
     /** Nothing waits and nothing on its way is taken any more. */
     fun cancel() { drop(); token++; asking = null }
 
+    /** What waits for [key]'s pause is sent now (the text it was asked ahead for is there). */
+    fun hurry(key: String) {
+        val r = send ?: return
+        if (key != scheduled) return
+        waiting.removeCallbacksAndMessages(null)
+        r.run()
+    }
+    private var send: Runnable? = null
+
     /**
      * Asks for [key] after [pauseMs]: [request] runs off the main thread (blocking, polling its
      * argument to stop early), and [onAnswer] gets its text, or null when it failed, on the main
-     * thread, unless something else was asked since.
+     * thread, unless something else was asked since (which also stops it).
      */
     fun ask(key: String, pauseMs: Long, request: (cancelled: () -> Boolean) -> String, onAnswer: (String?) -> Unit) {
         if (key == scheduled || key == asking) return
         drop()
         val t = ++token
         scheduled = key
-        waiting.postDelayed({
-            scheduled = null; asking = key
+        val r = Runnable {
+            scheduled = null; send = null; asking = key
             Background.ask {
                 AiBudget.asked(prefs)
                 val r = runCatching { request { t != token } }
@@ -55,6 +64,8 @@ class QuickAsk(private val prefs: Prefs) {
                     onAnswer(r.getOrNull())
                 }
             }
-        }, pauseMs)
+        }
+        send = r
+        if (pauseMs <= 0) r.run() else waiting.postDelayed(r, pauseMs)
     }
 }

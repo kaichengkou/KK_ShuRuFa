@@ -19,8 +19,8 @@ android {
         applicationId = "com.kk.shurufa"
         minSdk = 26
         targetSdk = 35
-        versionCode = 80
-        versionName = "0.19.7"
+        versionCode = 81
+        versionName = "0.19.8"
         ndk { abiFilters += abis }
         externalNativeBuild {
             cmake { arguments += listOf("-DANDROID_STL=c++_static", "-DCMAKE_BUILD_TYPE=Release") }
@@ -78,7 +78,12 @@ android {
         // GraalVM native-image metadata from the Claude SDK: unused on Android
         resources { excludes += listOf("META-INF/native-image/**") }
     }
-    testOptions { unitTests.isIncludeAndroidResources = true }
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+        // Robolectric fetches its Android jars while the tests run: from the same mirror as the
+        // build (Maven Central itself often answers 429)
+        unitTests.all { it.systemProperty("robolectric.dependency.repo.url", "https://maven-central.storage-download.googleapis.com/maven2/") }
+    }
     // dictionaries are copied out of the APK once, so they can stay compressed (about 3:1)
     androidResources { noCompress += listOf("gram") }
 }

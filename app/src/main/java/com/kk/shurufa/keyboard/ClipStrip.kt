@@ -164,7 +164,7 @@ class ClipStrip(context: Context, prefs: Prefs) : KbView(context, prefs) {
         val w = tp.measureText(label)
         clearRect.set(right - w - dp(10f), 0f, right + dp(6f), titleH + dp(2f))
         tp.textAlign = Paint.Align.LEFT; tp.typeface = Ui.regular
-        if (asking) postInvalidateDelayed(clearAskMs - (android.os.SystemClock.uptimeMillis() - clearAsked) + 20)
+        if (asking) invalidateIn(clearAskMs - (android.os.SystemClock.uptimeMillis() - clearAsked) + 20)
     }
 
     /**
